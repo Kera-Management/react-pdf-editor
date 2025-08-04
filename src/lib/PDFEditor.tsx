@@ -18,7 +18,14 @@ import {
   DocumentInitParameters,
   TypedArray,
 } from "pdfjs-dist/types/src/display/api";
-import { PDFCheckBox, PDFDocument, PDFDropdown, PDFOptionList, PDFRadioGroup, PDFTextField } from 'pdf-lib';
+import {
+  PDFCheckBox,
+  PDFDocument,
+  PDFDropdown,
+  PDFOptionList,
+  PDFRadioGroup,
+  PDFTextField,
+} from "pdf-lib";
 
 import ZoomOutIcon from "./icons/ZoomOutIcon";
 import ZoomInIcon from "./icons/ZoomInIcon";
@@ -281,27 +288,32 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
 
     const getAllFieldsValue = () => {
       const fieldElements = divRef?.current?.querySelectorAll("input, select");
-      return fieldElements ? Array.from(fieldElements).map(e => {
-        const field = e as HTMLInputElement;
-        const selectElement = (e as HTMLSelectElement);
-        let value = field.value;
-        switch (field.type) {
-          case "checkbox":
-            value = field.checked ? "On" : "Off";
-            break;
-          case "combobox":
-            value = selectElement.options[selectElement.selectedIndex].value;
-            break;
-          default:
-            break;
-        }
-        return {
-          [field.name]: value
-        } as PDFFormFields;
-      }).reduce((result, currentObject) => {
-        return { ...result, ...currentObject };
-      }, {}) : {};
-    }
+      return fieldElements
+        ? Array.from(fieldElements)
+            .map((e) => {
+              const field = e as HTMLInputElement;
+              const selectElement = e as HTMLSelectElement;
+              let value = field.value;
+              switch (field.type) {
+                case "checkbox":
+                  value = field.checked ? "On" : "Off";
+                  break;
+                case "combobox":
+                  value =
+                    selectElement.options[selectElement.selectedIndex].value;
+                  break;
+                default:
+                  break;
+              }
+              return {
+                [field.name]: value,
+              } as PDFFormFields;
+            })
+            .reduce((result, currentObject) => {
+              return { ...result, ...currentObject };
+            }, {})
+        : {};
+    };
 
     // expose formFields value
     useImperativeHandle(ref, () => ({
@@ -313,11 +325,11 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
 
     const onPrintClicked = () => {
       onPrint();
-    }
+    };
 
     const downloadPDF = (data: Blob, fileName: string) => {
       // Create a temporary anchor element
-      const downloadLink = document.createElement('a');
+      const downloadLink = document.createElement("a");
       downloadLink.href = window.URL.createObjectURL(data);
       downloadLink.download = fileName || "download.pdf";
 
@@ -332,9 +344,12 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       window.URL.revokeObjectURL(downloadLink.href);
     };
 
-    const saveFileUsingFilePicker = async (data: Uint8Array, fileName: string) => {
+    const saveFileUsingFilePicker = async (
+      data: Uint8Array,
+      fileName: string
+    ) => {
       try {
-        const blob = new Blob([data], { type: 'application/pdf' });
+        const blob = new Blob([data as BlobPart], { type: "application/pdf" });
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { showSaveFilePicker } = window as any;
         if (showSaveFilePicker) {
@@ -343,9 +358,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             suggestedName: fileName,
             types: [
               {
-                description: 'PDF Documents',
+                description: "PDF Documents",
                 accept: {
-                  'application/pdf': ['.pdf'],
+                  "application/pdf": [".pdf"],
                 },
               },
             ],
@@ -373,7 +388,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       if (originData) {
         const libDoc = await PDFDocument.load(originData);
         const form = libDoc.getForm();
-        form.getDropdown
+        form.getDropdown;
         const formFields = getAllFieldsValue();
         if (form) {
           for (const field of form.getFields()) {
@@ -404,7 +419,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             // Trigger the save-as dialog
             let fileName = "download.pdf";
             if (typeof src === "string") {
-              const url = (src as string);
+              const url = src as string;
               if (url.lastIndexOf("/") >= 0) {
                 fileName = url.substring(url.lastIndexOf("/") + 1);
               }
@@ -414,19 +429,21 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 fileName = url.substring(url.lastIndexOf("/") + 1);
               }
             }
-            await saveFileUsingFilePicker(savedData, fileName || "download.pdf");
+            await saveFileUsingFilePicker(
+              savedData,
+              fileName || "download.pdf"
+            );
           }
         }
       }
       setIsSaving(false);
-    }
+    };
 
-    if (!docReady || !pagesReady)
-      return null;
-    
+    if (!docReady || !pagesReady) return null;
+
     return (
       <div className={styles.rootContainer}>
-        <div className={styles.toolbarContainer}>  
+        <div className={styles.toolbarContainer}>
           <button
             className={styles.toolbarButton}
             title="Zoom Out"
@@ -463,10 +480,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             <SaveAsIcon className={styles.svgMediumIcon} />
           </button>
         </div>
-        <div
-          ref={divRef}
-          className={styles.pdfContainer}
-        >
+        <div ref={divRef} className={styles.pdfContainer}>
           {pages &&
             pages.length > 0 &&
             pages
