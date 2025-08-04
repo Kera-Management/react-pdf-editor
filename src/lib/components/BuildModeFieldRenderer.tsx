@@ -7,7 +7,6 @@ interface BuildModeFieldRendererProps {
   scale: number;
   isSelected: boolean;
   onSelect: (fieldId: string) => void;
-  onDoubleClick?: (fieldId: string) => void;
   onDelete: (fieldId: string) => void;
   onMove: (fieldId: string, x: number, y: number) => void;
   onResize: (fieldId: string, width: number, height: number) => void;
@@ -18,7 +17,6 @@ export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
   scale,
   isSelected,
   onSelect,
-  onDoubleClick,
   onDelete,
   onMove
 }) => {
@@ -36,24 +34,39 @@ export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
     outlineOffset: isSelected ? "2px" : "0",
   };
 
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     onSelect(field.id);
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation();
     
     const startX = e.clientX;
     const startY = e.clientY;
     const startFieldX = field.x;
     const startFieldY = field.y;
+    let hasMoved = false;
 
     const handleMouseMove = (e: MouseEvent) => {
+      if (!hasMoved) {
+        hasMoved = true;
+        // Prevent click event from firing since we're dragging
+        document.addEventListener('click', preventClick, { capture: true, once: true });
+      }
       const deltaX = (e.clientX - startX) / scale;
-      const deltaY = (e.clientY - startY) / scale; // Direct Y for top-left coordinates
+      const deltaY = (e.clientY - startY) / scale;
       onMove(field.id, startFieldX + deltaX, startFieldY + deltaY);
     };
 
     const handleMouseUp = () => {
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    const preventClick = (e: Event) => {
+      e.stopPropagation();
+      e.preventDefault();
     };
 
     document.addEventListener("mousemove", handleMouseMove);
@@ -172,8 +185,8 @@ export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
     <div
       className={`${styles.buildField} ${isSelected ? styles.selected : ""}`}
       style={fieldStyle}
+      onClick={handleClick}
       onMouseDown={handleMouseDown}
-      onDoubleClick={() => onDoubleClick?.(field.id)}
       onKeyDown={handleKeyDown}
       tabIndex={0}
     >

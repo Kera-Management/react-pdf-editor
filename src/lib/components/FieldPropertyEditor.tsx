@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { BuildModeField } from "../PDFEditor";
 import styles from "./FieldPropertyEditor.module.css";
 
@@ -14,12 +14,39 @@ export const FieldPropertyEditor: React.FC<FieldPropertyEditorProps> = ({
   onClose
 }) => {
   const [localField, setLocalField] = useState<BuildModeField | null>(null);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setLocalField(field);
   }, [field]);
 
   if (!field || !localField) return null;
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.target !== e.currentTarget) return; // Only drag from header, not from inputs
+    
+    setIsDragging(true);
+    const startX = e.clientX - position.x;
+    const startY = e.clientY - position.y;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      setPosition({
+        x: e.clientX - startX,
+        y: e.clientY - startY
+      });
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
 
   const handleInputChange = (key: keyof BuildModeField | string, value: unknown) => {
     if (!localField) return;
@@ -66,8 +93,22 @@ export const FieldPropertyEditor: React.FC<FieldPropertyEditorProps> = ({
   };
 
   return (
-    <div className={styles.editor}>
-      <div className={styles.header}>
+    <div 
+      ref={modalRef}
+      className={`${styles.editor} ${isDragging ? styles.dragging : ''}`}
+      style={{
+        transform: `translate(${position.x}px, ${position.y}px)`,
+        left: '50%',
+        top: '50%',
+        marginLeft: '-200px', // Half of width (400px / 2)
+        marginTop: '-200px'   // Approximate half of height
+      }}
+    >
+      <div 
+        className={styles.header}
+        onMouseDown={handleMouseDown}
+        style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+      >
         <h3>Field Properties</h3>
         <button onClick={onClose} className={styles.closeButton}>×</button>
       </div>

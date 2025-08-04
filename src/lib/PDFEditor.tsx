@@ -437,12 +437,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       );
     }, []);
 
-    // Handle field selection with double-click for property editor
+    // Handle field selection with single click for property editor
     const handleFieldSelect = useCallback((fieldId: string) => {
-      setSelectedField(fieldId);
-    }, []);
-
-    const handleFieldDoubleClick = useCallback((fieldId: string) => {
       setSelectedField(fieldId);
       setShowPropertyEditor(true);
     }, []);
@@ -795,7 +791,6 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                         scale={zoomLevels[zoomLevel]}
                         isSelected={selectedField === field.id}
                         onSelect={handleFieldSelect}
-                        onDoubleClick={handleFieldDoubleClick}
                         onDelete={deleteBuildModeField}
                         onMove={moveBuildModeField}
                         onResize={resizeBuildModeField}
