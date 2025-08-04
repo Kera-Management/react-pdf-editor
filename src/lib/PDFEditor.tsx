@@ -250,6 +250,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             if (sourceContext) {
               page.proxy.render({
                 canvasContext: sourceContext,
+                canvas: sourceCanvas,
                 viewport: page.proxy.getViewport({
                   scale: scale * ratio, // draw ratio pixels into Canvas
                 }),
@@ -529,29 +530,32 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
 
               try {
                 switch (buildField.type) {
-                  case "text":
-                    form.createTextField(buildField.name)
-                      .addToPage(page, { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight })
-                      .setText(buildField.properties.defaultValue || "")
-                      .setFontSize(buildField.properties.fontSize || 12);
+                  case "text": {
+                    const textField = form.createTextField(buildField.name);
+                    textField.addToPage(page, { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight });
+                    textField.setText(buildField.properties.defaultValue || "");
+                    textField.setFontSize(buildField.properties.fontSize || 12);
                     break;
+                  }
                     
-                  case "multiline":
-                    form.createTextField(buildField.name)
-                      .addToPage(page, { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight })
-                      .setText(buildField.properties.defaultValue || "")
-                      .setFontSize(buildField.properties.fontSize || 12)
-                      .enableMultiline();
+                  case "multiline": {
+                    const multilineField = form.createTextField(buildField.name);
+                    multilineField.addToPage(page, { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight });
+                    multilineField.setText(buildField.properties.defaultValue || "");
+                    multilineField.setFontSize(buildField.properties.fontSize || 12);
+                    multilineField.enableMultiline();
                     break;
+                  }
                     
-                  case "checkbox":
-                    form.createCheckBox(buildField.name)
-                      .addToPage(page, { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight });
+                  case "checkbox": {
+                    const checkbox = form.createCheckBox(buildField.name);
+                    checkbox.addToPage(page, { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight });
                     break;
+                  }
                     
                   case "dropdown": {
-                    const dropdown = form.createDropdown(buildField.name)
-                      .addToPage(page, { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight });
+                    const dropdown = form.createDropdown(buildField.name);
+                    dropdown.addToPage(page, { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight });
                     
                     if (buildField.properties.options) {
                       const options = buildField.properties.options.map(opt => opt.exportValue);
@@ -563,19 +567,21 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                     break;
                   }
                     
-                  case "radio":
+                  case "radio": {
                     // For radio buttons, we create a radio group
-                    form.createRadioGroup(buildField.name)
-                      .addOptionToPage(buildField.name + "_option", page, { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight });
+                    const radioGroup = form.createRadioGroup(buildField.name);
+                    radioGroup.addOptionToPage(buildField.name + "_option", page, { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight });
                     break;
+                  }
                     
-                  case "signature":
+                  case "signature": {
                     // For signature fields, we create a text field that can be marked for signatures
-                    form.createTextField(buildField.name)
-                      .addToPage(page, { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight })
-                      .setText("")
-                      .setFontSize(buildField.properties.fontSize || 12);
+                    const signatureField = form.createTextField(buildField.name);
+                    signatureField.addToPage(page, { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight });
+                    signatureField.setText("");
+                    signatureField.setFontSize(buildField.properties.fontSize || 12);
                     break;
+                  }
                 }
               } catch (error) {
                 console.warn(`Failed to add field ${buildField.name}:`, error);
