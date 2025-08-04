@@ -218,9 +218,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           ) as HTMLDivElement;
           pageDivContainer?.querySelectorAll("input, select").forEach((e) => {
             const input = e as HTMLInputElement;
-            const rect = page.fields
-              ?.find((field) => field.name === input.name)
-              ?.rect?.map((x) => x * scale);
+            const field = page.fields?.find((field) => field.id === input.dataset.fieldId);
+            const rect = field?.rect?.map((x) => x * scale);
             if (rect) {
               // rect are [llx, lly, urx, ury]
               /**
@@ -499,7 +498,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                           <select
                             name={field.name}
                             title={field.name}
-                            key={field.name}
+                            key={field.id}
+                            data-field-id={field.id}
                             defaultValue={field.defaultValue}
                             className={styles.pdfSelect}
                           >
@@ -518,8 +518,23 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                           type={field.type}
                           defaultValue={field.defaultValue}
                           name={field.name}
-                          key={field.name}
+                          key={field.id}
+                          data-field-id={field.id}
                           className={styles.pdfInput}
+                          onChange={field.type === "checkbox" ? (e) => {
+                            const checkbox = e.target as HTMLInputElement;
+                            if (checkbox.checked) {
+                              // For radio-like behavior, uncheck other checkboxes with same name
+                              const sameNameCheckboxes = document.querySelectorAll(
+                                `input[type="checkbox"][name="${field.name}"]`
+                              ) as NodeListOf<HTMLInputElement>;
+                              sameNameCheckboxes.forEach((cb) => {
+                                if (cb !== checkbox) {
+                                  cb.checked = false;
+                                }
+                              });
+                            }
+                          } : undefined}
                         />
                       );
                     })}
