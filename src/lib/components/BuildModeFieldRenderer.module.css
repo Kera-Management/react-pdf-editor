@@ -1,0 +1,93 @@
+.buildField {
+  position: relative;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.buildField:focus {
+  border-color: #007bff !important;
+}
+
+.selected {
+  border-color: #007bff !important;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.fieldControls {
+  position: absolute;
+  top: -30px;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #333;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 1001;
+}
+
+.deleteButton {
+  background: #dc3545;
+  border: none;
+  color: white;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.deleteButton:hover {
+  background: #c82333;
+}
+
+.fieldInfo {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.resizeHandle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: #007bff;
+  border: 1px solid white;
+  border-radius: 50%;
+  z-index: 1002;
+}
+
+.resizeHandle:hover {
+  background: #0056b3;
+  transform: scale(1.2);
+}
+
+.bottomRight {
+  bottom: -4px;
+  right: -4px;
+  cursor: nw-resize;
+}
+
+.bottomLeft {
+  bottom: -4px;
+  left: -4px;
+  cursor: ne-resize;
+}
+
+.topRight {
+  top: -4px;
+  right: -4px;
+  cursor: ne-resize;
+}
+
+.topLeft {
+  top: -4px;
+  left: -4px;
+  cursor: nw-resize;
+}

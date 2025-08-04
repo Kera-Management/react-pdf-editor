@@ -4,7 +4,7 @@ import PDFEditor, { PDFEditorRef } from "./src/lib/PDFEditor";
 
 const App = () => {
   const ref = useRef<PDFEditorRef>(null);
-  return <PDFEditor mode="edit" src="/form.pdf" ref={ref} />;
+  return <PDFEditor mode="build" src="/form.pdf" ref={ref} />;
 };
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
