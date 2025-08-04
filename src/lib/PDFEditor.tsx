@@ -76,6 +76,8 @@ const zoomLevels = [
   0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 3.5, 4.0,
 ];
 
+export type PDFEditorMode = "build" | "edit" | "view";
+
 export interface PDFEditorProps {
   /**
    * src - Can be a URL where a PDF file is located, a typed array (Uint8Array)
@@ -90,6 +92,13 @@ export interface PDFEditorProps {
    * issues when using the PDF.js library.
    */
   workerSrc?: string;
+  /**
+   * Mode determines the PDF editor behavior:
+   * - "view": Read-only mode, displays PDF content without allowing changes
+   * - "edit": Allows editing of form fields (default behavior)
+   * - "build": Full editing capabilities (future implementation)
+   */
+  mode?: PDFEditorMode;
   /**
    * This callback is triggered when the user initiates a save action.
    * If the onSave prop is not set, the save button will function similarly to the 'Save as' button in a browser's internal PDF extension.
@@ -107,7 +116,7 @@ GlobalWorkerOptions.workerSrc = cdnworker;
 
 export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
   (props, ref) => {
-    const { src, workerSrc, onSave } = props;
+    const { src, workerSrc, onSave, mode = "edit" } = props;
     const divRef = useRef<HTMLDivElement>(null);
     const [maxPageWidth, setMaxPageWidth] = useState(0);
     const [zoomLevel, setZoomLevel] = useState(6);
@@ -469,15 +478,17 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           >
             <PrintIcon className={styles.svgMediumIcon} />
           </button>
-          <button
-            title="Save as"
-            className={styles.toolbarButton}
-            onClick={onSaveAs}
-            type="button"
-            disabled={isSaving}
-          >
-            <SaveAsIcon className={styles.svgMediumIcon} />
-          </button>
+          {mode !== "view" && (
+            <button
+              title="Save as"
+              className={styles.toolbarButton}
+              onClick={onSaveAs}
+              type="button"
+              disabled={isSaving}
+            >
+              <SaveAsIcon className={styles.svgMediumIcon} />
+            </button>
+          )}
         </div>
         <div ref={divRef} className={styles.pdfContainer}>
           {pages &&
@@ -502,6 +513,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                             data-field-id={field.id}
                             defaultValue={field.defaultValue}
                             className={styles.pdfSelect}
+                            disabled={mode === "view"}
                           >
                             {field.items?.map((item) => (
                               <option
@@ -521,7 +533,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                           key={field.id}
                           data-field-id={field.id}
                           className={styles.pdfInput}
-                          onChange={field.type === "checkbox" ? (e) => {
+                          readOnly={mode === "view"}
+                          onChange={field.type === "checkbox" && mode !== "view" ? (e) => {
                             const checkbox = e.target as HTMLInputElement;
                             if (checkbox.checked) {
                               // For radio-like behavior, uncheck other checkboxes with same name
