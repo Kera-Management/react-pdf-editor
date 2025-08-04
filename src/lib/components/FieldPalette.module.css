@@ -1,11 +1,13 @@
 .palette {
   width: 250px;
-  height: 100%;
-  background: #f8f9fa;
-  border-right: 1px solid #e0e0e0;
+  height: min-content;
+  background: white;
+  border: 1px solid #e0e0e0;
   padding: 16px;
   box-sizing: border-box;
   overflow-y: auto;
+  border-radius: 10px;
+  margin-right: 20px;
 }
 
 .header {

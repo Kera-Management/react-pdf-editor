@@ -13,11 +13,13 @@
     flex-direction: column;
     flex: 1;
     overflow: auto;
+    border: 1px solid #e0e0e0;
+    border-radius: 10px;
 }
 
 .toolbarContainer {
     --tw-bg-opacity: 1;
-    background-color: rgb(247 247 247 / var(--tw-bg-opacity));
+    background-color: white;
     justify-content: center;
     align-items: center;
     width: 100%;
@@ -31,7 +33,6 @@
     padding-left: 0px;
     padding-right: 0px;
     --tw-bg-opacity: 1;
-    background-color: rgb(247 247 247 / var(--tw-bg-opacity));
     border-width: 0px;
     justify-content: center;
     align-items: center;
