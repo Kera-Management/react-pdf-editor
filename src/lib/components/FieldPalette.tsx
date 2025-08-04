@@ -1,6 +1,14 @@
 import React from "react";
 import { BuildModeFieldType } from "../PDFEditor";
 import styles from "./FieldPalette.module.css";
+import {
+  CheckSquare,
+  RadioButton,
+  RowsPlusBottom,
+  Signature,
+  TextAa,
+  TextAlignJustify,
+} from "@phosphor-icons/react";
 
 interface FieldPaletteProps {
   onFieldDragStart: (fieldType: BuildModeFieldType) => void;
@@ -10,7 +18,7 @@ interface FieldPaletteProps {
 interface FieldTypeConfig {
   type: BuildModeFieldType;
   label: string;
-  icon: string;
+  icon: React.ReactNode;
   description: string;
 }
 
@@ -18,46 +26,49 @@ const fieldTypes: FieldTypeConfig[] = [
   {
     type: "text",
     label: "Text Field",
-    icon: "📝",
-    description: "Single line text input"
+    icon: <TextAa />,
+    description: "Single line text input",
   },
   {
     type: "multiline",
     label: "Text Area",
-    icon: "📄",
-    description: "Multi-line text input"
+    icon: <TextAlignJustify />,
+    description: "Multi-line text input",
   },
   {
     type: "checkbox",
     label: "Checkbox",
-    icon: "☑️",
-    description: "Check/uncheck option"
+    icon: <CheckSquare />,
+    description: "Check/uncheck option",
   },
   {
     type: "dropdown",
     label: "Dropdown",
-    icon: "📋",
-    description: "Select from dropdown list"
+    icon: <RowsPlusBottom />,
+    description: "Select from dropdown list",
   },
   {
     type: "radio",
     label: "Radio Button",
-    icon: "🔘",
-    description: "Single selection from group"
+    icon: <RadioButton />,
+    description: "Single selection from group",
   },
   {
     type: "signature",
     label: "Signature",
-    icon: "✍️",
-    description: "Digital signature field"
-  }
+    icon: <Signature />,
+    description: "Digital signature field",
+  },
 ];
 
 export const FieldPalette: React.FC<FieldPaletteProps> = ({
   onFieldDragStart,
-  onFieldDragEnd
+  onFieldDragEnd,
 }) => {
-  const handleDragStart = (e: React.DragEvent, fieldType: BuildModeFieldType) => {
+  const handleDragStart = (
+    e: React.DragEvent,
+    fieldType: BuildModeFieldType
+  ) => {
     e.dataTransfer.setData("application/json", JSON.stringify({ fieldType }));
     e.dataTransfer.effectAllowed = "copy";
     onFieldDragStart(fieldType);
