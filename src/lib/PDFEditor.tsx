@@ -42,6 +42,7 @@ export interface PDFFormFields {
 
 export interface PDFEditorRef {
   formFields: PDFFormFields;
+  save: () => Promise<void>;
 }
 
 interface ComboboxItem {
@@ -358,9 +359,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         : {};
     };
 
-    // expose formFields value
+    // expose formFields value and save function
     useImperativeHandle(ref, () => ({
       formFields: getAllFieldsValue(),
+      save: onSaveAs,
     }));
 
     // Build mode field management
