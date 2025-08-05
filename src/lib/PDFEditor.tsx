@@ -748,9 +748,22 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                             title={field.name}
                             key={field.id}
                             data-field-id={field.id}
-                            defaultValue={field.defaultValue}
+                            value={field.value || field.defaultValue}
                             className={styles.pdfSelect}
                             disabled={mode === "view"}
+                            onChange={(e) => {
+                              // Update the field value in the pages state
+                              if (mode !== "view") {
+                                setPages(prevPages => 
+                                  prevPages?.map(page => ({
+                                    ...page,
+                                    fields: page.fields?.map(f => 
+                                      f.id === field.id ? { ...f, value: e.target.value } : f
+                                    )
+                                  }))
+                                );
+                              }
+                            }}
                           >
                             {field.items?.map((item) => (
                               <option
@@ -765,26 +778,48 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                       return (
                         <input
                           type={field.type}
-                          defaultValue={field.defaultValue}
+                          {...(field.type === "checkbox" 
+                            ? { checked: (field.value || field.defaultValue) === "On" }
+                            : { value: field.value || field.defaultValue }
+                          )}
                           name={field.name}
                           key={field.id}
                           data-field-id={field.id}
                           className={styles.pdfInput}
                           readOnly={mode === "view"}
-                          onChange={field.type === "checkbox" && mode !== "view" ? (e) => {
-                            const checkbox = e.target as HTMLInputElement;
-                            if (checkbox.checked) {
-                              // For radio-like behavior, uncheck other checkboxes with same name
-                              const sameNameCheckboxes = document.querySelectorAll(
-                                `input[type="checkbox"][name="${field.name}"]`
-                              ) as NodeListOf<HTMLInputElement>;
-                              sameNameCheckboxes.forEach((cb) => {
-                                if (cb !== checkbox) {
-                                  cb.checked = false;
+                          onChange={(e) => {
+                            if (mode !== "view") {
+                              const target = e.target as HTMLInputElement;
+                              let newValue: string;
+                              
+                              if (field.type === "checkbox") {
+                                newValue = target.checked ? "On" : "Off";
+                                // For radio-like behavior, uncheck other checkboxes with same name
+                                if (target.checked) {
+                                  const sameNameCheckboxes = document.querySelectorAll(
+                                    `input[type="checkbox"][name="${field.name}"]`
+                                  ) as NodeListOf<HTMLInputElement>;
+                                  sameNameCheckboxes.forEach((cb) => {
+                                    if (cb !== target) {
+                                      cb.checked = false;
+                                    }
+                                  });
                                 }
-                              });
+                              } else {
+                                newValue = target.value;
+                              }
+                              
+                              // Update the field value in the pages state
+                              setPages(prevPages => 
+                                prevPages?.map(page => ({
+                                  ...page,
+                                  fields: page.fields?.map(f => 
+                                    f.id === field.id ? { ...f, value: newValue } : f
+                                  )
+                                }))
+                              );
                             }
-                          } : undefined}
+                          }}
                         />
                       );
                     })}
