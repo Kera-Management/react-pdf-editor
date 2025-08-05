@@ -68,7 +68,13 @@ interface PDFFormRawField {
 }
 
 // Extended field type for build mode
-export type BuildModeFieldType = "text" | "checkbox" | "dropdown" | "radio" | "multiline" | "signature";
+export type BuildModeFieldType =
+  | "text"
+  | "checkbox"
+  | "dropdown"
+  | "radio"
+  | "multiline"
+  | "signature";
 
 export interface BuildModeField {
   id: string;
@@ -154,11 +160,14 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     const [pages, setPages] = useState<PDFPageAndFormFields[]>();
     const [pagesReady, setPagesReady] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
-    
+
     // Build mode state
-    const [buildModeFields, setBuildModeFields] = useState<BuildModeField[]>([]);
+    const [buildModeFields, setBuildModeFields] = useState<BuildModeField[]>(
+      []
+    );
     const [selectedField, setSelectedField] = useState<string | null>(null);
-    const [draggedFieldType, setDraggedFieldType] = useState<BuildModeFieldType | null>(null);
+    const [draggedFieldType, setDraggedFieldType] =
+      useState<BuildModeFieldType | null>(null);
     const [showPropertyEditor, setShowPropertyEditor] = useState(false);
 
     useEffect(() => {
@@ -263,7 +272,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           ) as HTMLDivElement;
           pageDivContainer?.querySelectorAll("input, select").forEach((e) => {
             const input = e as HTMLInputElement;
-            const field = page.fields?.find((field) => field.id === input.dataset.fieldId);
+            const field = page.fields?.find(
+              (field) => field.id === input.dataset.fieldId
+            );
             const rect = field?.rect?.map((x) => x * scale);
             if (rect) {
               // rect are [llx, lly, urx, ury]
@@ -331,114 +342,123 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     }, [resetViewScale]);
 
     const getAllFieldsValue = () => {
-      const fieldElements = divRef?.current?.querySelectorAll("input, select");
-      return fieldElements
-        ? Array.from(fieldElements)
-            .map((e) => {
-              const field = e as HTMLInputElement;
-              const selectElement = e as HTMLSelectElement;
-              let value = field.value;
-              switch (field.type) {
-                case "checkbox":
-                  value = field.checked ? "On" : "Off";
-                  break;
-                case "combobox":
-                  value =
-                    selectElement.options[selectElement.selectedIndex].value;
-                  break;
-                default:
-                  break;
-              }
-              return {
-                [field.name]: value,
-              } as PDFFormFields;
-            })
-            .reduce((result, currentObject) => {
-              return { ...result, ...currentObject };
-            }, {})
-        : {};
+      // Get field values from state instead of DOM elements
+      if (!pages) return {};
+
+      const formFields: PDFFormFields = {};
+
+      pages.forEach((page) => {
+        page.fields?.forEach((field) => {
+          if (field.name) {
+            formFields[field.name] = field.value || field.defaultValue || "";
+          }
+        });
+      });
+
+      return formFields;
     };
 
     // expose formFields value and save function
     useImperativeHandle(ref, () => ({
-      formFields: getAllFieldsValue(),
+      get formFields() {
+        return getAllFieldsValue();
+      },
       save: onSaveAs,
     }));
 
     // Build mode field management
-    const generateFieldId = () => `field_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const generateFieldId = () =>
+      `field_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    const addBuildModeField = useCallback((
-      type: BuildModeFieldType,
-      x: number,
-      y: number,
-      pageNumber: number
-    ) => {
-      const defaultDimensions = {
-        text: { width: 200, height: 16 },
-        multiline: { width: 300, height: 80 },
-        checkbox: { width: 16, height: 16 },
-        dropdown: { width: 200, height: 16 },
-        radio: { width: 100, height: 16 },
-        signature: { width: 300, height: 16 }
-      };
+    const addBuildModeField = useCallback(
+      (type: BuildModeFieldType, x: number, y: number, pageNumber: number) => {
+        const defaultDimensions = {
+          text: { width: 200, height: 16 },
+          multiline: { width: 300, height: 80 },
+          checkbox: { width: 16, height: 16 },
+          dropdown: { width: 200, height: 16 },
+          radio: { width: 100, height: 16 },
+          signature: { width: 300, height: 16 },
+        };
 
-      const dimensions = defaultDimensions[type];
-      const fieldId = generateFieldId();
+        const dimensions = defaultDimensions[type];
+        const fieldId = generateFieldId();
 
-      const newField: BuildModeField = {
-        id: fieldId,
-        type,
-        name: `${type}_${fieldId}`,
-        x,
-        y,
-        width: dimensions.width,
-        height: dimensions.height,
-        page: pageNumber,
-        properties: {
-          placeholder: type === "text" ? "Enter text..." : undefined,
-          required: false,
-          fontSize: 12,
-          fontColor: "#000000",
-          backgroundColor: "#ffffff",
-          borderColor: "#000000"
+        const newField: BuildModeField = {
+          id: fieldId,
+          type,
+          name: `${type}_${fieldId}`,
+          x,
+          y,
+          width: dimensions.width,
+          height: dimensions.height,
+          page: pageNumber,
+          properties: {
+            placeholder: type === "text" ? "Enter text..." : undefined,
+            required: false,
+            fontSize: 12,
+            fontColor: "#000000",
+            backgroundColor: "#ffffff",
+            borderColor: "#000000",
+          },
+        };
+
+        setBuildModeFields((prev) => [...prev, newField]);
+        setSelectedField(fieldId);
+      },
+      []
+    );
+
+    const deleteBuildModeField = useCallback(
+      (fieldId: string) => {
+        setBuildModeFields((prev) => prev.filter((f) => f.id !== fieldId));
+        if (selectedField === fieldId) {
+          setSelectedField(null);
         }
-      };
+      },
+      [selectedField]
+    );
 
-      setBuildModeFields(prev => [...prev, newField]);
-      setSelectedField(fieldId);
-    }, []);
+    const moveBuildModeField = useCallback(
+      (fieldId: string, x: number, y: number) => {
+        setBuildModeFields((prev) =>
+          prev.map((field) =>
+            field.id === fieldId
+              ? { ...field, x: Math.max(0, x), y: Math.max(0, y) }
+              : field
+          )
+        );
+      },
+      []
+    );
 
-    const deleteBuildModeField = useCallback((fieldId: string) => {
-      setBuildModeFields(prev => prev.filter(f => f.id !== fieldId));
-      if (selectedField === fieldId) {
-        setSelectedField(null);
-      }
-    }, [selectedField]);
+    const resizeBuildModeField = useCallback(
+      (fieldId: string, width: number, height: number) => {
+        setBuildModeFields((prev) =>
+          prev.map((field) =>
+            field.id === fieldId
+              ? {
+                  ...field,
+                  width: Math.max(20, width),
+                  height: Math.max(20, height),
+                }
+              : field
+          )
+        );
+      },
+      []
+    );
 
-    const moveBuildModeField = useCallback((fieldId: string, x: number, y: number) => {
-      setBuildModeFields(prev =>
-        prev.map(field =>
-          field.id === fieldId ? { ...field, x: Math.max(0, x), y: Math.max(0, y) } : field
-        )
-      );
-    }, []);
-
-    const resizeBuildModeField = useCallback((fieldId: string, width: number, height: number) => {
-      setBuildModeFields(prev =>
-        prev.map(field =>
-          field.id === fieldId ? { ...field, width: Math.max(20, width), height: Math.max(20, height) } : field
-        )
-      );
-    }, []);
-
-    const updateBuildModeField = useCallback((fieldId: string, updates: Partial<BuildModeField>) => {
-      setBuildModeFields(prev =>
-        prev.map(field =>
-          field.id === fieldId ? { ...field, ...updates } : field
-        )
-      );
-    }, []);
+    const updateBuildModeField = useCallback(
+      (fieldId: string, updates: Partial<BuildModeField>) => {
+        setBuildModeFields((prev) =>
+          prev.map((field) =>
+            field.id === fieldId ? { ...field, ...updates } : field
+          )
+        );
+      },
+      []
+    );
 
     // Handle field selection with single click for property editor
     const handleFieldSelect = useCallback((fieldId: string) => {
@@ -514,16 +534,16 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       if (originData) {
         const libDoc = await PDFDocument.load(originData);
         const form = libDoc.getForm();
-        
+
         // Add build mode fields to the PDF
         if (mode === "build" && buildModeFields.length > 0) {
           for (const buildField of buildModeFields) {
             const pdfPages = libDoc.getPages();
             const page = pdfPages[buildField.page];
-            
+
             if (page) {
               const { height: pageHeight } = page.getSize();
-              
+
               // Convert coordinates (PDF uses bottom-left origin, we use top-left)
               const pdfX = buildField.x;
               const pdfY = pageHeight - buildField.y - buildField.height;
@@ -534,33 +554,61 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 switch (buildField.type) {
                   case "text": {
                     const textField = form.createTextField(buildField.name);
-                    textField.addToPage(page, { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight });
+                    textField.addToPage(page, {
+                      x: pdfX,
+                      y: pdfY,
+                      width: pdfWidth,
+                      height: pdfHeight,
+                    });
                     textField.setText(buildField.properties.defaultValue || "");
                     textField.setFontSize(buildField.properties.fontSize || 12);
                     break;
                   }
-                    
+
                   case "multiline": {
-                    const multilineField = form.createTextField(buildField.name);
-                    multilineField.addToPage(page, { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight });
-                    multilineField.setText(buildField.properties.defaultValue || "");
-                    multilineField.setFontSize(buildField.properties.fontSize || 12);
+                    const multilineField = form.createTextField(
+                      buildField.name
+                    );
+                    multilineField.addToPage(page, {
+                      x: pdfX,
+                      y: pdfY,
+                      width: pdfWidth,
+                      height: pdfHeight,
+                    });
+                    multilineField.setText(
+                      buildField.properties.defaultValue || ""
+                    );
+                    multilineField.setFontSize(
+                      buildField.properties.fontSize || 12
+                    );
                     multilineField.enableMultiline();
                     break;
                   }
-                    
+
                   case "checkbox": {
                     const checkbox = form.createCheckBox(buildField.name);
-                    checkbox.addToPage(page, { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight });
+                    checkbox.addToPage(page, {
+                      x: pdfX,
+                      y: pdfY,
+                      width: pdfWidth,
+                      height: pdfHeight,
+                    });
                     break;
                   }
-                    
+
                   case "dropdown": {
                     const dropdown = form.createDropdown(buildField.name);
-                    dropdown.addToPage(page, { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight });
-                    
+                    dropdown.addToPage(page, {
+                      x: pdfX,
+                      y: pdfY,
+                      width: pdfWidth,
+                      height: pdfHeight,
+                    });
+
                     if (buildField.properties.options) {
-                      const options = buildField.properties.options.map(opt => opt.exportValue);
+                      const options = buildField.properties.options.map(
+                        (opt) => opt.exportValue
+                      );
                       dropdown.setOptions(options);
                       if (buildField.properties.defaultValue) {
                         dropdown.select(buildField.properties.defaultValue);
@@ -568,20 +616,33 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                     }
                     break;
                   }
-                    
+
                   case "radio": {
                     // For radio buttons, we create a radio group
                     const radioGroup = form.createRadioGroup(buildField.name);
-                    radioGroup.addOptionToPage(buildField.name + "_option", page, { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight });
+                    radioGroup.addOptionToPage(
+                      buildField.name + "_option",
+                      page,
+                      { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight }
+                    );
                     break;
                   }
-                    
+
                   case "signature": {
                     // For signature fields, we create a text field that can be marked for signatures
-                    const signatureField = form.createTextField(buildField.name);
-                    signatureField.addToPage(page, { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight });
+                    const signatureField = form.createTextField(
+                      buildField.name
+                    );
+                    signatureField.addToPage(page, {
+                      x: pdfX,
+                      y: pdfY,
+                      width: pdfWidth,
+                      height: pdfHeight,
+                    });
                     signatureField.setText("");
-                    signatureField.setFontSize(buildField.properties.fontSize || 12);
+                    signatureField.setFontSize(
+                      buildField.properties.fontSize || 12
+                    );
                     break;
                   }
                 }
@@ -591,21 +652,29 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             }
           }
         }
-        
+
         // Handle existing form fields
         const formFields = getAllFieldsValue();
+        console.log("Form fields to save:", formFields);
+
         for (const field of form.getFields()) {
-          const value = formFields[field.getName()];
+          const fieldName = field.getName();
+          const value = formFields[fieldName];
+
+          console.log(`Setting field "${fieldName}" to value:`, value);
+
           if (field instanceof PDFTextField) {
-            (field as PDFTextField).setText(value);
+            (field as PDFTextField).setText(value || "");
           } else if (field instanceof PDFCheckBox) {
-            if (value === "On") {
+            if (value === "On" || value) {
               (field as PDFCheckBox).check();
             } else {
               (field as PDFCheckBox).uncheck();
             }
           } else if (field instanceof PDFDropdown) {
-            (field as PDFDropdown).select(value);
+            if (value) {
+              (field as PDFDropdown).select(value);
+            }
           } else if (field instanceof PDFOptionList) {
             // FIXME...not render the input elements for this part field yet
             // TODO... handle multiple select, choice type in pdf.js
@@ -614,7 +683,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             // Specifically, for a radio button in a radio group, the fieldFlags property of the field object may contain the RADIO flag.
           }
         }
-        
+
         const savedData = await libDoc.save();
         if (onSave) {
           onSave(savedData, formFields);
@@ -633,10 +702,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
               fileName = url.substring(url.lastIndexOf("/") + 1);
             }
           }
-          await saveFileUsingFilePicker(
-            savedData,
-            fileName || "download.pdf"
-          );
+          await saveFileUsingFilePicker(savedData, fileName || "download.pdf");
         }
       }
       setIsSaving(false);
@@ -652,24 +718,24 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
 
     const handleDrop = (e: React.DragEvent, pageNumber: number) => {
       e.preventDefault();
-      
+
       if (mode !== "build" || !draggedFieldType) return;
 
       const pageContainer = e.currentTarget as HTMLElement;
       const scale = zoomLevels[zoomLevel];
-      
+
       // Calculate position relative to page container, accounting for the canvas
-      const canvas = pageContainer.querySelector('canvas');
+      const canvas = pageContainer.querySelector("canvas");
       if (!canvas) return;
-      
+
       const canvasRect = canvas.getBoundingClientRect();
       const relativeX = e.clientX - canvasRect.left;
       const relativeY = e.clientY - canvasRect.top;
-      
+
       // Convert to PDF coordinates (scale down and convert to PDF coordinate system)
       const pdfX = relativeX / scale;
       const pdfY = relativeY / scale; // Keep as top-left for internal storage
-      
+
       addBuildModeField(draggedFieldType, pdfX, pdfY, pageNumber - 1);
       setDraggedFieldType(null);
     };
@@ -723,131 +789,150 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             )}
           </div>
           <div ref={divRef} className={styles.pdfContainer}>
-          {pages &&
-            pages.length > 0 &&
-            pages
-              .filter((page) => !page.proxy?.destroyed)
-              .map((page) => (
-                <div
-                  id={"page_div_container_" + page.proxy.pageNumber}
-                  key={"page_" + page.proxy.pageNumber}
-                  className={styles.pdfPageContainer}
-                  onDragOver={mode === "build" ? handleDragOver : undefined}
-                  onDrop={mode === "build" ? (e) => handleDrop(e, page.proxy.pageNumber) : undefined}
-                  onClick={mode === "build" ? () => setSelectedField(null) : undefined}
-                >
-                  <canvas id={"page_canvas_" + page.proxy.pageNumber} />
-                  
-                  {/* Existing form fields */}
-                  {page.fields &&
-                    page.fields.map((field) => {
-                      if (field.type === "combobox")
+            {pages &&
+              pages.length > 0 &&
+              pages
+                .filter((page) => !page.proxy?.destroyed)
+                .map((page) => (
+                  <div
+                    id={"page_div_container_" + page.proxy.pageNumber}
+                    key={"page_" + page.proxy.pageNumber}
+                    className={styles.pdfPageContainer}
+                    onDragOver={mode === "build" ? handleDragOver : undefined}
+                    onDrop={
+                      mode === "build"
+                        ? (e) => handleDrop(e, page.proxy.pageNumber)
+                        : undefined
+                    }
+                    onClick={
+                      mode === "build"
+                        ? () => setSelectedField(null)
+                        : undefined
+                    }
+                  >
+                    <canvas id={"page_canvas_" + page.proxy.pageNumber} />
+
+                    {/* Existing form fields */}
+                    {page.fields &&
+                      page.fields.map((field) => {
+                        if (field.type === "combobox")
+                          return (
+                            <select
+                              name={field.name}
+                              title={field.name}
+                              key={field.id}
+                              data-field-id={field.id}
+                              value={field.value || field.defaultValue}
+                              className={styles.pdfSelect}
+                              disabled={mode === "view"}
+                              onChange={(e) => {
+                                // Update the field value in the pages state
+                                if (mode !== "view") {
+                                  setPages((prevPages) =>
+                                    prevPages?.map((page) => ({
+                                      ...page,
+                                      fields: page.fields?.map((f) =>
+                                        f.id === field.id
+                                          ? { ...f, value: e.target.value }
+                                          : f
+                                      ),
+                                    }))
+                                  );
+                                }
+                              }}
+                            >
+                              {field.items?.map((item) => (
+                                <option
+                                  key={item.exportValue}
+                                  value={item.exportValue}
+                                >
+                                  {item.displayValue}
+                                </option>
+                              ))}
+                            </select>
+                          );
                         return (
-                          <select
+                          <input
+                            type={field.type}
+                            {...(field.type === "checkbox"
+                              ? {
+                                  checked:
+                                    (field.value || field.defaultValue) ===
+                                    "On",
+                                }
+                              : { value: field.value || field.defaultValue })}
                             name={field.name}
-                            title={field.name}
                             key={field.id}
                             data-field-id={field.id}
-                            value={field.value || field.defaultValue}
-                            className={styles.pdfSelect}
-                            disabled={mode === "view"}
+                            className={styles.pdfInput}
+                            readOnly={mode === "view"}
                             onChange={(e) => {
-                              // Update the field value in the pages state
                               if (mode !== "view") {
-                                setPages(prevPages => 
-                                  prevPages?.map(page => ({
+                                const target = e.target as HTMLInputElement;
+                                let newValue: string;
+
+                                if (field.type === "checkbox") {
+                                  newValue = target.checked ? "On" : "Off";
+                                  // For radio-like behavior, uncheck other checkboxes with same name
+                                  if (target.checked) {
+                                    const sameNameCheckboxes =
+                                      document.querySelectorAll(
+                                        `input[type="checkbox"][name="${field.name}"]`
+                                      ) as NodeListOf<HTMLInputElement>;
+                                    sameNameCheckboxes.forEach((cb) => {
+                                      if (cb !== target) {
+                                        cb.checked = false;
+                                      }
+                                    });
+                                  }
+                                } else {
+                                  newValue = target.value;
+                                }
+
+                                // Update the field value in the pages state
+                                setPages((prevPages) =>
+                                  prevPages?.map((page) => ({
                                     ...page,
-                                    fields: page.fields?.map(f => 
-                                      f.id === field.id ? { ...f, value: e.target.value } : f
-                                    )
+                                    fields: page.fields?.map((f) =>
+                                      f.id === field.id
+                                        ? { ...f, value: newValue }
+                                        : f
+                                    ),
                                   }))
                                 );
                               }
                             }}
-                          >
-                            {field.items?.map((item) => (
-                              <option
-                                key={item.exportValue}
-                                value={item.exportValue}
-                              >
-                                {item.displayValue}
-                              </option>
-                            ))}
-                          </select>
+                          />
                         );
-                      return (
-                        <input
-                          type={field.type}
-                          {...(field.type === "checkbox" 
-                            ? { checked: (field.value || field.defaultValue) === "On" }
-                            : { value: field.value || field.defaultValue }
-                          )}
-                          name={field.name}
-                          key={field.id}
-                          data-field-id={field.id}
-                          className={styles.pdfInput}
-                          readOnly={mode === "view"}
-                          onChange={(e) => {
-                            if (mode !== "view") {
-                              const target = e.target as HTMLInputElement;
-                              let newValue: string;
-                              
-                              if (field.type === "checkbox") {
-                                newValue = target.checked ? "On" : "Off";
-                                // For radio-like behavior, uncheck other checkboxes with same name
-                                if (target.checked) {
-                                  const sameNameCheckboxes = document.querySelectorAll(
-                                    `input[type="checkbox"][name="${field.name}"]`
-                                  ) as NodeListOf<HTMLInputElement>;
-                                  sameNameCheckboxes.forEach((cb) => {
-                                    if (cb !== target) {
-                                      cb.checked = false;
-                                    }
-                                  });
-                                }
-                              } else {
-                                newValue = target.value;
-                              }
-                              
-                              // Update the field value in the pages state
-                              setPages(prevPages => 
-                                prevPages?.map(page => ({
-                                  ...page,
-                                  fields: page.fields?.map(f => 
-                                    f.id === field.id ? { ...f, value: newValue } : f
-                                  )
-                                }))
-                              );
-                            }
-                          }}
-                        />
-                      );
-                    })}
-                  
-                  {/* Build mode fields */}
-                  {mode === "build" && buildModeFields
-                    .filter((field) => field.page === page.proxy.pageNumber - 1)
-                    .map((field) => (
-                      <BuildModeFieldRenderer
-                        key={field.id}
-                        field={field}
-                        scale={zoomLevels[zoomLevel]}
-                        isSelected={selectedField === field.id}
-                        onSelect={handleFieldSelect}
-                        onDelete={deleteBuildModeField}
-                        onMove={moveBuildModeField}
-                        onResize={resizeBuildModeField}
-                      />
-                    ))}
-                </div>
-              ))}
+                      })}
+
+                    {/* Build mode fields */}
+                    {mode === "build" &&
+                      buildModeFields
+                        .filter(
+                          (field) => field.page === page.proxy.pageNumber - 1
+                        )
+                        .map((field) => (
+                          <BuildModeFieldRenderer
+                            key={field.id}
+                            field={field}
+                            scale={zoomLevels[zoomLevel]}
+                            isSelected={selectedField === field.id}
+                            onSelect={handleFieldSelect}
+                            onDelete={deleteBuildModeField}
+                            onMove={moveBuildModeField}
+                            onResize={resizeBuildModeField}
+                          />
+                        ))}
+                  </div>
+                ))}
           </div>
         </div>
-        
+
         {/* Property Editor Modal */}
         {mode === "build" && showPropertyEditor && selectedField && (
           <FieldPropertyEditor
-            field={buildModeFields.find(f => f.id === selectedField) || null}
+            field={buildModeFields.find((f) => f.id === selectedField) || null}
             onUpdateField={updateBuildModeField}
             onClose={() => setShowPropertyEditor(false)}
           />
