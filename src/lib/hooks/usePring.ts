@@ -31,7 +31,7 @@ const usePrint = (
     return Promise.resolve(true);
   };
 
-  return useReactToPrint({
+  const printFn = useReactToPrint({
     print: typeof window !== "undefined" ? reactPrint : undefined,
     content: getContent,
     copyStyles: true,
@@ -76,6 +76,12 @@ const usePrint = (
       }
     `,
   });
+
+  return useCallback(() => {
+    if (typeof window !== "undefined" && printFn) {
+      printFn();
+    }
+  }, [printFn]);
 };
 
 export default usePrint;
