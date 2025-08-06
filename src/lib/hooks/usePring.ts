@@ -1,5 +1,6 @@
-import { useReactToPrint } from "react-to-print";
 import { MutableRefObject, useCallback } from "react";
+import pkg from "react-to-print";
+const { useReactToPrint } = pkg as any;
 
 export interface PrintEventHandlers {
   onAfterPrint?: () => void;
