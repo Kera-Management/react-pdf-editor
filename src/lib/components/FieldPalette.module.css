@@ -6,6 +6,7 @@
   padding: 16px;
   box-sizing: border-box;
   overflow-y: auto;
+  overflow-x: hidden;
   border-radius: 10px;
   margin-right: 20px;
 }
@@ -67,6 +68,42 @@
   color: #555;
   font-weight: 500;
   line-height: 1.2;
+}
+
+/* Editor view */
+.editorContent {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.row3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+}
+
+.label {
+  display: grid;
+  gap: 6px;
+}
+
+.input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
 }
 
 /* Responsive design for smaller palettes */

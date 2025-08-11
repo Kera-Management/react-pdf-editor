@@ -1,5 +1,5 @@
-import React from "react";
-import { BuildModeFieldType } from "../PDFEditor";
+import React, { useEffect, useState } from "react";
+import { BuildModeField, BuildModeFieldType } from "../PDFEditor";
 import styles from "./FieldPalette.module.css";
 import {
   CheckSquare,
@@ -13,6 +13,10 @@ import {
 interface FieldPaletteProps {
   onFieldDragStart: (fieldType: BuildModeFieldType) => void;
   onFieldDragEnd: () => void;
+  selectedField: BuildModeField | null;
+  onUpdateField: (fieldId: string, updates: Partial<BuildModeField>) => void;
+  onCloseEditor: () => void;
+  onDeleteField: (fieldId: string) => void;
 }
 
 interface FieldTypeConfig {
@@ -64,7 +68,18 @@ const fieldTypes: FieldTypeConfig[] = [
 export const FieldPalette: React.FC<FieldPaletteProps> = ({
   onFieldDragStart,
   onFieldDragEnd,
+  selectedField,
+  onUpdateField,
+  onCloseEditor,
+  onDeleteField,
 }) => {
+  const [editingField, setEditingField] = useState<BuildModeField | null>(
+    selectedField
+  );
+
+  useEffect(() => {
+    setEditingField(selectedField);
+  }, [selectedField]);
   const handleDragStart = (
     e: React.DragEvent,
     fieldType: BuildModeFieldType
@@ -77,6 +92,234 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
   const handleDragEnd = () => {
     onFieldDragEnd();
   };
+
+  if (editingField) {
+    const handleInput = (
+      key: keyof BuildModeField | string,
+      value: unknown
+    ) => {
+      if (!editingField) return;
+      if (key.startsWith("properties.")) {
+        const propKey = key.replace("properties.", "");
+        const updated: BuildModeField = {
+          ...editingField,
+          properties: {
+            ...editingField.properties,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            [propKey as any]: value,
+          },
+        };
+        setEditingField(updated);
+        onUpdateField(editingField.id, updated);
+      } else {
+        const updated = { ...editingField, [key]: value } as BuildModeField;
+        setEditingField(updated);
+        onUpdateField(editingField.id, updated);
+      }
+    };
+
+    const handleOptionChange = (
+      index: number,
+      field: "exportValue" | "displayValue",
+      value: string
+    ) => {
+      if (!editingField.properties.options) return;
+      const options = [...editingField.properties.options];
+      options[index] = { ...options[index], [field]: value };
+      handleInput("properties.options", options);
+    };
+
+    const addOption = () => {
+      const options = [...(editingField.properties.options || [])];
+      options.push({
+        exportValue: `option${options.length + 1}`,
+        displayValue: `Option ${options.length + 1}`,
+      });
+      handleInput("properties.options", options);
+    };
+
+    const removeOption = (index: number) => {
+      if (!editingField.properties.options) return;
+      const options = editingField.properties.options.filter(
+        (_, i) => i !== index
+      );
+      handleInput("properties.options", options);
+    };
+
+    return (
+      <div className={styles.palette}>
+        <div className={styles.header}>
+          <h3>Edit Field</h3>
+          <p>
+            {editingField.type.toUpperCase()} • Page {editingField.page + 1}
+          </p>
+        </div>
+        <div className={styles.editorContent}>
+          <label className={styles.label}>
+            <span>Field Name</span>
+            <input
+              type="text"
+              value={editingField.name}
+              onChange={(e) => handleInput("name", e.target.value)}
+              className={styles.input}
+            />
+          </label>
+          <div className={styles.row2}>
+            <label className={styles.label}>
+              <span>X</span>
+              <input
+                type="number"
+                value={Math.round(editingField.x)}
+                onChange={(e) =>
+                  handleInput("x", parseFloat(e.target.value) || 0)
+                }
+                className={styles.input}
+              />
+            </label>
+            <label className={styles.label}>
+              <span>Y</span>
+              <input
+                type="number"
+                value={Math.round(editingField.y)}
+                onChange={(e) =>
+                  handleInput("y", parseFloat(e.target.value) || 0)
+                }
+                className={styles.input}
+              />
+            </label>
+            <label className={styles.label}>
+              <span>Width</span>
+              <input
+                type="number"
+                value={Math.round(editingField.width)}
+                onChange={(e) =>
+                  handleInput("width", parseFloat(e.target.value) || 20)
+                }
+                className={styles.input}
+              />
+            </label>
+            <label className={styles.label}>
+              <span>Height</span>
+              <input
+                type="number"
+                value={Math.round(editingField.height)}
+                onChange={(e) =>
+                  handleInput("height", parseFloat(e.target.value) || 20)
+                }
+                className={styles.input}
+              />
+            </label>
+          </div>
+
+          <label className={styles.label}>
+            <span>Font Size</span>
+            <input
+              type="number"
+              min={6}
+              max={72}
+              value={editingField.properties.fontSize || 12}
+              onChange={(e) =>
+                handleInput(
+                  "properties.fontSize",
+                  parseFloat(e.target.value) || 12
+                )
+              }
+              className={styles.input}
+            />
+          </label>
+
+          {(editingField.type === "text" ||
+            editingField.type === "multiline") && (
+            <>
+              <label className={styles.label}>
+                <span>Placeholder</span>
+                <input
+                  type="text"
+                  value={editingField.properties.placeholder || ""}
+                  onChange={(e) =>
+                    handleInput("properties.placeholder", e.target.value)
+                  }
+                  className={styles.input}
+                />
+              </label>
+              <label className={styles.label}>
+                <span>Default Value</span>
+                <input
+                  type="text"
+                  value={editingField.properties.defaultValue || ""}
+                  onChange={(e) =>
+                    handleInput("properties.defaultValue", e.target.value)
+                  }
+                  className={styles.input}
+                />
+              </label>
+            </>
+          )}
+
+          {(editingField.type === "dropdown" ||
+            editingField.type === "radio") && (
+            <div className={styles.editorContent}>
+              <div className={styles.actions}>
+                <span>Options</span>
+                <button type="button" onClick={addOption}>
+                  + Add
+                </button>
+              </div>
+              {(editingField.properties.options || []).map((opt, idx) => (
+                <div key={idx} className={styles.row3}>
+                  <input
+                    type="text"
+                    placeholder="Display value"
+                    value={opt.displayValue}
+                    onChange={(e) =>
+                      handleOptionChange(idx, "displayValue", e.target.value)
+                    }
+                    className={styles.input}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Export value"
+                    value={opt.exportValue}
+                    onChange={(e) =>
+                      handleOptionChange(idx, "exportValue", e.target.value)
+                    }
+                    className={styles.input}
+                  />
+                  <button type="button" onClick={() => removeOption(idx)}>
+                    −
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={editingField.properties.required || false}
+              onChange={(e) =>
+                handleInput("properties.required", e.target.checked)
+              }
+            />
+            <span>Required field</span>
+          </label>
+
+          <div className={styles.actions}>
+            <button type="button" onClick={onCloseEditor}>
+              Back
+            </button>
+            <button
+              type="button"
+              onClick={() => onDeleteField(editingField.id)}
+              style={{ color: "#b00020" }}
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.palette}>
