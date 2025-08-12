@@ -1,6 +1,6 @@
 .palette {
   width: 250px;
-  height: min-content;
+  height: 100vh;
   background: white;
   border: 1px solid #e0e0e0;
   padding: 16px;
@@ -9,6 +9,8 @@
   overflow-x: hidden;
   border-radius: 10px;
   margin-right: 20px;
+  position: sticky;
+  top: 0;
 }
 
 .header {

@@ -10,8 +10,8 @@ const App = () => {
         { id: "1", label: "Landlord" },
         { id: "2", label: "Tenant" },
       ]}
-      activeParticipantId="1"
-      mode="build"
+      activeParticipantId="2"
+      mode="edit"
       src="/form.pdf"
       onBuildSave={(pdfBytes) => {
         // Create a download link for the PDF

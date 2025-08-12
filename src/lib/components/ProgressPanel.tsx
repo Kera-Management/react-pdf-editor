@@ -9,6 +9,7 @@ interface ProgressPanelProps {
   totalFields: number;
   completedFields: number;
   mode: "view" | "edit" | "build";
+  onFieldFocus?: (fieldName: string) => void;
 }
 
 export const ProgressPanel: React.FC<ProgressPanelProps> = ({
@@ -19,6 +20,7 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
   totalFields,
   completedFields,
   mode,
+  onFieldFocus,
 }) => {
   if (mode !== "edit" || !activeParticipantId) {
     return null;
@@ -124,7 +126,12 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
           <h4>Remaining Fields ({remainingFields.length})</h4>
           <div className={styles.remainingList}>
             {remainingFields.slice(0, 5).map((fieldName) => (
-              <div key={fieldName} className={styles.remainingField}>
+              <div
+                key={fieldName}
+                className={styles.remainingField}
+                onClick={() => onFieldFocus?.(fieldName)}
+                title={`Click to focus on ${fieldName.replace(/_/g, " ")}`}
+              >
                 {fieldName
                   .replace(/_/g, " ")
                   .replace(/\b\w/g, (l) => l.toUpperCase())}

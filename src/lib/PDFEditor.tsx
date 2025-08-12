@@ -661,6 +661,44 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       setSelectedField(fieldId);
     }, []);
 
+    // Handle field focus from progress panel
+    const handleFieldFocus = useCallback((fieldName: string) => {
+      // Find the input element with this field name
+      const input = document.querySelector(
+        `input[name="${fieldName}"], select[name="${fieldName}"]`
+      ) as HTMLInputElement | HTMLSelectElement;
+
+      if (input && divRef.current) {
+        // Get the PDF container
+        const pdfContainer = divRef.current;
+        const inputRect = input.getBoundingClientRect();
+        const containerRect = pdfContainer.getBoundingClientRect();
+
+        // Calculate the scroll position to center the input in the PDF container
+        const scrollTop =
+          pdfContainer.scrollTop +
+          (inputRect.top - containerRect.top) -
+          containerRect.height / 2 +
+          inputRect.height / 2;
+
+        // Smooth scroll within the PDF container
+        pdfContainer.scrollTo({
+          top: scrollTop,
+          behavior: "smooth",
+        });
+
+        // Focus on the input after a short delay to ensure scroll completes
+        setTimeout(() => {
+          input.focus();
+          // Highlight the input briefly
+          input.style.boxShadow = "0 0 0 2px #007bff";
+          setTimeout(() => {
+            input.style.boxShadow = "";
+          }, 2000);
+        }, 300);
+      }
+    }, []);
+
     const downloadPDF = (data: Blob, fileName: string) => {
       // Create a temporary anchor element
       const downloadLink = document.createElement("a");
@@ -1004,6 +1042,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             totalFields={progressData.totalFields}
             completedFields={progressData.completedFields}
             mode={mode}
+            onFieldFocus={handleFieldFocus}
           />
         )}
         <div className={styles.mainContent}>

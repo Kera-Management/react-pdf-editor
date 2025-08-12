@@ -5,6 +5,9 @@
   padding: 20px;
   overflow-y: auto;
   box-shadow: -2px 0 4px rgba(0, 0, 0, 0.1);
+  height: 100vh;
+  position: sticky;
+  top: 0;
 }
 
 .header {
@@ -95,6 +98,14 @@
   font-size: 14px;
   color: #495057;
   border-left: 3px solid #ffc107;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.remainingField:hover {
+  background: #e9ecef;
+  border-color: #ffc107;
+  transform: translateX(2px);
 }
 
 .moreFields {
