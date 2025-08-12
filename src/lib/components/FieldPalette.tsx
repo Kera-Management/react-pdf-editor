@@ -299,18 +299,18 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
           {participants && participants.length > 0 && (
             <div className={styles.editorContent}>
               <label className={styles.label}>
-                <span>Assignees</span>
+                <span>Assignee</span>
                 <select
-                  multiple
-                  value={editingField.properties.assignees || []}
+                  value={editingField.properties.assignees?.[0] || ""}
                   onChange={(e) =>
                     handleInput(
                       "properties.assignees",
-                      Array.from(e.target.selectedOptions).map((o) => o.value)
+                      e.target.value ? [e.target.value] : []
                     )
                   }
                   className={styles.input}
                 >
+                  <option value="">No assignment</option>
                   {participants.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.label}

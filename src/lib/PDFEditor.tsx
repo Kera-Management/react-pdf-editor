@@ -32,6 +32,7 @@ import ZoomInIcon from "./icons/ZoomInIcon";
 import SaveAsIcon from "./icons/SaveAsIcon";
 import FieldPalette from "./components/FieldPalette";
 import BuildModeFieldRenderer from "./components/BuildModeFieldRenderer";
+import ProgressPanel from "./components/ProgressPanel";
 
 export interface PDFFormFields {
   [x: string]: string;
@@ -154,8 +155,12 @@ export interface PDFEditorProps {
   /** Visibility rule for fields not assigned to the active participant in edit mode */
   unassignedVisibility?: "readonly" | "hidden";
   /** Optional callback to receive the built schema along with saved PDF in build mode */
-  onBuildSave?: (pdfBytes: Uint8Array, buildSchema: BuildModeField[]) => void;
-  /** Optional mapping from field name to participant ids for enforcement in edit mode */
+  onBuildSave?: (
+    pdfBytes: Uint8Array,
+    buildSchema: BuildModeField[],
+    fieldAssignments: Record<string, string[]>
+  ) => void;
+  /** Optional mapping from field name to participant ids for enforcement in edit mode. If not provided, will be automatically extracted from PDF metadata. */
   fieldAssignments?: Record<string, string[]>;
 }
 
@@ -193,6 +198,20 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       useState<BuildModeFieldType | null>(null);
     // Property editing is handled inside FieldPalette now
 
+    // Store extracted field assignments from PDF metadata
+    const extractedFieldAssignments = useRef<Record<string, string[]> | null>(
+      null
+    );
+
+    // Debug: Log current assignments
+    useEffect(() => {
+      console.log("Current fieldAssignments prop:", fieldAssignments);
+      console.log(
+        "Current extracted assignments:",
+        extractedFieldAssignments.current
+      );
+    }, [fieldAssignments]);
+
     useEffect(() => {
       // use cdn pdf.worker.min.mjs if not set
       GlobalWorkerOptions.workerSrc = workerSrc || cdnworker;
@@ -201,7 +220,40 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     useEffect(() => {
       const loadDocument = async () => {
         setDocReady(false);
-        setPdfDoc(await getDocument(src).promise);
+        const doc = await getDocument(src).promise;
+        setPdfDoc(doc);
+
+        // Try to extract field assignments from PDF metadata
+        try {
+          const pdfBytes = await doc.getData();
+          const libDoc = await PDFDocument.load(pdfBytes);
+          const title = libDoc.getTitle();
+
+          console.log("PDF title:", title);
+          console.log("PDF catalog:", libDoc.catalog);
+
+          if (title && title.startsWith("REACT_PDF_EDITOR_ASSIGNMENTS:")) {
+            const assignmentsJson = title.replace(
+              "REACT_PDF_EDITOR_ASSIGNMENTS:",
+              ""
+            );
+            const extractedAssignments = JSON.parse(assignmentsJson);
+            console.log(
+              "Extracted field assignments from PDF:",
+              extractedAssignments
+            );
+
+            // Store extracted assignments for internal use
+            extractedFieldAssignments.current = extractedAssignments;
+            console.log(
+              "Field assignments extracted from PDF metadata:",
+              extractedAssignments
+            );
+          }
+        } catch (error) {
+          console.warn("Failed to extract field assignments from PDF:", error);
+        }
+
         setDocReady(true);
       };
       loadDocument();
@@ -320,10 +372,23 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
 
             // Enforce assignment in edit mode by disabling or hiding
             if (mode === "edit" && activeParticipantId && field) {
-              const assignedIds = fieldAssignments?.[field.name];
+              // Prioritize extracted assignments from PDF metadata, fallback to prop
+              const effectiveAssignments =
+                extractedFieldAssignments.current || fieldAssignments;
+              const assignedIds = effectiveAssignments?.[field.name];
               const isAssigned = assignedIds
                 ? assignedIds.includes(activeParticipantId)
                 : true; // default allow if no mapping provided
+
+              // Debug: Log field assignment enforcement
+              console.log(`Field "${field.name}":`, {
+                effectiveAssignments,
+                assignedIds,
+                activeParticipantId,
+                isAssigned,
+                unassignedVisibility,
+              });
+
               if (!isAssigned) {
                 if (unassignedVisibility === "hidden") {
                   (input as HTMLElement).style.display = "none";
@@ -397,6 +462,24 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       });
 
       return formFields;
+    };
+
+    // Calculate progress for the active participant
+    const getProgressData = () => {
+      const formFields = getAllFieldsValue();
+      const allFieldNames = Object.keys(formFields);
+
+      // Count total completed fields
+      const totalCompleted = allFieldNames.filter((fieldName) => {
+        const value = formFields[fieldName];
+        return value && value.trim() !== "" && value !== "Off";
+      }).length;
+
+      return {
+        formFields,
+        totalFields: allFieldNames.length,
+        completedFields: totalCompleted,
+      };
     };
 
     // expose formFields value and save function
@@ -479,6 +562,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           const width = rect[2] - rect[0];
           const height = rect[3] - rect[1];
 
+          // Get assignments for this field from extracted metadata
+          const fieldAssignments =
+            extractedFieldAssignments.current?.[field.name] || [];
+
           initial.push({
             id: `existing_${field.id}`,
             originalId: field.id,
@@ -502,12 +589,19 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
               options: field.items,
               multiline: field.multiline,
               fontSize: 12,
+              assignees: fieldAssignments, // Set the extracted assignments
             },
           });
         });
       });
 
-      if (initial.length > 0) setBuildModeFields(initial);
+      if (initial.length > 0) {
+        console.log(
+          "Initializing build mode fields with assignments:",
+          initial
+        );
+        setBuildModeFields(initial);
+      }
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [mode, pagesReady]);
 
@@ -789,8 +883,42 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         }
 
         const savedData = await libDoc.save();
+        console.log({ onBuildSave });
         if (mode === "build" && onBuildSave) {
-          onBuildSave(savedData, buildModeFields);
+          // Create a mapping from field names to assignees for the parent app
+          const fieldAssignmentsMap: Record<string, string[]> = {};
+          buildModeFields.forEach((field) => {
+            if (
+              field.properties.assignees &&
+              field.properties.assignees.length > 0
+            ) {
+              fieldAssignmentsMap[field.name] = field.properties.assignees;
+            }
+          });
+
+          // Store field assignments in PDF metadata
+          const assignmentsJson = JSON.stringify(fieldAssignmentsMap);
+          const titleWithAssignments = `REACT_PDF_EDITOR_ASSIGNMENTS:${assignmentsJson}`;
+
+          console.log("Setting PDF title to:", titleWithAssignments);
+          libDoc.setTitle(titleWithAssignments);
+
+          // Verify the title was set
+          const verifyTitle = libDoc.getTitle();
+          console.log("Verified PDF title:", verifyTitle);
+
+          // Re-save with metadata
+          const savedDataWithMetadata = await libDoc.save();
+
+          onBuildSave(
+            savedDataWithMetadata,
+            buildModeFields,
+            fieldAssignmentsMap
+          );
+          console.log(
+            "Field assignments stored in PDF metadata:",
+            fieldAssignmentsMap
+          );
         } else if (onSave) {
           onSave(savedData, formFields);
         } else {
@@ -846,6 +974,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       setDraggedFieldType(null);
     };
 
+    const progressData = getProgressData();
+
     return (
       <div className={styles.rootContainer}>
         {mode === "build" && (
@@ -861,6 +991,19 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             onCloseEditor={() => setSelectedField(null)}
             onDeleteField={deleteBuildModeField}
             participants={participants}
+          />
+        )}
+        {mode === "edit" && (
+          <ProgressPanel
+            activeParticipantId={activeParticipantId}
+            participants={participants}
+            fieldAssignments={
+              extractedFieldAssignments.current || fieldAssignments || undefined
+            }
+            formFields={progressData.formFields}
+            totalFields={progressData.totalFields}
+            completedFields={progressData.completedFields}
+            mode={mode}
           />
         )}
         <div className={styles.mainContent}>
