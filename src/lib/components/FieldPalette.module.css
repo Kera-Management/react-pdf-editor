@@ -100,6 +100,11 @@
 .input {
   width: 100%;
   box-sizing: border-box;
+  border: 1px solid #E8E7E4;
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 14px;
+  transition: all 0.2s ease;
 }
 
 .actions {

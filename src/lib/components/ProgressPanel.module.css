@@ -1,11 +1,14 @@
 .progressPanel {
-  width: 300px;
-  background: #ffffff;
-  border-left: 1px solid #e0e0e0;
-  padding: 20px;
-  overflow-y: auto;
-  box-shadow: -2px 0 4px rgba(0, 0, 0, 0.1);
+  width: 250px;
   height: 100vh;
+  background: white;
+  border: 1px solid #e0e0e0;
+  padding: 16px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-radius: 10px;
+  margin-right: 20px;
   position: sticky;
   top: 0;
 }
@@ -97,14 +100,14 @@
   border-radius: 6px;
   font-size: 14px;
   color: #495057;
-  border-left: 3px solid #ffc107;
+  border-left: 3px solid #063b26;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .remainingField:hover {
   background: #e9ecef;
-  border-color: #ffc107;
+  border-color: #063b26;
   transform: translateX(2px);
 }
 
