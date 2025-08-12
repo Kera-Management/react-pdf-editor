@@ -17,6 +17,7 @@ interface FieldPaletteProps {
   onUpdateField: (fieldId: string, updates: Partial<BuildModeField>) => void;
   onCloseEditor: () => void;
   onDeleteField: (fieldId: string) => void;
+  participants?: { id: string; label: string; role?: "landlord" | "tenant" }[];
 }
 
 interface FieldTypeConfig {
@@ -72,6 +73,7 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
   onUpdateField,
   onCloseEditor,
   onDeleteField,
+  participants,
 }) => {
   const [editingField, setEditingField] = useState<BuildModeField | null>(
     selectedField
@@ -290,6 +292,32 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
                   </button>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Assignment */}
+          {participants && participants.length > 0 && (
+            <div className={styles.editorContent}>
+              <label className={styles.label}>
+                <span>Assignees</span>
+                <select
+                  multiple
+                  value={editingField.properties.assignees || []}
+                  onChange={(e) =>
+                    handleInput(
+                      "properties.assignees",
+                      Array.from(e.target.selectedOptions).map((o) => o.value)
+                    )
+                  }
+                  className={styles.input}
+                >
+                  {participants.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
           )}
 

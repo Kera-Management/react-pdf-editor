@@ -4,7 +4,17 @@ import PDFEditor, { PDFEditorRef } from "./src/lib/PDFEditor";
 
 const App = () => {
   const ref = useRef<PDFEditorRef>(null);
-  return <PDFEditor mode="build" src="/form.pdf" ref={ref} />;
+  return (
+    <PDFEditor
+      participants={[
+        { id: "1", label: "Landlord" },
+        { id: "2", label: "Tenant" },
+      ]}
+      mode="build"
+      src="/form.pdf"
+      ref={ref}
+    />
+  );
 };
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

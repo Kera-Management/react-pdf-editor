@@ -96,6 +96,8 @@ export interface BuildModeField {
     fontColor?: string;
     backgroundColor?: string;
     borderColor?: string;
+    // Assignment metadata: participant ids allowed to edit this field
+    assignees?: string[];
   };
 }
 
@@ -145,6 +147,16 @@ export interface PDFEditorProps {
    * @returns
    */
   onSave?: (pdfBytes: Uint8Array, formFields: PDFFormFields) => void;
+  /** Participants that can be assigned to fields in build mode */
+  participants?: { id: string; label: string; role?: "landlord" | "tenant" }[];
+  /** Active participant in edit mode. If provided, only their assigned fields are editable. */
+  activeParticipantId?: string;
+  /** Visibility rule for fields not assigned to the active participant in edit mode */
+  unassignedVisibility?: "readonly" | "hidden";
+  /** Optional callback to receive the built schema along with saved PDF in build mode */
+  onBuildSave?: (pdfBytes: Uint8Array, buildSchema: BuildModeField[]) => void;
+  /** Optional mapping from field name to participant ids for enforcement in edit mode */
+  fieldAssignments?: Record<string, string[]>;
 }
 
 const cdnworker = "https://unpkg.com/pdfjs-dist/build/pdf.worker.min.mjs";
@@ -152,7 +164,17 @@ GlobalWorkerOptions.workerSrc = cdnworker;
 
 export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
   (props, ref) => {
-    const { src, workerSrc, onSave, mode = "edit" } = props;
+    const {
+      src,
+      workerSrc,
+      onSave,
+      mode = "edit",
+      participants,
+      activeParticipantId,
+      unassignedVisibility = "readonly",
+      onBuildSave,
+      fieldAssignments,
+    } = props;
     const divRef = useRef<HTMLDivElement>(null);
     const [maxPageWidth, setMaxPageWidth] = useState(0);
     const [zoomLevel, setZoomLevel] = useState(6);
@@ -294,6 +316,24 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
               input.style.top = viewport.height - rect[3] + "px";
               input.style.width = rect[2] - rect[0] + "px";
               input.style.height = rect[3] - rect[1] + "px";
+            }
+
+            // Enforce assignment in edit mode by disabling or hiding
+            if (mode === "edit" && activeParticipantId && field) {
+              const assignedIds = fieldAssignments?.[field.name];
+              const isAssigned = assignedIds
+                ? assignedIds.includes(activeParticipantId)
+                : true; // default allow if no mapping provided
+              if (!isAssigned) {
+                if (unassignedVisibility === "hidden") {
+                  (input as HTMLElement).style.display = "none";
+                } else {
+                  input.setAttribute("disabled", "true");
+                }
+              } else {
+                (input as HTMLElement).style.display = "";
+                input.removeAttribute("disabled");
+              }
             }
           });
         });
@@ -749,7 +789,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         }
 
         const savedData = await libDoc.save();
-        if (onSave) {
+        if (mode === "build" && onBuildSave) {
+          onBuildSave(savedData, buildModeFields);
+        } else if (onSave) {
           onSave(savedData, formFields);
         } else {
           // default behavior, save to local machine
@@ -818,6 +860,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             onUpdateField={updateBuildModeField}
             onCloseEditor={() => setSelectedField(null)}
             onDeleteField={deleteBuildModeField}
+            participants={participants}
           />
         )}
         <div className={styles.mainContent}>
