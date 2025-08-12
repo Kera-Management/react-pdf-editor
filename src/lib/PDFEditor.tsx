@@ -1105,6 +1105,15 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                     {mode !== "build" &&
                       page.fields &&
                       page.fields.map((field) => {
+                        const scale = zoomLevels[zoomLevel];
+                        const vp = page.proxy.getViewport({ scale });
+                        const rectScaled = field.rect.map((x) => x * scale);
+                        const style: React.CSSProperties = {
+                          left: rectScaled[0],
+                          top: vp.height - rectScaled[3],
+                          width: rectScaled[2] - rectScaled[0],
+                          height: rectScaled[3] - rectScaled[1],
+                        };
                         if (field.type === "combobox")
                           return (
                             <select
@@ -1114,6 +1123,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                               data-field-id={field.id}
                               value={field.value || field.defaultValue}
                               className={styles.pdfSelect}
+                              style={style}
                               disabled={mode === "view"}
                               onChange={(e) => {
                                 // Update the field value in the pages state
@@ -1155,6 +1165,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                             key={field.id}
                             data-field-id={field.id}
                             className={styles.pdfInput}
+                            style={style}
                             readOnly={mode === "view"}
                             onChange={(e) => {
                               if (mode !== "view") {

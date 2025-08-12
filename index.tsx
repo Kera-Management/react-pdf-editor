@@ -11,7 +11,7 @@ const App = () => {
         { id: "2", label: "Tenant" },
       ]}
       activeParticipantId="2"
-      mode="build"
+      mode="edit"
       src="/form.pdf"
       onBuildSave={(pdfBytes) => {
         // Create a download link for the PDF
