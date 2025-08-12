@@ -35,7 +35,7 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
-    "@phosphor-icons/react": "^2.2.0",
+    "@phosphor-icons/react": "^2.1.10",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^5.4.54",
     "react": "^18.2.0",
