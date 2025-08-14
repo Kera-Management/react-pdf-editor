@@ -203,15 +203,6 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       null
     );
 
-    // Debug: Log current assignments
-    useEffect(() => {
-      console.log("Current fieldAssignments prop:", fieldAssignments);
-      console.log(
-        "Current extracted assignments:",
-        extractedFieldAssignments.current
-      );
-    }, [fieldAssignments]);
-
     useEffect(() => {
       // use cdn pdf.worker.min.mjs if not set
       GlobalWorkerOptions.workerSrc = workerSrc || cdnworker;
@@ -228,9 +219,6 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           const pdfBytes = await doc.getData();
           const libDoc = await PDFDocument.load(pdfBytes);
           const title = libDoc.getTitle();
-
-          console.log("PDF title:", title);
-          console.log("PDF catalog:", libDoc.catalog);
 
           if (title && title.startsWith("REACT_PDF_EDITOR_ASSIGNMENTS:")) {
             const assignmentsJson = title.replace(
@@ -279,7 +267,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           setPagesReady(false);
           for (let i = 1; i <= pdfDoc?.numPages; i++) {
             const proxy = await pdfDoc.getPage(i);
-            const fields = Object.values(rawFormFields).flatMap((rawFields) =>
+            const fields = rawFormFields ? Object.values(rawFormFields).flatMap((rawFields) =>
               rawFields.filter(
                 (rawField) =>
                   rawField.editable &&
@@ -288,7 +276,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                   // while page proxy pageNumber index start from 1
                   rawField.page === proxy.pageNumber - 1
               )
-            );
+            ) : [];
             rawPages.push({ proxy, fields });
           }
           setPages(rawPages);
@@ -596,10 +584,6 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       });
 
       if (initial.length > 0) {
-        console.log(
-          "Initializing build mode fields with assignments:",
-          initial
-        );
         setBuildModeFields(initial);
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps
