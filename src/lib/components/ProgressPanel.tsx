@@ -17,8 +17,6 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
   participants,
   fieldAssignments,
   formFields,
-  totalFields,
-  completedFields,
   mode,
   onFieldFocus,
 }) => {
@@ -26,19 +24,14 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
     return null;
   }
 
-  // Debug: Log what assignments we're working with
-  console.log("ProgressPanel - fieldAssignments:", fieldAssignments);
-  console.log("ProgressPanel - activeParticipantId:", activeParticipantId);
-
   const activeParticipant = participants?.find(
     (p) => p.id === activeParticipantId
   );
-  const progressPercentage =
-    totalFields > 0 ? Math.round((completedFields / totalFields) * 100) : 0;
 
   // Get fields assigned to the active participant
   const assignedFields = fieldAssignments
     ? Object.entries(fieldAssignments)
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         .filter(([_, assignees]) => assignees.includes(activeParticipantId))
         .map(([fieldName]) => fieldName)
     : []; // If no fieldAssignments provided, show no assigned fields

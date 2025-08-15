@@ -93,6 +93,7 @@
     border-bottom-width: 1px;
     border-left-width: 0px;
     border-right-width: 0px;
+    box-sizing: border-box;
     position: absolute;
     font-size: 75%;
     padding: 0;
@@ -113,6 +114,7 @@
     border-bottom-width: 1px;
     border-left-width: 0px;
     border-right-width: 0px;
+    box-sizing: border-box;
     position: absolute;
     padding: 0 0;
     padding-block: 0;

@@ -226,17 +226,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
               ""
             );
             const extractedAssignments = JSON.parse(assignmentsJson);
-            console.log(
-              "Extracted field assignments from PDF:",
-              extractedAssignments
-            );
 
             // Store extracted assignments for internal use
             extractedFieldAssignments.current = extractedAssignments;
-            console.log(
-              "Field assignments extracted from PDF metadata:",
-              extractedAssignments
-            );
           }
         } catch (error) {
           console.warn("Failed to extract field assignments from PDF:", error);
@@ -267,16 +259,18 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           setPagesReady(false);
           for (let i = 1; i <= pdfDoc?.numPages; i++) {
             const proxy = await pdfDoc.getPage(i);
-            const fields = rawFormFields ? Object.values(rawFormFields).flatMap((rawFields) =>
-              rawFields.filter(
-                (rawField) =>
-                  rawField.editable &&
-                  !rawField.hidden &&
-                  // form field page index start from 0
-                  // while page proxy pageNumber index start from 1
-                  rawField.page === proxy.pageNumber - 1
-              )
-            ) : [];
+            const fields = rawFormFields
+              ? Object.values(rawFormFields).flatMap((rawFields) =>
+                  rawFields.filter(
+                    (rawField) =>
+                      rawField.editable &&
+                      !rawField.hidden &&
+                      // form field page index start from 0
+                      // while page proxy pageNumber index start from 1
+                      rawField.page === proxy.pageNumber - 1
+                  )
+                )
+              : [];
             rawPages.push({ proxy, fields });
           }
           setPages(rawPages);
@@ -367,15 +361,6 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
               const isAssigned = assignedIds
                 ? assignedIds.includes(activeParticipantId)
                 : true; // default allow if no mapping provided
-
-              // Debug: Log field assignment enforcement
-              console.log(`Field "${field.name}":`, {
-                effectiveAssignments,
-                assignedIds,
-                activeParticipantId,
-                isAssigned,
-                unassignedVisibility,
-              });
 
               if (!isAssigned) {
                 if (unassignedVisibility === "hidden") {
@@ -485,12 +470,12 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     const addBuildModeField = useCallback(
       (type: BuildModeFieldType, x: number, y: number, pageNumber: number) => {
         const defaultDimensions = {
-          text: { width: 200, height: 16 },
+          text: { width: 115, height: 16 },
           multiline: { width: 300, height: 80 },
           checkbox: { width: 16, height: 16 },
-          dropdown: { width: 200, height: 16 },
+          dropdown: { width: 115, height: 16 },
           radio: { width: 100, height: 16 },
-          signature: { width: 300, height: 16 },
+          signature: { width: 115, height: 16 },
         };
 
         const dimensions = defaultDimensions[type];
@@ -765,10 +750,12 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             if (!page) continue;
 
             const { height: pageHeight } = page.getSize();
-            const pdfX = buildField.x;
-            const pdfY = pageHeight - buildField.y - buildField.height;
-            const pdfWidth = buildField.width;
-            const pdfHeight = buildField.height;
+            const pdfX = Math.round(buildField.x);
+            const pdfY = Math.round(
+              pageHeight - buildField.y - buildField.height
+            );
+            const pdfWidth = Math.round(buildField.width);
+            const pdfHeight = Math.round(buildField.height);
 
             try {
               switch (buildField.type) {
@@ -779,6 +766,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                     y: pdfY,
                     width: pdfWidth,
                     height: pdfHeight,
+                    borderWidth: 0,
                   });
                   textField.setFontSize(buildField.properties.fontSize || 12);
                   break;
@@ -790,6 +778,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                     y: pdfY,
                     width: pdfWidth,
                     height: pdfHeight,
+                    borderWidth: 0,
                   });
                   multilineField.setFontSize(
                     buildField.properties.fontSize || 12
@@ -804,6 +793,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                     y: pdfY,
                     width: pdfWidth,
                     height: pdfHeight,
+                    borderWidth: 0,
                   });
                   break;
                 }
@@ -814,6 +804,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                     y: pdfY,
                     width: pdfWidth,
                     height: pdfHeight,
+                    borderWidth: 0,
                   });
                   if (buildField.properties.options) {
                     dropdown.setOptions(
@@ -827,7 +818,13 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                   radioGroup.addOptionToPage(
                     buildField.name + "_option",
                     page,
-                    { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight }
+                    {
+                      x: pdfX,
+                      y: pdfY,
+                      width: pdfWidth,
+                      height: pdfHeight,
+                      borderWidth: 0,
+                    }
                   );
                   break;
                 }
@@ -838,6 +835,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                     y: pdfY,
                     width: pdfWidth,
                     height: pdfHeight,
+                    borderWidth: 0,
                   });
                   signatureField.setFontSize(
                     buildField.properties.fontSize || 12
@@ -853,13 +851,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
 
         // Handle existing form fields
         const formFields = getAllFieldsValue();
-        console.log("Form fields to save:", formFields);
 
         for (const field of form.getFields()) {
           const fieldName = field.getName();
           const value = formFields[fieldName];
-
-          console.log(`Setting field "${fieldName}" to value:`, value);
 
           if (field instanceof PDFTextField) {
             (field as PDFTextField).setText(value || "");
@@ -905,7 +900,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         }
 
         const savedData = await libDoc.save();
-        console.log({ onBuildSave });
+
         if (mode === "build" && onBuildSave) {
           // Create a mapping from field names to assignees for the parent app
           const fieldAssignmentsMap: Record<string, string[]> = {};
@@ -922,12 +917,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           const assignmentsJson = JSON.stringify(fieldAssignmentsMap);
           const titleWithAssignments = `REACT_PDF_EDITOR_ASSIGNMENTS:${assignmentsJson}`;
 
-          console.log("Setting PDF title to:", titleWithAssignments);
           libDoc.setTitle(titleWithAssignments);
-
-          // Verify the title was set
-          const verifyTitle = libDoc.getTitle();
-          console.log("Verified PDF title:", verifyTitle);
 
           // Re-save with metadata
           const savedDataWithMetadata = await libDoc.save();
@@ -935,10 +925,6 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           onBuildSave(
             savedDataWithMetadata,
             buildModeFields,
-            fieldAssignmentsMap
-          );
-          console.log(
-            "Field assignments stored in PDF metadata:",
             fieldAssignmentsMap
           );
         } else if (onSave) {
