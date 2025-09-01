@@ -164,7 +164,8 @@ export interface PDFEditorProps {
   fieldAssignments?: Record<string, string[]>;
 }
 
-const cdnworker = "https://unpkg.com/pdfjs-dist/build/pdf.worker.min.mjs";
+const cdnworker =
+  "https://unpkg.com/pdfjs-dist@5.4.54/build/pdf.worker.min.mjs";
 GlobalWorkerOptions.workerSrc = cdnworker;
 
 export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
