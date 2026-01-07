@@ -1,163 +1,486 @@
+/* ==========================================================================
+   Progress Panel Component
+   PandaDoc-Inspired Modern Design
+   ========================================================================== */
+
+/* ==========================================================================
+   Desktop Sidebar Layout
+   ========================================================================== */
 .progressPanel {
-  width: 250px;
-  height: 100vh;
-  background: white;
-  border: 1px solid #e0e0e0;
-  padding: 16px;
-  box-sizing: border-box;
-  overflow-y: auto;
-  overflow-x: hidden;
-  border-radius: 10px;
-  margin-right: 20px;
-  position: sticky;
-  top: 0;
+  display: flex;
+  flex-direction: column;
+  width: var(--sidebar-width, 280px);
+  height: 100%;
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e7e5e4);
+  border-radius: var(--radius-xl, 16px);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition: var(--transition-all, all 200ms ease);
 }
 
+/* ==========================================================================
+   Header
+   ========================================================================== */
 .header {
-  margin-bottom: 20px;
-  border-bottom: 1px solid #e0e0e0;
-  padding-bottom: 15px;
+  padding: var(--space-5, 20px);
+  border-bottom: 1px solid var(--color-border-light, #f5f5f4);
+  background: linear-gradient(to bottom, var(--color-surface, #ffffff), var(--color-gray-50, #fafaf9));
 }
 
 .header h3 {
-  margin: 0 0 10px 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: #333;
+  margin: 0 0 var(--space-3, 12px) 0;
+  font-size: var(--text-lg, 18px);
+  font-weight: var(--font-semibold, 600);
+  color: var(--color-text-primary, #1c1917);
+  line-height: var(--leading-tight, 1.25);
 }
 
+/* ==========================================================================
+   Participant Info
+   ========================================================================== */
 .participantInfo {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2, 8px);
+  padding: var(--space-3, 12px);
+  background: var(--color-primary-50, #e6f7f5);
+  border-radius: var(--radius-lg, 12px);
+}
+
+.participantAvatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: linear-gradient(135deg, var(--color-primary-500, #00b298), var(--color-primary-600, #00a18a));
+  border-radius: var(--radius-full);
+  color: var(--color-text-inverse, #ffffff);
+  font-size: var(--text-sm, 14px);
+  font-weight: var(--font-semibold, 600);
+  flex-shrink: 0;
 }
 
 .participantName {
-  font-weight: 500;
-  color: #333;
+  font-size: var(--text-sm, 14px);
+  font-weight: var(--font-semibold, 600);
+  color: var(--color-primary-700, #008d78);
 }
 
 .participantRole {
-  font-size: 14px;
-  color: #666;
-  font-style: italic;
+  font-size: var(--text-xs, 12px);
+  color: var(--color-primary-600, #00a18a);
+  text-transform: capitalize;
 }
 
+/* ==========================================================================
+   Progress Section
+   ========================================================================== */
 .progressSection {
-  margin-bottom: 20px;
+  padding: var(--space-5, 20px);
 }
 
 .progressBar {
+  position: relative;
   width: 100%;
   height: 8px;
-  background: #f0f0f0;
-  border-radius: 4px;
+  background: var(--color-gray-200, #e7e5e4);
+  border-radius: var(--radius-full);
   overflow: hidden;
-  margin-bottom: 10px;
+  margin-bottom: var(--space-3, 12px);
 }
 
 .progressFill {
   height: 100%;
-  background: linear-gradient(90deg, #4CAF50, #45a049);
-  border-radius: 4px;
-  transition: width 0.3s ease;
+  background: linear-gradient(90deg, var(--color-success-500, #10b981), var(--color-success-400, #34d399));
+  border-radius: var(--radius-full);
+  transition: width 500ms cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
 }
 
 .progressText {
-  font-size: 14px;
-  color: #666;
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
+  font-size: var(--text-sm, 14px);
+  color: var(--color-text-secondary, #57534e);
 }
 
 .percentage {
-  font-weight: 600;
-  color: #4CAF50;
+  font-size: var(--text-lg, 18px);
+  font-weight: var(--font-bold, 700);
+  color: var(--color-success-600, #059669);
 }
 
+/* ==========================================================================
+   Remaining Fields Section
+   ========================================================================== */
 .remainingSection {
-  margin-bottom: 20px;
+  flex: 1;
+  padding: 0 var(--space-5, 20px) var(--space-5, 20px);
+  overflow-y: auto;
 }
 
 .remainingSection h4 {
-  margin: 0 0 12px 0;
-  font-size: 16px;
-  font-weight: 500;
-  color: #333;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 var(--space-3, 12px) 0;
+  font-size: var(--text-sm, 14px);
+  font-weight: var(--font-semibold, 600);
+  color: var(--color-text-primary, #1c1917);
+}
+
+.remainingCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 var(--space-2, 8px);
+  background: var(--color-warning-100, #fef3c7);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs, 12px);
+  font-weight: var(--font-semibold, 600);
+  color: var(--color-warning-700, #b45309);
 }
 
 .remainingList {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2, 8px);
 }
 
+/* Custom scrollbar */
+.remainingSection::-webkit-scrollbar {
+  width: 6px;
+}
+
+.remainingSection::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.remainingSection::-webkit-scrollbar-thumb {
+  background: var(--color-gray-300, #d6d3d1);
+  border-radius: var(--radius-full);
+}
+
+/* ==========================================================================
+   Remaining Field Cards
+   ========================================================================== */
 .remainingField {
-  padding: 8px 12px;
-  background: #f8f9fa;
-  border: 1px solid #e9ecef;
-  border-radius: 6px;
-  font-size: 14px;
-  color: #495057;
-  border-left: 3px solid #063b26;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3, 12px);
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e7e5e4);
+  border-left: 3px solid var(--color-warning-500, #f59e0b);
+  border-radius: var(--radius-md, 8px);
+  font-size: var(--text-sm, 14px);
+  color: var(--color-text-primary, #1c1917);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: var(--transition-all);
+  -webkit-tap-highlight-color: transparent;
 }
 
 .remainingField:hover {
-  background: #e9ecef;
-  border-color: #063b26;
+  background: var(--color-gray-50, #fafaf9);
+  border-color: var(--color-warning-400, #fbbf24);
+  transform: translateX(4px);
+  box-shadow: var(--shadow-sm);
+}
+
+.remainingField:active {
   transform: translateX(2px);
 }
 
-.moreFields {
-  padding: 8px 12px;
-  background: #f8f9fa;
-  border: 1px solid #e9ecef;
-  border-radius: 6px;
+.fieldIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--color-warning-100, #fef3c7);
+  border-radius: var(--radius-md, 8px);
+  color: var(--color-warning-600, #d97706);
   font-size: 14px;
-  color: #6c757d;
-  font-style: italic;
-  text-align: center;
+  flex-shrink: 0;
 }
 
+.moreFields {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3, 12px);
+  background: var(--color-gray-50, #fafaf9);
+  border: 1px dashed var(--color-border, #e7e5e4);
+  border-radius: var(--radius-md, 8px);
+  font-size: var(--text-sm, 14px);
+  color: var(--color-text-tertiary, #78716c);
+  font-style: italic;
+}
+
+/* ==========================================================================
+   Completion Panel
+   ========================================================================== */
 .completionPanel {
-  padding: 20px;
-  background: #d4edda;
-  border: 1px solid #c3e6cb;
-  border-radius: 8px;
-  color: #155724;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-6, 24px);
+  margin: var(--space-5, 20px);
+  background: linear-gradient(135deg, var(--color-success-50, #ecfdf5), var(--color-success-100, #d1fae5));
+  border: 1px solid var(--color-success-200, #a7f3d0);
+  border-radius: var(--radius-xl, 16px);
   text-align: center;
-  margin-top: 20px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  animation: celebrateIn 500ms ease-out;
+}
+
+@keyframes celebrateIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .completionIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  background: var(--color-success-500, #10b981);
+  border-radius: var(--radius-full);
   font-size: 32px;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-4, 16px);
+  box-shadow: 0 0 0 8px rgba(16, 185, 129, 0.2);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 0 16px rgba(16, 185, 129, 0.1);
+  }
 }
 
 .completionTitle {
-  font-size: 20px;
-  font-weight: 600;
-  margin-bottom: 8px;
-  color: #155724;
+  font-size: var(--text-xl, 20px);
+  font-weight: var(--font-bold, 700);
+  color: var(--color-success-700, #047857);
+  margin-bottom: var(--space-2, 8px);
 }
 
 .completionMessage {
-  font-size: 14px;
-  line-height: 1.4;
-  color: #155724;
+  font-size: var(--text-sm, 14px);
+  color: var(--color-success-600, #059669);
+  line-height: var(--leading-relaxed, 1.625);
+  max-width: 200px;
 }
 
+/* ==========================================================================
+   No Assignment Message
+   ========================================================================== */
 .noAssignmentMessage {
-  padding: 12px;
-  background: #f8d7da;
-  border: 1px solid #f5c6cb;
-  border-radius: 6px;
-  color: #721c24;
-  font-weight: 500;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-6, 24px);
+  margin: var(--space-5, 20px);
+  background: var(--color-gray-50, #fafaf9);
+  border: 1px solid var(--color-border, #e7e5e4);
+  border-radius: var(--radius-xl, 16px);
   text-align: center;
-  margin-top: 20px;
+}
+
+.noAssignmentIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background: var(--color-gray-200, #e7e5e4);
+  border-radius: var(--radius-full);
+  font-size: 24px;
+  margin-bottom: var(--space-3, 12px);
+  color: var(--color-text-tertiary, #78716c);
+}
+
+.noAssignmentMessage p {
+  margin: 0;
+  font-size: var(--text-sm, 14px);
+  color: var(--color-text-secondary, #57534e);
+  line-height: var(--leading-relaxed, 1.625);
+}
+
+/* ==========================================================================
+   Mobile Bottom Sheet
+   ========================================================================== */
+@media (max-width: 767px) {
+  .progressPanel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: auto;
+    max-height: 70vh;
+    border-radius: var(--radius-2xl, 24px) var(--radius-2xl, 24px) 0 0;
+    border: none;
+    box-shadow: var(--shadow-2xl);
+    z-index: var(--z-drawer, 500);
+    transform: translateY(calc(100% - 80px));
+    transition: transform 300ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .progressPanel.open {
+    transform: translateY(0);
+  }
+
+  /* Compact header for mobile collapsed state */
+  .mobileCompactHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-4, 16px) var(--space-5, 20px);
+    cursor: pointer;
+  }
+
+  .mobileCompactInfo {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3, 12px);
+  }
+
+  .mobileProgressRing {
+    position: relative;
+    width: 44px;
+    height: 44px;
+  }
+
+  .mobileProgressRing svg {
+    transform: rotate(-90deg);
+  }
+
+  .mobileProgressRing .ringBg {
+    fill: none;
+    stroke: var(--color-gray-200, #e7e5e4);
+    stroke-width: 4;
+  }
+
+  .mobileProgressRing .ringFill {
+    fill: none;
+    stroke: var(--color-success-500, #10b981);
+    stroke-width: 4;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 500ms ease;
+  }
+
+  .mobileProgressText {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--text-xs, 12px);
+    font-weight: var(--font-bold, 700);
+    color: var(--color-text-primary, #1c1917);
+  }
+
+  .mobileCompactLabel {
+    font-size: var(--text-sm, 14px);
+    font-weight: var(--font-medium, 500);
+    color: var(--color-text-secondary, #57534e);
+  }
+
+  .mobileExpandIcon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: var(--color-gray-100, #f5f5f4);
+    border-radius: var(--radius-full);
+    color: var(--color-text-tertiary, #78716c);
+    transition: transform 300ms ease;
+  }
+
+  .progressPanel.open .mobileExpandIcon {
+    transform: rotate(180deg);
+  }
+
+  /* Drag handle for mobile */
+  .dragHandle {
+    display: flex;
+    justify-content: center;
+    padding: var(--space-3, 12px) 0 0;
+    cursor: grab;
+  }
+
+  .dragHandle:active {
+    cursor: grabbing;
+  }
+
+  .dragBar {
+    width: 40px;
+    height: 4px;
+    background: var(--color-gray-300, #d6d3d1);
+    border-radius: var(--radius-full);
+  }
+
+  .header {
+    padding: var(--space-3, 12px) var(--space-5, 20px) var(--space-4, 16px);
+  }
+
+  .progressSection {
+    padding: var(--space-4, 16px) var(--space-5, 20px);
+  }
+
+  .remainingSection {
+    padding: 0 var(--space-5, 20px) var(--space-5, 20px);
+    padding-bottom: calc(var(--space-5, 20px) + env(safe-area-inset-bottom, 0px));
+  }
+
+  .completionPanel,
+  .noAssignmentMessage {
+    margin: var(--space-4, 16px) var(--space-5, 20px);
+    margin-bottom: calc(var(--space-4, 16px) + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* Hide mobile-specific elements on desktop */
+@media (min-width: 768px) {
+  .mobileCompactHeader,
+  .dragHandle {
+    display: none;
+  }
+}
+
+/* ==========================================================================
+   Tablet Adjustments
+   ========================================================================== */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .progressPanel {
+    width: 260px;
+  }
+}
+
+/* ==========================================================================
+   Large Desktop
+   ========================================================================== */
+@media (min-width: 1280px) {
+  .progressPanel {
+    width: 300px;
+  }
 }

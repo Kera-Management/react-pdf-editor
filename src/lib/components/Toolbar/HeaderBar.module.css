@@ -1,0 +1,336 @@
+/* ==========================================================================
+   HeaderBar - Minimal top bar with mode switcher and actions
+   ========================================================================== */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--header-height);
+  padding: 0 var(--space-3);
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  gap: var(--space-4);
+  z-index: var(--z-sticky);
+}
+
+/* ==========================================================================
+   Left Section
+   ========================================================================== */
+
+.left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
+}
+
+/* ==========================================================================
+   Mode Selector
+   ========================================================================== */
+
+.modeSelector {
+  position: relative;
+}
+
+.modeButton {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1-5) var(--space-3);
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.modeButton:hover {
+  background: var(--bg-surface-active);
+  border-color: var(--border-strong);
+}
+
+.modeButton svg {
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.modeButton .rotated {
+  transform: rotate(180deg);
+}
+
+.modeIndicator {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.modeIndicator[data-mode="build"] {
+  background: var(--color-secondary-500);
+}
+
+.modeIndicator[data-mode="edit"] {
+  background: var(--color-success-500);
+}
+
+.modeIndicator[data-mode="view"] {
+  background: var(--color-gray-500);
+}
+
+.modeLabel {
+  min-width: 36px;
+}
+
+/* Mode Menu Dropdown */
+.modeMenu {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  left: 0;
+  min-width: 200px;
+  background: var(--panel-bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  padding: var(--space-1);
+  z-index: var(--z-dropdown);
+  animation: menuSlideDown var(--duration-fast) var(--ease-out);
+}
+
+@keyframes menuSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.modeOption {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition-fast);
+}
+
+.modeOption:hover {
+  background: var(--bg-surface-hover);
+}
+
+.modeOption.active {
+  background: var(--accent-primary-subtle);
+}
+
+.modeOptionText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.modeOptionLabel {
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  color: var(--text-primary);
+}
+
+.modeOptionDesc {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+/* ==========================================================================
+   Title
+   ========================================================================== */
+
+.title {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+/* ==========================================================================
+   Center Section
+   ========================================================================== */
+
+.center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pageIndicator {
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  color: var(--text-secondary);
+  padding: var(--space-1) var(--space-3);
+  background: var(--bg-base);
+  border-radius: var(--radius-md);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   Right Section
+   ========================================================================== */
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  justify-content: flex-end;
+}
+
+/* ==========================================================================
+   Zoom Controls
+   ========================================================================== */
+
+.zoomControls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--bg-base);
+  border-radius: var(--radius-md);
+}
+
+.zoomValue {
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  color: var(--text-secondary);
+  min-width: 44px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   Icon Button
+   ========================================================================== */
+
+.iconButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: 
+    color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.iconButton:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-surface-hover);
+}
+
+.iconButton:active:not(:disabled) {
+  background: var(--bg-surface-active);
+}
+
+.iconButton:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ==========================================================================
+   Save Button
+   ========================================================================== */
+
+.saveButton {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: var(--accent-primary);
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--text-on-accent);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  cursor: pointer;
+  transition: background var(--transition-fast), transform var(--transition-fast);
+}
+
+.saveButton:hover:not(:disabled) {
+  background: var(--accent-primary-hover);
+}
+
+.saveButton:active:not(:disabled) {
+  background: var(--accent-primary-active);
+  transform: scale(0.98);
+}
+
+.saveButton:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+
+@media (max-width: 640px) {
+  .header {
+    padding: 0 var(--space-2);
+    gap: var(--space-2);
+  }
+
+  .modeButton {
+    padding: var(--space-1-5) var(--space-2);
+  }
+
+  .modeLabel {
+    display: none;
+  }
+
+  .zoomControls {
+    padding: var(--space-0-5);
+  }
+
+  .zoomValue {
+    min-width: 36px;
+    font-size: var(--text-xs);
+  }
+
+  .iconButton {
+    width: 36px;
+    height: 36px;
+  }
+
+  .saveButton {
+    padding: var(--space-2);
+  }
+}
+
+

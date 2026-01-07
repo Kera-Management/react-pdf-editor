@@ -5,6 +5,7 @@ import PDFEditor, { PDFEditorMode, PDFEditorRef } from "./src/lib/PDFEditor";
 const App = () => {
   const [src, setSrc] = useState("/generated-form.pdf");
   const [mode, setMode] = useState("build");
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const ref = useRef<PDFEditorRef>(null);
   return (
     <div>
@@ -18,6 +19,10 @@ const App = () => {
         <option value="edit">Edit</option>
         <option value="view">View</option>
       </select>
+      <select value={theme} onChange={(e) => setTheme(e.target.value as "light" | "dark")}>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
       <PDFEditor
         participants={[
           { id: "1", label: "Landlord" },
@@ -26,6 +31,7 @@ const App = () => {
         activeParticipantId="1"
         mode={mode as PDFEditorMode}
         src={src}
+        theme={theme}
         onBuildSave={(pdfBytes) => {
           // Create a download link for the PDF
           const blob = new Blob([pdfBytes], { type: "application/pdf" });

@@ -1,6 +1,7 @@
+import "./theme.css";
 import styles from "./PDFEditor.module.css";
 
-import {
+import React, {
   forwardRef,
   useCallback,
   useEffect,
@@ -13,6 +14,7 @@ import {
   GlobalWorkerOptions,
   PDFDocumentProxy,
   PDFPageProxy,
+  version as pdfjsVersion,
 } from "pdfjs-dist";
 import {
   DocumentInitParameters,
@@ -26,13 +28,18 @@ import {
   PDFRadioGroup,
   PDFTextField,
 } from "pdf-lib";
-
-import ZoomOutIcon from "./icons/ZoomOutIcon";
-import ZoomInIcon from "./icons/ZoomInIcon";
-import SaveAsIcon from "./icons/SaveAsIcon";
-import FieldPalette from "./components/FieldPalette";
+// New component imports
+import { useResponsive } from "./hooks/useResponsive";
+import { usePanelState } from "./hooks/usePanelState";
+import HeaderBar from "./components/Toolbar/HeaderBar";
+import { PageThumbnails } from "./components/Panels/PageThumbnails";
+import { FieldPalette } from "./components/Panels/FieldPalette";
+import { PropertiesPanel } from "./components/Panels/PropertiesPanel";
+import { ProgressPanel } from "./components/Panels/ProgressPanel";
+import { ContextToolbar } from "./components/Toolbar/ContextToolbar";
+import { BottomSheet, SnapPoint } from "./components/Mobile/BottomSheet";
+import { FloatingActionButton } from "./components/Mobile/FloatingActionButton";
 import BuildModeFieldRenderer from "./components/BuildModeFieldRenderer";
-import ProgressPanel from "./components/ProgressPanel";
 
 export interface PDFFormFields {
   [x: string]: string;
@@ -162,11 +169,22 @@ export interface PDFEditorProps {
   ) => void;
   /** Optional mapping from field name to participant ids for enforcement in edit mode. If not provided, will be automatically extracted from PDF metadata. */
   fieldAssignments?: Record<string, string[]>;
+  /** Theme for the editor UI. Defaults to "light". */
+  theme?: "light" | "dark";
 }
 
-const cdnworker =
-  "https://unpkg.com/pdfjs-dist@5.4.54/build/pdf.worker.min.mjs";
-GlobalWorkerOptions.workerSrc = cdnworker;
+// Use worker from the installed pdfjs-dist package to ensure version matching
+// Get the version dynamically from the imported pdfjs-dist to ensure they match
+// This prevents version mismatch errors between the API and worker
+const getWorkerSrc = (version: string) => {
+  // Extract major.minor.patch from version string (e.g., "4.10.38" or "5.4.54")
+  const versionMatch = version.match(/^(\d+\.\d+\.\d+)/);
+  const workerVersion = versionMatch ? versionMatch[1] : "5.4.54";
+  return `https://unpkg.com/pdfjs-dist@${workerVersion}/build/pdf.worker.min.mjs`;
+};
+
+const defaultWorkerSrc = getWorkerSrc(pdfjsVersion);
+GlobalWorkerOptions.workerSrc = defaultWorkerSrc;
 
 export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
   (props, ref) => {
@@ -180,6 +198,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       unassignedVisibility = "readonly",
       onBuildSave,
       fieldAssignments,
+      theme = "light",
     } = props;
     const divRef = useRef<HTMLDivElement>(null);
     const [maxPageWidth, setMaxPageWidth] = useState(0);
@@ -204,38 +223,67 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       null
     );
 
+    // Pinch-to-zoom state
+    const lastPinchDistance = useRef<number>(0);
+    const isPinching = useRef<boolean>(false);
+
+    // New UI state
+    const { isMobile } = useResponsive();
+    const { openPanel, closePanel, togglePanel, isPanelOpen } = usePanelState();
+
+    // Active page tracking
+    const [activePage, setActivePage] = useState(1);
+
+    // Mobile bottom sheet state
+    const [bottomSheetOpen, setBottomSheetOpen] = useState(false);
+    const [bottomSheetSnap, setBottomSheetSnap] =
+      useState<SnapPoint>("collapsed");
+
+    // Context toolbar state
+    const [contextToolbarTarget, setContextToolbarTarget] =
+      useState<DOMRect | null>(null);
+
     useEffect(() => {
       // use cdn pdf.worker.min.mjs if not set
-      GlobalWorkerOptions.workerSrc = workerSrc || cdnworker;
+      GlobalWorkerOptions.workerSrc = workerSrc || defaultWorkerSrc;
     }, [workerSrc]);
 
     useEffect(() => {
       const loadDocument = async () => {
         setDocReady(false);
-        const doc = await getDocument(src).promise;
-        setPdfDoc(doc);
-
-        // Try to extract field assignments from PDF metadata
         try {
-          const pdfBytes = await doc.getData();
-          const libDoc = await PDFDocument.load(pdfBytes);
-          const title = libDoc.getTitle();
+          const doc = await getDocument(src).promise;
+          setPdfDoc(doc);
 
-          if (title && title.startsWith("REACT_PDF_EDITOR_ASSIGNMENTS:")) {
-            const assignmentsJson = title.replace(
-              "REACT_PDF_EDITOR_ASSIGNMENTS:",
-              ""
+          // Try to extract field assignments from PDF metadata
+          try {
+            const pdfBytes = await doc.getData();
+            const libDoc = await PDFDocument.load(pdfBytes);
+            const title = libDoc.getTitle();
+
+            if (title && title.startsWith("REACT_PDF_EDITOR_ASSIGNMENTS:")) {
+              const assignmentsJson = title.replace(
+                "REACT_PDF_EDITOR_ASSIGNMENTS:",
+                ""
+              );
+              const extractedAssignments = JSON.parse(assignmentsJson);
+
+              // Store extracted assignments for internal use
+              extractedFieldAssignments.current = extractedAssignments;
+            }
+          } catch (error) {
+            console.warn(
+              "Failed to extract field assignments from PDF:",
+              error
             );
-            const extractedAssignments = JSON.parse(assignmentsJson);
-
-            // Store extracted assignments for internal use
-            extractedFieldAssignments.current = extractedAssignments;
           }
-        } catch (error) {
-          console.warn("Failed to extract field assignments from PDF:", error);
-        }
 
-        setDocReady(true);
+          setDocReady(true);
+        } catch (error) {
+          console.error("Failed to load PDF document:", error);
+          // Set docReady to true even on error to prevent infinite loading
+          setDocReady(true);
+        }
       };
       loadDocument();
       return () => {
@@ -254,28 +302,37 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     useEffect(() => {
       const loadFormFieldsAndPages = async () => {
         if (pdfDoc) {
-          const rawFormFields =
-            (await pdfDoc.getFieldObjects()) as PDFFormRawFields;
-          const rawPages: PDFPageAndFormFields[] = [];
-          setPagesReady(false);
-          for (let i = 1; i <= pdfDoc?.numPages; i++) {
-            const proxy = await pdfDoc.getPage(i);
-            const fields = rawFormFields
-              ? Object.values(rawFormFields).flatMap((rawFields) =>
-                  rawFields.filter(
-                    (rawField) =>
-                      rawField.editable &&
-                      !rawField.hidden &&
-                      // form field page index start from 0
-                      // while page proxy pageNumber index start from 1
-                      rawField.page === proxy.pageNumber - 1
-                  )
-                )
-              : [];
-            rawPages.push({ proxy, fields });
+          try {
+            const rawFormFields =
+              (await pdfDoc.getFieldObjects()) as PDFFormRawFields;
+            const rawPages: PDFPageAndFormFields[] = [];
+            setPagesReady(false);
+            for (let i = 1; i <= pdfDoc?.numPages; i++) {
+              try {
+                const proxy = await pdfDoc.getPage(i);
+                const fields = rawFormFields
+                  ? Object.values(rawFormFields).flatMap((rawFields) =>
+                      rawFields.filter(
+                        (rawField) =>
+                          rawField.editable &&
+                          !rawField.hidden &&
+                          // form field page index start from 0
+                          // while page proxy pageNumber index start from 1
+                          rawField.page === proxy.pageNumber - 1
+                      )
+                    )
+                  : [];
+                rawPages.push({ proxy, fields });
+              } catch (pageError) {
+                console.error(`Failed to load page ${i}:`, pageError);
+              }
+            }
+            setPages(rawPages);
+            setPagesReady(true);
+          } catch (error) {
+            console.error("Failed to load form fields and pages:", error);
+            setPagesReady(true);
           }
-          setPages(rawPages);
-          setPagesReady(true);
         }
       };
       loadFormFieldsAndPages();
@@ -287,44 +344,62 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       (scale: number) => {
         let maxPageActualWidth = 0;
         pages?.forEach((page) => {
-          const viewport = page.proxy.getViewport({ scale });
-          const actualWidth = page.proxy.getViewport({ scale: 1.0 }).width;
-          if (actualWidth > maxPageActualWidth) {
-            maxPageActualWidth = actualWidth;
-          }
-          const sourceCanvas = divRef.current?.querySelector(
-            "canvas#page_canvas_" + page.proxy.pageNumber
-          ) as HTMLCanvasElement;
-          if (sourceCanvas) {
-            const sourceContext = sourceCanvas.getContext("2d");
-            /**
-             * The devicePixelRatio property in JavaScript provides the ratio of physical pixels to CSS pixels on a device.
-             * A value of 2 on your Mac likely means that your display has a high-resolution, also known as a "Retina" display.
-             */
-            const ratio = window.devicePixelRatio || 1;
-            /**
-             * Canvas Sizing: The width and height attributes determine the actual pixel dimensions of the canvas.
-             */
-            sourceCanvas.height = viewport.height * ratio;
-            sourceCanvas.width = viewport.width * ratio;
-            /**
-             * The style.width and style.height properties control the size of the canvas as it is rendered on the page.
-             */
-            sourceCanvas.style.width = viewport.width + "px";
-            sourceCanvas.style.height = viewport.height + "px";
-            /**
-             * for "Retina" display, 2 phsyical pixels equal to 1 CSS pixels
-             */
-            if (sourceContext) {
-              page.proxy.render({
-                canvasContext: sourceContext,
-                canvas: sourceCanvas,
-                viewport: page.proxy.getViewport({
-                  scale: scale * ratio, // draw ratio pixels into Canvas
-                }),
-              });
+          let viewport: ReturnType<typeof page.proxy.getViewport> | null = null;
+          try {
+            viewport = page.proxy.getViewport({ scale });
+            const actualWidth = page.proxy.getViewport({ scale: 1.0 }).width;
+            if (actualWidth > maxPageActualWidth) {
+              maxPageActualWidth = actualWidth;
             }
+            const sourceCanvas = divRef.current?.querySelector(
+              "canvas#page_canvas_" + page.proxy.pageNumber
+            ) as HTMLCanvasElement;
+            if (sourceCanvas) {
+              const sourceContext = sourceCanvas.getContext("2d");
+              /**
+               * The devicePixelRatio property in JavaScript provides the ratio of physical pixels to CSS pixels on a device.
+               * A value of 2 on your Mac likely means that your display has a high-resolution, also known as a "Retina" display.
+               */
+              const ratio = window.devicePixelRatio || 1;
+              /**
+               * Canvas Sizing: The width and height attributes determine the actual pixel dimensions of the canvas.
+               */
+              sourceCanvas.height = viewport.height * ratio;
+              sourceCanvas.width = viewport.width * ratio;
+              /**
+               * The style.width and style.height properties control the size of the canvas as it is rendered on the page.
+               */
+              sourceCanvas.style.width = viewport.width + "px";
+              sourceCanvas.style.height = viewport.height + "px";
+              /**
+               * for "Retina" display, 2 phsyical pixels equal to 1 CSS pixels
+               */
+              if (sourceContext) {
+                try {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  (page.proxy.render as any)({
+                    canvasContext: sourceContext,
+                    viewport: page.proxy.getViewport({
+                      scale: scale * ratio, // draw ratio pixels into Canvas
+                    }),
+                  });
+                } catch (renderError) {
+                  console.error(
+                    `Failed to render page ${page.proxy.pageNumber}:`,
+                    renderError
+                  );
+                }
+              }
+            }
+          } catch (pageError) {
+            console.error(
+              `Error processing page ${page.proxy?.pageNumber || "unknown"}:`,
+              pageError
+            );
           }
+
+          if (!viewport) return; // Skip field positioning if viewport couldn't be calculated
+
           const pageDivContainer = divRef.current?.querySelector(
             "div#page_div_container_" + page.proxy.pageNumber
           ) as HTMLDivElement;
@@ -421,6 +496,74 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       };
     }, [resetViewScale]);
 
+    // Pinch-to-zoom handlers
+    const handlePinchZoom = useCallback(
+      (e: TouchEvent) => {
+        if (e.touches.length !== 2) {
+          isPinching.current = false;
+          return;
+        }
+
+        const touch1 = e.touches[0];
+        const touch2 = e.touches[1];
+        const distance = Math.hypot(
+          touch2.clientX - touch1.clientX,
+          touch2.clientY - touch1.clientY
+        );
+
+        if (!isPinching.current) {
+          isPinching.current = true;
+          lastPinchDistance.current = distance;
+          return;
+        }
+
+        const delta = distance - lastPinchDistance.current;
+        const threshold = 30; // Pixels needed to trigger zoom change
+
+        if (Math.abs(delta) > threshold) {
+          if (delta > 0 && zoomLevel < zoomLevels.length - 1) {
+            setZoomLevel((prev) => Math.min(prev + 1, zoomLevels.length - 1));
+          } else if (delta < 0 && zoomLevel > 0) {
+            setZoomLevel((prev) => Math.max(prev - 1, 0));
+          }
+          lastPinchDistance.current = distance;
+        }
+      },
+      [zoomLevel]
+    );
+
+    const handlePinchEnd = useCallback(() => {
+      isPinching.current = false;
+      lastPinchDistance.current = 0;
+    }, []);
+
+    // Add pinch-to-zoom event listeners
+    useEffect(() => {
+      const container = divRef.current;
+      if (!container) return;
+
+      const handleTouchMove = (e: TouchEvent) => {
+        if (e.touches.length === 2) {
+          e.preventDefault();
+          handlePinchZoom(e);
+        }
+      };
+
+      const handleTouchEnd = () => {
+        handlePinchEnd();
+      };
+
+      container.addEventListener("touchmove", handleTouchMove, {
+        passive: false,
+      });
+      container.addEventListener("touchend", handleTouchEnd);
+
+      return () => {
+        container.removeEventListener("touchmove", handleTouchMove);
+        container.removeEventListener("touchend", handleTouchEnd);
+      };
+    }, [handlePinchZoom, handlePinchEnd]);
+
     const getAllFieldsValue = () => {
       // Get field values from state instead of DOM elements
       if (!pages) return {};
@@ -506,6 +649,74 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         setSelectedField(fieldId);
       },
       []
+    );
+
+    // Handle touch drop for mobile build mode
+    const handleTouchDrop = useCallback(
+      (
+        fieldType: BuildModeFieldType,
+        pageNumber: number,
+        clientX: number,
+        clientY: number
+      ) => {
+        if (mode !== "build") return;
+
+        const pageContainer = document.querySelector(
+          `#page_div_container_${pageNumber}`
+        );
+        if (!pageContainer) return;
+
+        const canvas = pageContainer.querySelector("canvas");
+        if (!canvas) return;
+
+        const canvasRect = canvas.getBoundingClientRect();
+        const scale = zoomLevels[zoomLevel];
+
+        const relativeX = clientX - canvasRect.left;
+        const relativeY = clientY - canvasRect.top;
+
+        // Check if touch is within canvas bounds
+        if (
+          relativeX >= 0 &&
+          relativeY >= 0 &&
+          relativeX <= canvasRect.width &&
+          relativeY <= canvasRect.height
+        ) {
+          const pdfX = relativeX / scale;
+          const pdfY = relativeY / scale;
+          addBuildModeField(fieldType, pdfX, pdfY, pageNumber - 1);
+        }
+      },
+      [mode, zoomLevel, addBuildModeField]
+    );
+
+    // Expose touch drop handler to FieldPalette
+    const handleFieldTouchDrop = useCallback(
+      (fieldType: BuildModeFieldType, clientX: number, clientY: number) => {
+        // Find which page the touch is over
+        const pageContainers = document.querySelectorAll(
+          '[id^="page_div_container_"]'
+        );
+
+        for (const container of pageContainers) {
+          const rect = container.getBoundingClientRect();
+          if (
+            clientX >= rect.left &&
+            clientX <= rect.right &&
+            clientY >= rect.top &&
+            clientY <= rect.bottom
+          ) {
+            const pageNumber = parseInt(
+              container.id.replace("page_div_container_", ""),
+              10
+            );
+            handleTouchDrop(fieldType, pageNumber, clientX, clientY);
+            return true;
+          }
+        }
+        return false;
+      },
+      [handleTouchDrop]
     );
 
     // Initialize build mode fields from existing PDF form fields
@@ -627,9 +838,30 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     );
 
     // Handle field selection with single click for property editor
-    const handleFieldSelect = useCallback((fieldId: string) => {
-      setSelectedField(fieldId);
-    }, []);
+    const handleFieldSelect = useCallback(
+      (fieldId: string) => {
+        setSelectedField(fieldId);
+
+        // Update context toolbar position
+        setTimeout(() => {
+          const fieldElement = document.querySelector(
+            `[data-field-id="${fieldId}"]`
+          );
+          if (fieldElement) {
+            setContextToolbarTarget(fieldElement.getBoundingClientRect());
+          }
+        }, 0);
+
+        // Open properties panel on desktop, bottom sheet on mobile
+        if (isMobile) {
+          setBottomSheetOpen(true);
+          setBottomSheetSnap("partial");
+        } else {
+          openPanel("properties");
+        }
+      },
+      [isMobile, openPanel]
+    );
 
     // Handle field focus from progress panel
     const handleFieldFocus = useCallback((fieldName: string) => {
@@ -661,13 +893,77 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         setTimeout(() => {
           input.focus();
           // Highlight the input briefly
-          input.style.boxShadow = "0 0 0 2px #007bff";
+          input.style.boxShadow = "0 0 0 3px rgba(0, 178, 152, 0.3)";
           setTimeout(() => {
             input.style.boxShadow = "";
           }, 2000);
         }, 300);
       }
     }, []);
+
+    // Handle page navigation from thumbnails
+    const handlePageSelect = useCallback((pageNumber: number) => {
+      setActivePage(pageNumber);
+      const pageContainer = document.querySelector(
+        `#page_div_container_${pageNumber}`
+      );
+      if (pageContainer) {
+        pageContainer.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, []);
+
+    // Handle mode change
+    const handleModeChange = useCallback((newMode: PDFEditorMode) => {
+      // Mode changes would need to be handled by parent component
+      // This is a controlled component, so we just log for now
+      console.log("Mode change requested:", newMode);
+    }, []);
+
+    // Handle field duplication
+    const duplicateField = useCallback(
+      (fieldId: string) => {
+        const field = buildModeFields.find((f) => f.id === fieldId);
+        if (field) {
+          const newField: BuildModeField = {
+            ...field,
+            id: `${field.type}_${Date.now()}`,
+            x: field.x + 20,
+            y: field.y + 20,
+            name: `${field.name}_copy`,
+          };
+          setBuildModeFields((prev) => [...prev, newField]);
+          setSelectedField(newField.id);
+        }
+      },
+      [buildModeFields]
+    );
+
+    // Close selection when clicking on canvas
+    const handleCanvasClick = useCallback(() => {
+      setSelectedField(null);
+      setContextToolbarTarget(null);
+    }, []);
+
+    // Handle FAB field selection (mobile)
+    const handleFABFieldSelect = useCallback(
+      (fieldType: BuildModeFieldType) => {
+        // Add field to center of viewport
+        if (divRef.current && pages && pages.length > 0) {
+          const container = divRef.current;
+          const containerRect = container.getBoundingClientRect();
+          const scale = zoomLevels[zoomLevel];
+
+          // Calculate center position
+          const centerX =
+            (containerRect.width / 2 + container.scrollLeft) / scale;
+          const centerY =
+            (containerRect.height / 2 + container.scrollTop) / scale;
+
+          addBuildModeField(fieldType, centerX, centerY, activePage - 1);
+        }
+      },
+      [pages, zoomLevel, activePage, addBuildModeField]
+    );
 
     const downloadPDF = (data: Blob, fileName: string) => {
       // Create a temporary anchor element
@@ -985,221 +1281,363 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
 
     const progressData = getProgressData();
 
+    // Calculate zoom percentage for display
+    const zoomPercentage = Math.round(zoomLevels[zoomLevel] * 100);
+
+    // Get selected field data for properties panel
+    const selectedFieldData = selectedField
+      ? buildModeFields.find((f) => f.id === selectedField) || null
+      : null;
+
     return (
-      <div className={styles.rootContainer}>
-        {mode === "build" && (
-          <FieldPalette
-            onFieldDragStart={setDraggedFieldType}
-            onFieldDragEnd={() => setDraggedFieldType(null)}
-            selectedField={
-              selectedField
-                ? buildModeFields.find((f) => f.id === selectedField) || null
-                : null
-            }
-            onUpdateField={updateBuildModeField}
-            onCloseEditor={() => setSelectedField(null)}
-            onDeleteField={deleteBuildModeField}
-            participants={participants}
-          />
-        )}
-        {mode === "edit" && (
-          <ProgressPanel
-            activeParticipantId={activeParticipantId}
-            participants={participants}
-            fieldAssignments={
-              extractedFieldAssignments.current || fieldAssignments || undefined
-            }
-            formFields={progressData.formFields}
-            totalFields={progressData.totalFields}
-            completedFields={progressData.completedFields}
-            mode={mode}
-            onFieldFocus={handleFieldFocus}
-          />
-        )}
-        <div className={styles.mainContent}>
-          <div className={styles.toolbarContainer}>
-            <button
-              className={styles.toolbarButton}
-              title="Zoom Out"
-              onClick={() => setZoomLevel(zoomLevel - 1)}
-              disabled={zoomLevel <= 0}
-              type="button"
+      <div
+        className={`${styles.rootContainer} pdf-editor-root`}
+        data-theme={theme}
+      >
+        {/* Header Bar */}
+        <HeaderBar
+          mode={mode}
+          onModeChange={handleModeChange}
+          zoomPercentage={zoomPercentage}
+          onZoomIn={() =>
+            setZoomLevel((prev) => Math.min(prev + 1, zoomLevels.length - 1))
+          }
+          onZoomOut={() => setZoomLevel((prev) => Math.max(prev - 1, 0))}
+          zoomInDisabled={zoomLevel >= zoomLevels.length - 1}
+          zoomOutDisabled={zoomLevel <= 0}
+          onSave={onSaveAs}
+          isSaving={isSaving}
+          currentPage={activePage}
+          totalPages={pages?.length || 0}
+          isMobile={isMobile}
+          onToggleLeftPanel={() => togglePanel("thumbnails")}
+        />
+
+        {/* Main Layout */}
+        <div className={styles.mainLayout}>
+          {/* Left Sidebar - Desktop only */}
+          {!isMobile && (
+            <div
+              className={`${styles.leftSidebar} ${
+                !isPanelOpen("thumbnails") ? styles.collapsed : ""
+              }`}
             >
-              <ZoomOutIcon className={styles.svgIcon} />
-            </button>
-            <button
-              title="Zoom In"
-              className={styles.toolbarButton}
-              onClick={() => setZoomLevel(zoomLevel + 1)}
-              disabled={zoomLevel >= zoomLevels.length - 1}
-              type="button"
+              {/* Field Palette - Build mode only (shown first) */}
+              {mode === "build" && (
+                <div className={styles.sidebarSection}>
+                  <div className={styles.sidebarHeader}>
+                    <span className={styles.sidebarTitle}>Fields</span>
+                  </div>
+                  <div className={styles.sidebarContent}>
+                    <FieldPalette
+                      onFieldDragStart={setDraggedFieldType}
+                      onFieldDragEnd={() => setDraggedFieldType(null)}
+                      onTouchDrop={handleFieldTouchDrop}
+                      selectedField={selectedFieldData}
+                      onCloseEditor={() => setSelectedField(null)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Page Thumbnails */}
+              <div className={styles.sidebarSection}>
+                <div className={styles.sidebarHeader}>
+                  <span className={styles.sidebarTitle}>Pages</span>
+                </div>
+                <div className={styles.sidebarContent}>
+                  {pages && (
+                    <PageThumbnails
+                      pages={pages}
+                      activePage={activePage}
+                      onPageSelect={handlePageSelect}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Canvas Area */}
+          <div className={styles.canvasArea}>
+            <div
+              ref={divRef}
+              className={styles.documentContainer}
+              onClick={handleCanvasClick}
             >
-              <ZoomInIcon className={styles.svgIcon} />
-            </button>
-            {mode !== "view" && (
-              <button
-                title="Save as"
-                className={styles.toolbarButton}
-                onClick={onSaveAs}
-                type="button"
-                disabled={isSaving}
-              >
-                <SaveAsIcon className={styles.svgMediumIcon} />
-              </button>
+              <div className={styles.pageWrapper}>
+                {pages &&
+                  pages.length > 0 &&
+                  pages
+                    .filter((page) => !page.proxy?.destroyed)
+                    .map((page, index) => (
+                      <div
+                        id={"page_div_container_" + page.proxy.pageNumber}
+                        key={"page_" + page.proxy.pageNumber}
+                        className={styles.pageContainer}
+                        onDragOver={
+                          mode === "build" ? handleDragOver : undefined
+                        }
+                        onDrop={
+                          mode === "build"
+                            ? (e) => handleDrop(e, page.proxy.pageNumber)
+                            : undefined
+                        }
+                      >
+                        <canvas
+                          id={"page_canvas_" + page.proxy.pageNumber}
+                          className={styles.pageCanvas}
+                        />
+
+                        {/* Page Number Badge */}
+                        <div className={styles.pageNumber}>{index + 1}</div>
+
+                        {/* Existing form fields (hidden in build mode) */}
+                        {mode !== "build" &&
+                          page.fields &&
+                          page.fields.map((field) => {
+                            const scale = zoomLevels[zoomLevel];
+                            const vp = page.proxy.getViewport({ scale });
+                            const rectScaled = field.rect.map((x) => x * scale);
+                            const style: React.CSSProperties = {
+                              left: rectScaled[0],
+                              top: vp.height - rectScaled[3],
+                              width: rectScaled[2] - rectScaled[0],
+                              height: rectScaled[3] - rectScaled[1],
+                            };
+                            if (field.type === "combobox")
+                              return (
+                                <select
+                                  name={field.name}
+                                  title={field.name}
+                                  key={field.id}
+                                  data-field-id={field.id}
+                                  value={field.value || field.defaultValue}
+                                  className={styles.pdfSelect}
+                                  style={style}
+                                  disabled={mode === "view"}
+                                  onChange={(e) => {
+                                    if (mode !== "view") {
+                                      setPages((prevPages) =>
+                                        prevPages?.map((page) => ({
+                                          ...page,
+                                          fields: page.fields?.map((f) =>
+                                            f.id === field.id
+                                              ? { ...f, value: e.target.value }
+                                              : f
+                                          ),
+                                        }))
+                                      );
+                                    }
+                                  }}
+                                >
+                                  {field.items?.map((item) => (
+                                    <option
+                                      key={item.exportValue}
+                                      value={item.exportValue}
+                                    >
+                                      {item.displayValue}
+                                    </option>
+                                  ))}
+                                </select>
+                              );
+                            return (
+                              <input
+                                type={field.type}
+                                {...(field.type === "checkbox"
+                                  ? {
+                                      checked:
+                                        (field.value || field.defaultValue) ===
+                                        "On",
+                                    }
+                                  : {
+                                      value: field.value || field.defaultValue,
+                                    })}
+                                name={field.name}
+                                key={field.id}
+                                data-field-id={field.id}
+                                className={styles.pdfInput}
+                                style={style}
+                                readOnly={mode === "view"}
+                                onChange={(e) => {
+                                  if (mode !== "view") {
+                                    const target = e.target as HTMLInputElement;
+                                    let newValue: string;
+
+                                    if (field.type === "checkbox") {
+                                      newValue = target.checked ? "On" : "Off";
+                                      if (target.checked) {
+                                        const sameNameCheckboxes =
+                                          document.querySelectorAll(
+                                            `input[type="checkbox"][name="${field.name}"]`
+                                          ) as NodeListOf<HTMLInputElement>;
+                                        sameNameCheckboxes.forEach((cb) => {
+                                          if (cb !== target) {
+                                            cb.checked = false;
+                                          }
+                                        });
+                                      }
+                                    } else {
+                                      newValue = target.value;
+                                    }
+
+                                    setPages((prevPages) =>
+                                      prevPages?.map((page) => ({
+                                        ...page,
+                                        fields: page.fields?.map((f) =>
+                                          f.id === field.id
+                                            ? { ...f, value: newValue }
+                                            : f
+                                        ),
+                                      }))
+                                    );
+                                  }
+                                }}
+                              />
+                            );
+                          })}
+
+                        {/* Build mode fields */}
+                        {mode === "build" &&
+                          buildModeFields
+                            .filter(
+                              (field) =>
+                                field.page === page.proxy.pageNumber - 1
+                            )
+                            .map((field) => (
+                              <BuildModeFieldRenderer
+                                key={field.id}
+                                field={field}
+                                scale={zoomLevels[zoomLevel]}
+                                isSelected={selectedField === field.id}
+                                onSelect={handleFieldSelect}
+                                onDelete={deleteBuildModeField}
+                                onMove={moveBuildModeField}
+                                onResize={resizeBuildModeField}
+                              />
+                            ))}
+                      </div>
+                    ))}
+              </div>
+            </div>
+
+            {/* Context Toolbar - Desktop */}
+            {!isMobile && mode === "build" && selectedField && (
+              <ContextToolbar
+                targetRect={contextToolbarTarget}
+                containerRef={divRef}
+                isVisible={!!selectedField}
+                onDelete={() => deleteBuildModeField(selectedField)}
+                onDuplicate={() => duplicateField(selectedField)}
+              />
             )}
           </div>
-          <div ref={divRef} className={styles.pdfContainer}>
-            {pages &&
-              pages.length > 0 &&
-              pages
-                .filter((page) => !page.proxy?.destroyed)
-                .map((page) => (
-                  <div
-                    id={"page_div_container_" + page.proxy.pageNumber}
-                    key={"page_" + page.proxy.pageNumber}
-                    className={styles.pdfPageContainer}
-                    onDragOver={mode === "build" ? handleDragOver : undefined}
-                    onDrop={
-                      mode === "build"
-                        ? (e) => handleDrop(e, page.proxy.pageNumber)
-                        : undefined
-                    }
-                    onClick={
-                      mode === "build"
-                        ? () => setSelectedField(null)
-                        : undefined
-                    }
-                  >
-                    <canvas id={"page_canvas_" + page.proxy.pageNumber} />
 
-                    {/* Existing form fields (hidden in build mode) */}
-                    {mode !== "build" &&
-                      page.fields &&
-                      page.fields.map((field) => {
-                        const scale = zoomLevels[zoomLevel];
-                        const vp = page.proxy.getViewport({ scale });
-                        const rectScaled = field.rect.map((x) => x * scale);
-                        const style: React.CSSProperties = {
-                          left: rectScaled[0],
-                          top: vp.height - rectScaled[3],
-                          width: rectScaled[2] - rectScaled[0],
-                          height: rectScaled[3] - rectScaled[1],
-                        };
-                        if (field.type === "combobox")
-                          return (
-                            <select
-                              name={field.name}
-                              title={field.name}
-                              key={field.id}
-                              data-field-id={field.id}
-                              value={field.value || field.defaultValue}
-                              className={styles.pdfSelect}
-                              style={style}
-                              disabled={mode === "view"}
-                              onChange={(e) => {
-                                // Update the field value in the pages state
-                                if (mode !== "view") {
-                                  setPages((prevPages) =>
-                                    prevPages?.map((page) => ({
-                                      ...page,
-                                      fields: page.fields?.map((f) =>
-                                        f.id === field.id
-                                          ? { ...f, value: e.target.value }
-                                          : f
-                                      ),
-                                    }))
-                                  );
-                                }
-                              }}
-                            >
-                              {field.items?.map((item) => (
-                                <option
-                                  key={item.exportValue}
-                                  value={item.exportValue}
-                                >
-                                  {item.displayValue}
-                                </option>
-                              ))}
-                            </select>
-                          );
-                        return (
-                          <input
-                            type={field.type}
-                            {...(field.type === "checkbox"
-                              ? {
-                                  checked:
-                                    (field.value || field.defaultValue) ===
-                                    "On",
-                                }
-                              : { value: field.value || field.defaultValue })}
-                            name={field.name}
-                            key={field.id}
-                            data-field-id={field.id}
-                            className={styles.pdfInput}
-                            style={style}
-                            readOnly={mode === "view"}
-                            onChange={(e) => {
-                              if (mode !== "view") {
-                                const target = e.target as HTMLInputElement;
-                                let newValue: string;
-
-                                if (field.type === "checkbox") {
-                                  newValue = target.checked ? "On" : "Off";
-                                  // For radio-like behavior, uncheck other checkboxes with same name
-                                  if (target.checked) {
-                                    const sameNameCheckboxes =
-                                      document.querySelectorAll(
-                                        `input[type="checkbox"][name="${field.name}"]`
-                                      ) as NodeListOf<HTMLInputElement>;
-                                    sameNameCheckboxes.forEach((cb) => {
-                                      if (cb !== target) {
-                                        cb.checked = false;
-                                      }
-                                    });
-                                  }
-                                } else {
-                                  newValue = target.value;
-                                }
-
-                                // Update the field value in the pages state
-                                setPages((prevPages) =>
-                                  prevPages?.map((page) => ({
-                                    ...page,
-                                    fields: page.fields?.map((f) =>
-                                      f.id === field.id
-                                        ? { ...f, value: newValue }
-                                        : f
-                                    ),
-                                  }))
-                                );
-                              }
-                            }}
-                          />
-                        );
-                      })}
-
-                    {/* Build mode fields */}
-                    {mode === "build" &&
-                      buildModeFields
-                        .filter(
-                          (field) => field.page === page.proxy.pageNumber - 1
-                        )
-                        .map((field) => (
-                          <BuildModeFieldRenderer
-                            key={field.id}
-                            field={field}
-                            scale={zoomLevels[zoomLevel]}
-                            isSelected={selectedField === field.id}
-                            onSelect={handleFieldSelect}
-                            onDelete={deleteBuildModeField}
-                            onMove={moveBuildModeField}
-                            onResize={resizeBuildModeField}
-                          />
-                        ))}
+          {/* Right Sidebar - Desktop only */}
+          {!isMobile && (
+            <div
+              className={`${styles.rightSidebar} ${
+                !isPanelOpen("properties") && !isPanelOpen("progress")
+                  ? styles.collapsed
+                  : ""
+              }`}
+            >
+              {/* Properties Panel - Build mode */}
+              {mode === "build" && isPanelOpen("properties") && (
+                <div className={styles.sidebarSection}>
+                  <div className={styles.sidebarHeader}>
+                    <span className={styles.sidebarTitle}>Properties</span>
                   </div>
-                ))}
-          </div>
+                  <div className={styles.sidebarContent}>
+                    <PropertiesPanel
+                      selectedField={selectedFieldData}
+                      onUpdateField={updateBuildModeField}
+                      onDeleteField={deleteBuildModeField}
+                      onClose={() => closePanel("properties")}
+                      participants={participants}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Progress Panel - Edit mode */}
+              {mode === "edit" && (
+                <div className={styles.sidebarSection}>
+                  <div className={styles.sidebarHeader}>
+                    <span className={styles.sidebarTitle}>Progress</span>
+                  </div>
+                  <div className={styles.sidebarContent}>
+                    <ProgressPanel
+                      activeParticipantId={activeParticipantId}
+                      participants={participants}
+                      fieldAssignments={
+                        extractedFieldAssignments.current ||
+                        fieldAssignments ||
+                        undefined
+                      }
+                      formFields={progressData.formFields}
+                      totalFields={progressData.totalFields}
+                      completedFields={progressData.completedFields}
+                      mode={mode}
+                      onFieldFocus={handleFieldFocus}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
+
+        {/* Mobile Page Indicator */}
+        {isMobile && pages && pages.length > 1 && (
+          <div className={styles.pageIndicator}>
+            {activePage} / {pages.length}
+          </div>
+        )}
+
+        {/* Mobile Bottom Sheet */}
+        {isMobile && (
+          <BottomSheet
+            isOpen={bottomSheetOpen}
+            onClose={() => setBottomSheetOpen(false)}
+            snapPoint={bottomSheetSnap}
+            onSnapChange={setBottomSheetSnap}
+            title={mode === "build" ? "Properties" : "Progress"}
+          >
+            {mode === "build" ? (
+              <PropertiesPanel
+                selectedField={selectedFieldData}
+                onUpdateField={updateBuildModeField}
+                onDeleteField={deleteBuildModeField}
+                onClose={() => setBottomSheetOpen(false)}
+                participants={participants}
+              />
+            ) : (
+              <ProgressPanel
+                activeParticipantId={activeParticipantId}
+                participants={participants}
+                fieldAssignments={
+                  extractedFieldAssignments.current ||
+                  fieldAssignments ||
+                  undefined
+                }
+                formFields={progressData.formFields}
+                totalFields={progressData.totalFields}
+                completedFields={progressData.completedFields}
+                mode={mode}
+                onFieldFocus={handleFieldFocus}
+              />
+            )}
+          </BottomSheet>
+        )}
+
+        {/* Mobile FAB - Build mode only */}
+        {isMobile && mode === "build" && (
+          <FloatingActionButton
+            onFieldSelect={handleFABFieldSelect}
+            bottomOffset={bottomSheetOpen ? 100 : 24}
+          />
+        )}
       </div>
     );
   }

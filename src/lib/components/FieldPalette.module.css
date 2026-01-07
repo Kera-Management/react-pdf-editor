@@ -1,125 +1,525 @@
+/* ==========================================================================
+   Field Palette Component
+   PandaDoc-Inspired Modern Design
+   ========================================================================== */
+
+/* ==========================================================================
+   Desktop Sidebar Layout
+   ========================================================================== */
 .palette {
-  width: 250px;
-  height: 100vh;
-  background: white;
-  border: 1px solid #e0e0e0;
-  padding: 16px;
-  box-sizing: border-box;
-  overflow-y: auto;
-  overflow-x: hidden;
-  border-radius: 10px;
-  margin-right: 20px;
-  position: sticky;
-  top: 0;
+  display: flex;
+  flex-direction: column;
+  width: var(--sidebar-width, 280px);
+  height: 100%;
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e7e5e4);
+  border-radius: var(--radius-xl, 16px);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition: var(--transition-all, all 200ms ease);
 }
 
+/* ==========================================================================
+   Header
+   ========================================================================== */
 .header {
-  margin-bottom: 20px;
+  padding: var(--space-5, 20px);
+  border-bottom: 1px solid var(--color-border-light, #f5f5f4);
+  background: linear-gradient(to bottom, var(--color-surface, #ffffff), var(--color-gray-50, #fafaf9));
 }
 
 .header h3 {
-  margin: 0 0 8px 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #333;
+  margin: 0 0 var(--space-1, 4px) 0;
+  font-size: var(--text-lg, 18px);
+  font-weight: var(--font-semibold, 600);
+  color: var(--color-text-primary, #1c1917);
+  line-height: var(--leading-tight, 1.25);
 }
 
 .header p {
   margin: 0;
-  font-size: 12px;
-  color: #666;
+  font-size: var(--text-sm, 14px);
+  color: var(--color-text-tertiary, #78716c);
+  line-height: var(--leading-normal, 1.5);
 }
 
+/* ==========================================================================
+   Field Grid - Desktop
+   ========================================================================== */
 .fieldGrid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-3, 12px);
+  padding: var(--space-4, 16px);
+  overflow-y: auto;
 }
 
+/* Custom scrollbar */
+.fieldGrid::-webkit-scrollbar {
+  width: 6px;
+}
+
+.fieldGrid::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.fieldGrid::-webkit-scrollbar-thumb {
+  background: var(--color-gray-300, #d6d3d1);
+  border-radius: var(--radius-full);
+}
+
+/* ==========================================================================
+   Field Item Cards
+   ========================================================================== */
 .fieldItem {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 12px 8px;
-  background: white;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  gap: var(--space-2, 8px);
+  padding: var(--space-4, 16px) var(--space-3, 12px);
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e7e5e4);
+  border-radius: var(--radius-lg, 12px);
   cursor: grab;
-  transition: all 0.2s ease;
+  transition: var(--transition-all);
   user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .fieldItem:hover {
-  border-color: #007bff;
-  box-shadow: 0 2px 8px rgba(0, 123, 255, 0.15);
-  transform: translateY(-1px);
+  border-color: var(--color-primary-400, #26bea9);
+  background: var(--color-primary-50, #e6f7f5);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
 }
 
 .fieldItem:active {
   cursor: grabbing;
+  transform: scale(0.98);
 }
 
 .fieldIcon {
-  font-size: 24px;
-  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  background: linear-gradient(135deg, var(--color-gray-100, #f5f5f4), var(--color-gray-50, #fafaf9));
+  border-radius: var(--radius-lg, 12px);
+  color: var(--color-text-secondary, #57534e);
+  font-size: 22px;
+  transition: var(--transition-all);
+}
+
+.fieldItem:hover .fieldIcon {
+  background: linear-gradient(135deg, var(--color-primary-500, #00b298), var(--color-primary-600, #00a18a));
+  color: var(--color-text-inverse, #ffffff);
+  box-shadow: var(--shadow-primary);
 }
 
 .fieldLabel {
-  font-size: 11px;
+  font-size: var(--text-xs, 12px);
+  font-weight: var(--font-medium, 500);
   text-align: center;
-  color: #555;
-  font-weight: 500;
-  line-height: 1.2;
+  color: var(--color-text-secondary, #57534e);
+  line-height: var(--leading-tight, 1.25);
 }
 
-/* Editor view */
+.fieldItem:hover .fieldLabel {
+  color: var(--color-primary-700, #008d78);
+}
+
+/* ==========================================================================
+   Property Editor View
+   ========================================================================== */
 .editorContent {
-  display: grid;
-  gap: 12px;
-  width: 100%;
-  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 16px);
+  padding: var(--space-4, 16px);
+  overflow-y: auto;
+  flex: 1;
 }
 
+.editorContent::-webkit-scrollbar {
+  width: 6px;
+}
+
+.editorContent::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.editorContent::-webkit-scrollbar-thumb {
+  background: var(--color-gray-300, #d6d3d1);
+  border-radius: var(--radius-full);
+}
+
+/* Form Groups */
 .row2 {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-2, 8px);
 }
 
 .row3 {
   display: grid;
   grid-template-columns: 1fr 1fr auto;
-  gap: 8px;
+  gap: var(--space-2, 8px);
+  align-items: end;
 }
 
+/* Labels */
 .label {
-  display: grid;
-  gap: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, 4px);
 }
 
+.label span {
+  font-size: var(--text-xs, 12px);
+  font-weight: var(--font-medium, 500);
+  color: var(--color-text-secondary, #57534e);
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+/* Inputs */
 .input {
   width: 100%;
+  height: var(--input-height, 40px);
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e7e5e4);
+  border-radius: var(--radius-md, 8px);
+  font-family: inherit;
+  font-size: var(--text-sm, 14px);
+  color: var(--color-text-primary, #1c1917);
+  transition: var(--transition-all);
   box-sizing: border-box;
-  border: 1px solid #E8E7E4;
-  border-radius: 4px;
-  padding: 8px;
-  font-size: 14px;
-  transition: all 0.2s ease;
 }
 
+.input:hover {
+  border-color: var(--color-gray-400, #a8a29e);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-primary-500, #00b298);
+  box-shadow: 0 0 0 3px rgba(0, 178, 152, 0.15);
+}
+
+.input::placeholder {
+  color: var(--color-text-tertiary, #78716c);
+}
+
+/* Select dropdown */
+select.input {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2378716c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: var(--space-8, 32px);
+  cursor: pointer;
+}
+
+/* Checkbox in form */
+.checkboxRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3, 12px);
+  padding: var(--space-3, 12px);
+  background: var(--color-gray-50, #fafaf9);
+  border-radius: var(--radius-md, 8px);
+  cursor: pointer;
+  transition: var(--transition-colors);
+}
+
+.checkboxRow:hover {
+  background: var(--color-gray-100, #f5f5f4);
+}
+
+.checkboxRow input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  background: var(--color-surface, #ffffff);
+  border: 2px solid var(--color-border, #e7e5e4);
+  border-radius: var(--radius-sm, 4px);
+  cursor: pointer;
+  transition: var(--transition-all);
+  flex-shrink: 0;
+}
+
+.checkboxRow input[type="checkbox"]:checked {
+  background: var(--color-primary-500, #00b298);
+  border-color: var(--color-primary-500, #00b298);
+}
+
+.checkboxRow input[type="checkbox"]:checked::after {
+  content: "";
+  display: block;
+  width: 5px;
+  height: 9px;
+  margin: 2px auto;
+  border: solid var(--color-text-inverse, #ffffff);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.checkboxRow span {
+  font-size: var(--text-sm, 14px);
+  color: var(--color-text-primary, #1c1917);
+}
+
+/* ==========================================================================
+   Action Buttons
+   ========================================================================== */
 .actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2, 8px);
   justify-content: space-between;
+  padding-top: var(--space-3, 12px);
+  border-top: 1px solid var(--color-border-light, #f5f5f4);
+  margin-top: auto;
 }
 
-/* Responsive design for smaller palettes */
-@media (max-width: 300px) {
+.actions button {
+  flex: 1;
+  height: var(--input-height, 40px);
+  padding: var(--space-2, 8px) var(--space-4, 16px);
+  background: var(--color-gray-100, #f5f5f4);
+  border: none;
+  border-radius: var(--radius-md, 8px);
+  font-family: inherit;
+  font-size: var(--text-sm, 14px);
+  font-weight: var(--font-medium, 500);
+  color: var(--color-text-secondary, #57534e);
+  cursor: pointer;
+  transition: var(--transition-all);
+}
+
+.actions button:hover {
+  background: var(--color-gray-200, #e7e5e4);
+  color: var(--color-text-primary, #1c1917);
+}
+
+.actions button:active {
+  transform: scale(0.98);
+}
+
+/* Delete button */
+.deleteButton {
+  background: var(--color-error-50, #fff1f2) !important;
+  color: var(--color-error-600, #e11d48) !important;
+}
+
+.deleteButton:hover {
+  background: var(--color-error-100, #ffe4e6) !important;
+  color: var(--color-error-700, #be123c) !important;
+}
+
+/* Add option button */
+.addButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1, 4px);
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  background: var(--color-primary-50, #e6f7f5);
+  color: var(--color-primary-600, #00a18a);
+  font-size: var(--text-sm, 14px);
+  font-weight: var(--font-medium, 500);
+  border: 1px dashed var(--color-primary-300, #4dcab9);
+  border-radius: var(--radius-md, 8px);
+  cursor: pointer;
+  transition: var(--transition-all);
+}
+
+.addButton:hover {
+  background: var(--color-primary-100, #b3e8e1);
+  border-style: solid;
+}
+
+/* Remove option button */
+.removeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--input-height, 40px);
+  height: var(--input-height, 40px);
+  padding: 0;
+  background: var(--color-gray-100, #f5f5f4);
+  border: none;
+  border-radius: var(--radius-md, 8px);
+  color: var(--color-text-tertiary, #78716c);
+  cursor: pointer;
+  transition: var(--transition-all);
+  flex-shrink: 0;
+}
+
+.removeButton:hover {
+  background: var(--color-error-100, #ffe4e6);
+  color: var(--color-error-600, #e11d48);
+}
+
+/* ==========================================================================
+   Section Headers
+   ========================================================================== */
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2, 8px);
+}
+
+.sectionHeader span {
+  font-size: var(--text-xs, 12px);
+  font-weight: var(--font-semibold, 600);
+  color: var(--color-text-secondary, #57534e);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ==========================================================================
+   Mobile Bottom Sheet
+   ========================================================================== */
+@media (max-width: 767px) {
+  .palette {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: auto;
+    max-height: 85vh;
+    border-radius: var(--radius-2xl, 24px) var(--radius-2xl, 24px) 0 0;
+    border: none;
+    box-shadow: var(--shadow-2xl);
+    z-index: var(--z-drawer, 500);
+    transform: translateY(calc(100% - 56px));
+    transition: transform 300ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .palette.open {
+    transform: translateY(0);
+  }
+
+  /* Drag handle for mobile */
+  .dragHandle {
+    display: flex;
+    justify-content: center;
+    padding: var(--space-3, 12px) 0;
+    cursor: grab;
+  }
+
+  .dragHandle:active {
+    cursor: grabbing;
+  }
+
+  .dragBar {
+    width: 40px;
+    height: 4px;
+    background: var(--color-gray-300, #d6d3d1);
+    border-radius: var(--radius-full);
+  }
+
+  .header {
+    padding: 0 var(--space-5, 20px) var(--space-4, 16px);
+  }
+
+  /* Horizontal scrolling field list on mobile */
+  .fieldGrid {
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: var(--space-3, 12px);
+    padding: var(--space-3, 12px) var(--space-5, 20px);
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .fieldGrid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .fieldItem {
+    flex-shrink: 0;
+    width: 100px;
+    padding: var(--space-3, 12px);
+    scroll-snap-align: start;
+  }
+
+  .fieldIcon {
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+  }
+
+  /* Editor content on mobile */
+  .editorContent {
+    padding: var(--space-4, 16px) var(--space-5, 20px);
+    padding-bottom: calc(var(--space-4, 16px) + env(safe-area-inset-bottom, 0px));
+  }
+
+  .input {
+    height: var(--input-height-mobile, 48px);
+    font-size: 16px; /* Prevents iOS zoom */
+  }
+
+  .row2 {
+    grid-template-columns: 1fr;
+  }
+
+  .actions button {
+    height: var(--input-height-mobile, 48px);
+  }
+}
+
+/* Hide drag handle on desktop */
+@media (min-width: 768px) {
+  .dragHandle {
+    display: none;
+  }
+}
+
+/* ==========================================================================
+   Tablet Adjustments
+   ========================================================================== */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .palette {
+    width: 260px;
+  }
+
   .fieldGrid {
     grid-template-columns: 1fr;
   }
-  
+
+  .fieldItem {
+    flex-direction: row;
+    justify-content: flex-start;
+    padding: var(--space-3, 12px);
+    gap: var(--space-3, 12px);
+  }
+
+  .fieldIcon {
+    width: 36px;
+    height: 36px;
+    font-size: 18px;
+  }
+
+  .fieldLabel {
+    text-align: left;
+  }
+}
+
+/* ==========================================================================
+   Large Desktop
+   ========================================================================== */
+@media (min-width: 1280px) {
   .palette {
-    width: 200px;
+    width: 300px;
   }
 }

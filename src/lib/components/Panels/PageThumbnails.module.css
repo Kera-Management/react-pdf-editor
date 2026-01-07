@@ -1,0 +1,162 @@
+/* ==========================================================================
+   PageThumbnails - Page navigation sidebar
+   ========================================================================== */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--thumbnail-gap);
+  padding: var(--space-2);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Custom scrollbar */
+.list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.list::-webkit-scrollbar-thumb {
+  background: var(--color-gray-700);
+  border-radius: var(--radius-full);
+}
+
+/* ==========================================================================
+   Thumbnail Item
+   ========================================================================== */
+
+.thumbnail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: 
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.thumbnail:hover {
+  background: var(--bg-surface-hover);
+}
+
+.thumbnail:active {
+  transform: scale(0.98);
+}
+
+.thumbnail.active {
+  background: var(--accent-primary-subtle);
+  border-color: var(--accent-primary);
+}
+
+/* ==========================================================================
+   Canvas Wrapper
+   ========================================================================== */
+
+.canvasWrapper {
+  position: relative;
+  background: var(--doc-bg);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition: box-shadow var(--transition-fast);
+}
+
+.thumbnail:hover .canvasWrapper {
+  box-shadow: var(--shadow-md);
+}
+
+.thumbnail.active .canvasWrapper {
+  box-shadow: 0 0 0 2px var(--accent-primary);
+}
+
+.canvas {
+  display: block;
+  width: var(--thumbnail-width);
+  height: auto;
+}
+
+/* ==========================================================================
+   Page Number
+   ========================================================================== */
+
+.pageNumber {
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  color: var(--text-secondary);
+  transition: color var(--transition-fast);
+}
+
+.thumbnail:hover .pageNumber {
+  color: var(--text-primary);
+}
+
+.thumbnail.active .pageNumber {
+  color: var(--accent-primary);
+}
+
+/* ==========================================================================
+   Loading State
+   ========================================================================== */
+
+.thumbnail.loading .canvasWrapper::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    var(--color-gray-800) 25%,
+    var(--color-gray-700) 50%,
+    var(--color-gray-800) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+
+@media (max-width: 640px) {
+  .list {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: var(--space-3);
+    gap: var(--space-3);
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .thumbnail {
+    flex-shrink: 0;
+    scroll-snap-align: center;
+  }
+
+  .canvas {
+    width: 60px;
+  }
+}
+
+

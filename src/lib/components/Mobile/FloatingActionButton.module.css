@@ -1,0 +1,174 @@
+/* ==========================================================================
+   FloatingActionButton - Mobile field addition FAB
+   ========================================================================== */
+
+.container {
+  position: fixed;
+  right: var(--space-4);
+  z-index: var(--z-sticky);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+/* ==========================================================================
+   Backdrop
+   ========================================================================== */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: -1;
+  animation: fadeIn var(--duration-fast) var(--ease-out);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ==========================================================================
+   Main FAB
+   ========================================================================== */
+
+.fab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--fab-size);
+  height: var(--fab-size);
+  padding: 0;
+  background: var(--fab-bg);
+  border: none;
+  border-radius: var(--radius-full);
+  box-shadow: var(--fab-shadow);
+  color: var(--text-on-accent);
+  cursor: pointer;
+  transition: 
+    transform var(--duration-normal) var(--ease-spring),
+    background var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.fab:hover {
+  background: var(--accent-primary-hover);
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.5);
+}
+
+.fab:active {
+  transform: scale(0.95);
+}
+
+.fab.active {
+  background: var(--color-gray-700);
+  box-shadow: var(--shadow-lg);
+}
+
+.fabIcon {
+  transition: transform var(--duration-normal) var(--ease-spring);
+}
+
+.fab.active .fabIcon {
+  transform: rotate(45deg);
+}
+
+/* ==========================================================================
+   Speed Dial Menu
+   ========================================================================== */
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+  pointer-events: none;
+}
+
+.menu.expanded {
+  pointer-events: auto;
+}
+
+/* ==========================================================================
+   Menu Item
+   ========================================================================== */
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--panel-bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(10px) scale(0.9);
+  transition: 
+    opacity var(--duration-normal) var(--ease-out),
+    transform var(--duration-normal) var(--ease-spring),
+    background var(--transition-fast);
+}
+
+.menu.expanded .menuItem {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.menuItem:hover {
+  background: var(--bg-surface-hover);
+}
+
+.menuItem:active {
+  transform: scale(0.98);
+}
+
+.menuIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: var(--accent-primary-subtle);
+  border-radius: var(--radius-full);
+  color: var(--accent-primary);
+}
+
+.menuLabel {
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   Safe Area
+   ========================================================================== */
+
+@supports (bottom: env(safe-area-inset-bottom)) {
+  .container {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* ==========================================================================
+   Animations
+   ========================================================================== */
+
+@keyframes fabPulse {
+  0%, 100% {
+    box-shadow: var(--fab-shadow);
+  }
+  50% {
+    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.6);
+  }
+}
+
+/* Hint animation for first-time users */
+.fab[data-hint="true"] {
+  animation: fabPulse 2s ease-in-out infinite;
+}
+
+

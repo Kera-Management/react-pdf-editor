@@ -1,128 +1,578 @@
+/* ==========================================================================
+   PDFEditor - Figma-style Canvas Layout
+   ========================================================================== */
+
+/* ==========================================================================
+   Root Container
+   ========================================================================== */
+
 .rootContainer {
-    position: relative;
-    display: flex;
-    width: 100%;
-    height: 100vh;
-    flex-direction: row;
-    overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100vh;
+  max-height: 100vh;
+  background: var(--canvas-bg);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  overflow: hidden;
 }
 
-.mainContent {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    overflow: hidden;
-    border: 1px solid #e0e0e0;
-    border-radius: 10px;
+/* ==========================================================================
+   Main Layout
+   ========================================================================== */
+
+.mainLayout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
 }
 
-.toolbarContainer {
-    --tw-bg-opacity: 1;
-    background-color: white;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    height: 2.5rem;
-    display: flex;
-    top: 0px;
-    position: sticky;
+/* ==========================================================================
+   Left Sidebar
+   ========================================================================== */
+
+.leftSidebar {
+  display: flex;
+  flex-direction: column;
+  width: var(--panel-width);
+  background: var(--panel-bg);
+  border-right: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  z-index: var(--z-panel);
+  transition: width var(--duration-normal) var(--ease-out);
+  overflow: hidden;
 }
 
-.toolbarButton {
-    padding-left: 0px;
-    padding-right: 0px;
-    --tw-bg-opacity: 1;
-    border-width: 0px;
-    justify-content: center;
-    align-items: center;
-    width: 2.25rem;
-    height: 2rem;
-    display: flex;
-    margin-top: 0.5rem;
-    margin-bottom: 0.5rem;
+.leftSidebar.collapsed {
+  width: 0;
+  border-right: none;
+  overflow: hidden;
 }
 
-.toolbarButton:hover {
-    background-color: #dddddd;
+.sidebarSection {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.svgIcon {
-    cursor: pointer;
-    width: 1rem;
-    height: 1rem;
-    display: block;
+.sidebarSection:not(:last-child) {
+  border-bottom: 1px solid var(--border-subtle);
 }
 
-.svgMediumIcon {
-    cursor: pointer;
-    width: 1.25rem;
-    height: 1.25rem;
-    display: block;
+.sidebarHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3);
+  background: var(--panel-bg-elevated);
 }
 
-.pdfContainer {
-    padding-top: 0.5rem;
-    padding-bottom: 0.5rem;
-    padding-left: 1rem;
-    padding-right: 1rem;
-    --tw-bg-opacity: 1;
-    background-color: rgb(230 230 230 / var(--tw-bg-opacity));
-    overflow-y: auto;
-    overflow-x: hidden;
-    align-items: center;
-    flex-direction: column;
-    display: flex;
-    flex: 1;
+.sidebarTitle {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
 }
 
-.pdfPageContainer {
-    position: relative;
-    margin-bottom: 1rem;
-    background: white;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+.sidebarContent {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
-.pdfPageContainer canvas {
-    z-index: 1;
+/* ==========================================================================
+   Canvas Area
+   ========================================================================== */
+
+.canvasArea {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  background: var(--canvas-bg-secondary);
 }
 
-.pdfSelect {
-    --tw-bg-opacity: 1;
-    background-color: rgb(242 244 254 / var(--tw-bg-opacity));
-    border-top-width: 0px;
-    border-bottom-width: 1px;
-    border-left-width: 0px;
-    border-right-width: 0px;
-    box-sizing: border-box;
-    position: absolute;
-    font-size: 75%;
-    padding: 0;
-    padding-block: 0;
-    padding-inline: 0;
-    margin: 0 0;
-    z-index: 10;
+/* Canvas Grid Pattern */
+.canvasArea::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: 
+    linear-gradient(var(--canvas-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--canvas-grid) 1px, transparent 1px);
+  background-size: 20px 20px;
+  pointer-events: none;
+  opacity: 0.5;
 }
 
-.pdfSelect:focus {
-    background-color: white;
+/* ==========================================================================
+   Document Container
+   ========================================================================== */
+
+.documentContainer {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  -webkit-overflow-scrolling: touch;
 }
+
+/* Custom scrollbar */
+.documentContainer::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.documentContainer::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.documentContainer::-webkit-scrollbar-thumb {
+  background: var(--color-gray-700);
+  border-radius: var(--radius-full);
+  border: 3px solid var(--canvas-bg-secondary);
+}
+
+.documentContainer::-webkit-scrollbar-thumb:hover {
+  background: var(--color-gray-600);
+}
+
+.documentContainer::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ==========================================================================
+   Page Container
+   ========================================================================== */
+
+.pageWrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--doc-page-gap);
+}
+
+.pageContainer {
+  position: relative;
+  background: var(--doc-bg);
+  border-radius: var(--doc-border-radius);
+  box-shadow: var(--doc-shadow);
+  overflow: hidden;
+  transition: box-shadow var(--transition-fast);
+}
+
+.pageContainer:hover {
+  box-shadow: 
+    var(--doc-shadow),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.pageCanvas {
+  display: block;
+}
+
+/* Page Number Badge */
+.pageNumber {
+  position: absolute;
+  bottom: var(--space-3);
+  right: var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  color: white;
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.pageContainer:hover .pageNumber {
+  opacity: 1;
+}
+
+/* ==========================================================================
+   Right Sidebar
+   ========================================================================== */
+
+.rightSidebar {
+  display: flex;
+  flex-direction: column;
+  width: var(--panel-width);
+  background: var(--panel-bg);
+  border-left: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  z-index: var(--z-panel);
+  transition: width var(--duration-normal) var(--ease-out);
+  overflow: hidden;
+}
+
+.rightSidebar.collapsed {
+  width: 0;
+  border-left: none;
+  overflow: hidden;
+}
+
+/* ==========================================================================
+   Floating Panels Container
+   ========================================================================== */
+
+.floatingPanelsLeft {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  z-index: var(--z-panel);
+  max-height: calc(100% - var(--space-6));
+  pointer-events: none;
+}
+
+.floatingPanelsLeft > * {
+  pointer-events: auto;
+}
+
+.floatingPanelsRight {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  z-index: var(--z-panel);
+  max-height: calc(100% - var(--space-6));
+  pointer-events: none;
+}
+
+.floatingPanelsRight > * {
+  pointer-events: auto;
+}
+
+/* ==========================================================================
+   Form Fields Overlay
+   ========================================================================== */
+
+.formFieldsOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.formFieldsOverlay input,
+.formFieldsOverlay select,
+.formFieldsOverlay textarea {
+  pointer-events: auto;
+}
+
+/* ==========================================================================
+   PDF Form Input Styles
+   ========================================================================== */
 
 .pdfInput {
-    --tw-bg-opacity: 1;
-    background-color: rgb(242 244 254 / var(--tw-bg-opacity));
-    border-top-width: 0px;
-    border-bottom-width: 1px;
-    border-left-width: 0px;
-    border-right-width: 0px;
-    box-sizing: border-box;
-    position: absolute;
-    padding: 0 0;
-    padding-block: 0;
-    padding-inline: 0;
-    margin: 0 0;
-    z-index: 10;
+  position: absolute;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--accent-primary);
+  border-radius: 2px;
+  padding: 2px 4px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  color: var(--text-inverse);
+  transition: 
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.pdfInput::placeholder {
+  color: var(--color-gray-400);
+}
+
+.pdfInput:hover {
+  background: white;
+  border-color: var(--accent-primary-hover);
 }
 
 .pdfInput:focus {
-    background-color: white;
+  outline: none;
+  background: white;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--accent-primary-subtle);
 }
+
+.pdfInput:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Textarea */
+.pdfInput[data-type="multiline"] {
+  resize: none;
+  overflow: hidden;
+}
+
+/* Checkbox */
+.pdfInput[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  cursor: pointer;
+  accent-color: var(--accent-primary);
+}
+
+/* Select/Dropdown */
+.pdfSelect {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--accent-primary);
+  border-radius: 2px;
+  padding: 2px 4px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  color: var(--text-inverse);
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23063b26' d='M3 4.5L6 8l3-3.5H3z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  padding-right: 20px;
+}
+
+.pdfSelect:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--accent-primary-subtle);
+}
+
+/* ==========================================================================
+   Build Mode Field Styles
+   ========================================================================== */
+
+.buildField {
+  position: absolute;
+  background: var(--field-bg-default);
+  border: 2px solid var(--field-border-default);
+  border-radius: var(--radius-sm);
+  cursor: move;
+  transition: 
+    border-color var(--transition-fast),
+    background var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.buildField:hover {
+  border-color: var(--field-border-hover);
+  background: var(--field-bg-selected);
+}
+
+.buildField.selected {
+  border-color: var(--field-border-selected);
+  background: var(--field-bg-selected);
+  box-shadow: 0 0 0 2px var(--accent-primary-subtle);
+}
+
+.buildFieldLabel {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 10px;
+  font-weight: var(--font-medium);
+  color: var(--accent-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  pointer-events: none;
+}
+
+/* Resize Handles */
+.resizeHandle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: var(--field-resize-handle);
+  border: 2px solid var(--doc-bg);
+  border-radius: 2px;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.buildField.selected .resizeHandle {
+  opacity: 1;
+}
+
+.resizeHandle.nw { top: -5px; left: -5px; cursor: nw-resize; }
+.resizeHandle.ne { top: -5px; right: -5px; cursor: ne-resize; }
+.resizeHandle.sw { bottom: -5px; left: -5px; cursor: sw-resize; }
+.resizeHandle.se { bottom: -5px; right: -5px; cursor: se-resize; }
+
+/* ==========================================================================
+   Page Indicator (Mobile)
+   ========================================================================== */
+
+.pageIndicator {
+  display: none;
+  position: fixed;
+  bottom: calc(var(--space-20) + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--space-2) var(--space-4);
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  border-radius: var(--radius-full);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  color: white;
+  z-index: var(--z-sticky);
+}
+
+/* ==========================================================================
+   Loading State
+   ========================================================================== */
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  padding: var(--space-8);
+}
+
+.loadingSpinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border-subtle);
+  border-top-color: var(--accent-primary);
+  border-radius: var(--radius-full);
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ==========================================================================
+   Drop Zone Indicator
+   ========================================================================== */
+
+.dropZone {
+  position: absolute;
+  inset: 0;
+  border: 2px dashed var(--accent-primary);
+  background: var(--accent-primary-subtle);
+  border-radius: var(--doc-border-radius);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-fast);
+}
+
+.dropZone.active {
+  opacity: 1;
+}
+
+/* ==========================================================================
+   Responsive - Tablet
+   ========================================================================== */
+
+@media (max-width: 1024px) {
+  .leftSidebar,
+  .rightSidebar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: var(--z-modal);
+    box-shadow: var(--shadow-2xl);
+  }
+
+  .leftSidebar {
+    left: 0;
+  }
+
+  .rightSidebar {
+    right: 0;
+  }
+
+  .leftSidebar.collapsed,
+  .rightSidebar.collapsed {
+    box-shadow: none;
+  }
+}
+
+/* ==========================================================================
+   Responsive - Mobile
+   ========================================================================== */
+
+@media (max-width: 640px) {
+  .rootContainer {
+    min-height: 100dvh;
+  }
+
+  .leftSidebar,
+  .rightSidebar {
+    display: none;
+  }
+
+  .documentContainer {
+    padding: var(--space-4);
+  }
+
+  .floatingPanelsLeft,
+  .floatingPanelsRight {
+    display: none;
+  }
+
+  .pageIndicator {
+    display: block;
+  }
+
+  /* Larger touch targets for form inputs */
+  .pdfInput,
+  .pdfSelect {
+    min-height: 32px;
+    font-size: 14px;
+  }
+
+  .pdfInput[type="checkbox"] {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+/* ==========================================================================
+   Animations
+   ========================================================================== */
+
+@keyframes pageAppear {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.pageContainer {
+  animation: pageAppear var(--duration-normal) var(--ease-out);
+  animation-fill-mode: both;
+}
+
+.pageContainer:nth-child(1) { animation-delay: 0ms; }
+.pageContainer:nth-child(2) { animation-delay: 50ms; }
+.pageContainer:nth-child(3) { animation-delay: 100ms; }
+.pageContainer:nth-child(4) { animation-delay: 150ms; }
+.pageContainer:nth-child(5) { animation-delay: 200ms; }

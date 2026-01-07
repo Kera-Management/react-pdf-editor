@@ -1,0 +1,248 @@
+/* ==========================================================================
+   FloatingPanel - Figma-style floating panel
+   ========================================================================== */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--panel-radius);
+  box-shadow: var(--panel-shadow);
+  overflow: hidden;
+  transition: 
+    transform var(--duration-normal) var(--ease-out),
+    opacity var(--duration-normal) var(--ease-out),
+    box-shadow var(--duration-fast);
+  will-change: transform, opacity;
+  min-width: 200px;
+  max-width: 320px;
+  max-height: calc(100vh - 120px);
+}
+
+.panel:hover {
+  box-shadow: var(--panel-shadow-lg);
+}
+
+/* Side positioning */
+.left {
+  /* Default - handled by parent layout */
+}
+
+.right {
+  /* Default - handled by parent layout */
+}
+
+/* Collapsed state */
+.collapsed {
+  max-height: var(--panel-header-height);
+}
+
+.collapsed .content {
+  display: none;
+}
+
+/* Dragging state */
+.dragging {
+  cursor: grabbing;
+  opacity: 0.95;
+  box-shadow: var(--shadow-2xl);
+  z-index: var(--z-modal);
+}
+
+/* ==========================================================================
+   Header
+   ========================================================================== */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--panel-header-height);
+  padding: 0 var(--space-2) 0 var(--space-3);
+  background: var(--panel-bg-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.dragHandle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  cursor: grab;
+  padding: var(--space-1);
+  margin-left: calc(-1 * var(--space-1));
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.dragHandle:hover {
+  color: var(--text-secondary);
+  background: var(--bg-surface-hover);
+}
+
+.dragHandle:active {
+  cursor: grabbing;
+}
+
+.icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.title {
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--space-1-5);
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+  font-size: var(--text-2xs);
+  font-weight: var(--font-semibold);
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+/* ==========================================================================
+   Header Buttons
+   ========================================================================== */
+
+.headerButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.headerButton:hover {
+  color: var(--text-primary);
+  background: var(--bg-surface-hover);
+}
+
+.headerButton:active {
+  background: var(--bg-surface-active);
+}
+
+.collapseButton svg {
+  transition: transform var(--duration-normal) var(--ease-out);
+}
+
+.collapseButton .rotated {
+  transform: rotate(-90deg);
+}
+
+/* ==========================================================================
+   Content
+   ========================================================================== */
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-3);
+}
+
+/* Custom scrollbar for content */
+.content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.content::-webkit-scrollbar-thumb {
+  background: var(--color-gray-700);
+  border-radius: var(--radius-full);
+}
+
+.content::-webkit-scrollbar-thumb:hover {
+  background: var(--color-gray-600);
+}
+
+/* ==========================================================================
+   Animations
+   ========================================================================== */
+
+@keyframes panelSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.panel {
+  animation: panelSlideIn var(--duration-normal) var(--ease-out);
+}
+
+.right {
+  animation-name: panelSlideInRight;
+}
+
+@keyframes panelSlideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+
+@media (max-width: 640px) {
+  .panel {
+    max-width: none;
+    width: 100%;
+    border-radius: 0;
+    max-height: none;
+  }
+}
+
+

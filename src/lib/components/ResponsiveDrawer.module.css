@@ -1,0 +1,311 @@
+/* ==========================================================================
+   Responsive Drawer Component
+   Desktop: Sidebar | Mobile: Bottom Sheet Drawer
+   ========================================================================== */
+
+/* ==========================================================================
+   Desktop Sidebar Styles
+   ========================================================================== */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  width: var(--sidebar-width, 280px);
+  height: 100%;
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e7e5e4);
+  border-radius: var(--radius-xl, 16px);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition: var(--transition-all, all 200ms ease);
+}
+
+.sidebar.left {
+  margin-right: var(--space-4, 16px);
+}
+
+.sidebar.right {
+  margin-left: var(--space-4, 16px);
+}
+
+.sidebarHeader {
+  padding: var(--space-5, 20px);
+  border-bottom: 1px solid var(--color-border-light, #f5f5f4);
+  background: linear-gradient(to bottom, var(--color-surface, #ffffff), var(--color-gray-50, #fafaf9));
+}
+
+.headerContent {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3, 12px);
+}
+
+.headerIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(135deg, var(--color-primary-500, #00b298), var(--color-primary-600, #00a18a));
+  border-radius: var(--radius-lg, 12px);
+  color: white;
+  font-size: 20px;
+  flex-shrink: 0;
+  box-shadow: var(--shadow-primary);
+}
+
+.headerText {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-lg, 18px);
+  font-weight: var(--font-semibold, 600);
+  color: var(--color-text-primary, #1c1917);
+  line-height: var(--leading-tight, 1.25);
+}
+
+.subtitle {
+  margin: var(--space-1, 4px) 0 0;
+  font-size: var(--text-sm, 14px);
+  color: var(--color-text-tertiary, #78716c);
+  line-height: var(--leading-normal, 1.5);
+}
+
+.sidebarContent {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-4, 16px);
+}
+
+/* Custom scrollbar for sidebar */
+.sidebarContent::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebarContent::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebarContent::-webkit-scrollbar-thumb {
+  background: var(--color-gray-300, #d6d3d1);
+  border-radius: var(--radius-full);
+}
+
+.sidebarContent::-webkit-scrollbar-thumb:hover {
+  background: var(--color-gray-400, #a8a29e);
+}
+
+/* ==========================================================================
+   Mobile Drawer Styles
+   ========================================================================== */
+
+/* Trigger button (collapsed state) */
+.mobileTrigger {
+  position: fixed;
+  bottom: calc(var(--space-4, 16px) + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e7e5e4);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-lg);
+  font-family: inherit;
+  font-size: var(--text-sm, 14px);
+  font-weight: var(--font-medium, 500);
+  color: var(--color-text-primary, #1c1917);
+  cursor: pointer;
+  z-index: var(--z-fixed, 300);
+  transition: var(--transition-all);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobileTrigger.left {
+  left: var(--space-4, 16px);
+}
+
+.mobileTrigger.right {
+  right: var(--space-4, 16px);
+}
+
+.mobileTrigger:hover {
+  background: var(--color-gray-50, #fafaf9);
+  box-shadow: var(--shadow-xl);
+  transform: translateY(-2px);
+}
+
+.mobileTrigger:active {
+  transform: translateY(0);
+}
+
+.triggerIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--color-primary-500, #00b298);
+}
+
+.triggerLabel {
+  white-space: nowrap;
+}
+
+.badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 var(--space-1, 4px);
+  background: var(--color-error-500, #f43f5e);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs, 12px);
+  font-weight: var(--font-semibold, 600);
+  color: white;
+}
+
+/* Backdrop */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  z-index: var(--z-drawer-backdrop, 400);
+  animation: fadeIn 200ms ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Drawer panel */
+.drawer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+  background: var(--color-surface, #ffffff);
+  border-radius: var(--radius-2xl, 24px) var(--radius-2xl, 24px) 0 0;
+  box-shadow: var(--shadow-2xl);
+  z-index: var(--z-drawer, 500);
+  transform: translateY(100%);
+  transition: transform 300ms cubic-bezier(0.32, 0.72, 0, 1);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.drawer.drawerOpen {
+  transform: translateY(0);
+}
+
+/* Drag handle */
+.dragHandle {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-3, 12px) 0;
+  cursor: grab;
+}
+
+.dragHandle:active {
+  cursor: grabbing;
+}
+
+.dragBar {
+  width: 40px;
+  height: 4px;
+  background: var(--color-gray-300, #d6d3d1);
+  border-radius: var(--radius-full);
+}
+
+/* Drawer header */
+.drawerHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 0 var(--space-5, 20px) var(--space-4, 16px);
+  border-bottom: 1px solid var(--color-border-light, #f5f5f4);
+}
+
+.closeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: var(--color-gray-100, #f5f5f4);
+  border: none;
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary, #57534e);
+  cursor: pointer;
+  transition: var(--transition-colors);
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+}
+
+.closeButton:hover {
+  background: var(--color-gray-200, #e7e5e4);
+  color: var(--color-text-primary, #1c1917);
+}
+
+.closeButton:active {
+  transform: scale(0.95);
+}
+
+/* Drawer content */
+.drawerContent {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-4, 16px) var(--space-5, 20px);
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ==========================================================================
+   Responsive Adjustments
+   ========================================================================== */
+
+/* Hide sidebar styles on mobile */
+@media (max-width: 767px) {
+  .sidebar {
+    display: none;
+  }
+}
+
+/* Hide mobile styles on desktop */
+@media (min-width: 768px) {
+  .mobileTrigger,
+  .backdrop,
+  .drawer {
+    display: none !important;
+  }
+}
+
+/* Tablet adjustments */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .sidebar {
+    width: 260px;
+  }
+}
+
+/* Large desktop */
+@media (min-width: 1280px) {
+  .sidebar {
+    width: 300px;
+  }
+}
+
+

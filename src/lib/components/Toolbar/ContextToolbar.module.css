@@ -1,0 +1,164 @@
+/* ==========================================================================
+   ContextToolbar - Floating toolbar near selected elements
+   ========================================================================== */
+
+.toolbar {
+  position: fixed;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--panel-bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  z-index: var(--z-popover);
+  animation: toolbarAppear var(--duration-fast) var(--ease-out);
+}
+
+.toolbar.top {
+  transform-origin: bottom center;
+}
+
+.toolbar.bottom {
+  transform-origin: top center;
+}
+
+@keyframes toolbarAppear {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ==========================================================================
+   Buttons
+   ========================================================================== */
+
+.button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: 
+    color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.button:hover {
+  color: var(--text-primary);
+  background: var(--bg-surface-hover);
+}
+
+.button:active {
+  background: var(--bg-surface-active);
+}
+
+.button.active {
+  color: var(--accent-primary);
+  background: var(--accent-primary-subtle);
+}
+
+.button.danger:hover {
+  color: var(--color-error-500);
+  background: var(--color-error-subtle);
+}
+
+/* ==========================================================================
+   Divider
+   ========================================================================== */
+
+.divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border-default);
+  margin: 0 var(--space-1);
+}
+
+/* ==========================================================================
+   More Menu
+   ========================================================================== */
+
+.moreWrapper {
+  position: relative;
+}
+
+.moreMenu {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  min-width: 180px;
+  background: var(--panel-bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  padding: var(--space-1);
+  z-index: var(--z-dropdown);
+  animation: menuAppear var(--duration-fast) var(--ease-out);
+}
+
+@keyframes menuAppear {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition-fast);
+}
+
+.menuItem:hover {
+  background: var(--bg-surface-hover);
+}
+
+.shortcut {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+
+@media (max-width: 640px) {
+  .toolbar {
+    padding: var(--space-1-5);
+    gap: var(--space-0-5);
+  }
+
+  .button {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+

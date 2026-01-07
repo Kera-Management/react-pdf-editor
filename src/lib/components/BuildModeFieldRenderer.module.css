@@ -1,93 +1,374 @@
+/* ==========================================================================
+   Build Mode Field Renderer - Figma-style Dark Theme
+   ========================================================================== */
+
+/* ==========================================================================
+   Base Field Container
+   ========================================================================== */
 .buildField {
-  position: relative;
+  position: absolute;
   box-sizing: border-box;
   outline: none;
+  border-radius: var(--radius-sm);
+  transition: 
+    box-shadow var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+  cursor: move;
+  touch-action: none;
+  user-select: none;
 }
 
 .buildField:focus {
-  border-color: #007bff !important;
+  outline: none;
 }
 
+.buildField:hover:not(.selected) {
+  box-shadow: 0 0 0 2px var(--field-border-hover);
+}
+
+/* ==========================================================================
+   Selection State
+   ========================================================================== */
 .selected {
-  border-color: #007bff !important;
-  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+  z-index: 100 !important;
+  box-shadow: 
+    0 0 0 2px var(--field-border-selected),
+    0 0 0 4px var(--accent-primary-subtle);
 }
 
-.fieldControls {
+/* Selection ring animation */
+.selected::after {
+  content: "";
   position: absolute;
-  top: -30px;
-  left: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: #333;
-  color: white;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  white-space: nowrap;
-  z-index: 1001;
+  inset: -4px;
+  border: 1px dashed var(--accent-primary);
+  border-radius: calc(var(--radius-sm) + 4px);
+  opacity: 0.5;
+  pointer-events: none;
+  animation: dashRotate 20s linear infinite;
 }
 
-.deleteButton {
-  background: #dc3545;
-  border: none;
-  color: white;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
+@keyframes dashRotate {
+  0% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -100;
+  }
+}
+
+/* ==========================================================================
+   Field Preview Content
+   ========================================================================== */
+.fieldPreview {
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
+  pointer-events: none;
+  background: var(--field-bg-default);
+  border: 2px solid var(--field-border-default);
+  border-radius: var(--radius-sm);
+  transition: 
+    background var(--duration-fast),
+    border-color var(--duration-fast);
 }
 
-.deleteButton:hover {
-  background: #c82333;
+.selected .fieldPreview {
+  background: var(--field-bg-selected);
+  border-color: var(--field-border-selected);
+}
+
+/* Field type label */
+.fieldTypeLabel {
+  font-size: var(--text-2xs);
+  font-weight: var(--font-semibold);
+  color: var(--accent-primary);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wider);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.fieldTypeLabel svg {
+  opacity: 0.8;
+}
+
+/* Text input preview */
+.fieldPreview input[type="text"],
+.fieldPreview textarea {
+  width: 100%;
+  height: 100%;
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border: none;
+  font-size: var(--text-xs);
+  color: var(--accent-primary);
+  pointer-events: none;
+  resize: none;
+}
+
+.fieldPreview input[type="text"]::placeholder,
+.fieldPreview textarea::placeholder {
+  color: var(--accent-primary);
+  opacity: 0.6;
+}
+
+/* Checkbox preview */
+.fieldPreview input[type="checkbox"] {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 2px solid var(--accent-primary);
+  border-radius: var(--radius-sm);
+  cursor: inherit;
+}
+
+/* Radio preview */
+.fieldPreview input[type="radio"] {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 2px solid var(--accent-primary);
+  border-radius: var(--radius-full);
+  cursor: inherit;
+}
+
+/* Signature placeholder */
+.signaturePlaceholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  color: var(--accent-primary);
+}
+
+.signaturePlaceholder svg {
+  opacity: 0.6;
+}
+
+.signaturePlaceholder span {
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wider);
+  font-weight: var(--font-medium);
+}
+
+/* ==========================================================================
+   Field Controls (shown when selected)
+   ========================================================================== */
+.fieldControls {
+  position: absolute;
+  top: -40px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--panel-bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  white-space: nowrap;
+  z-index: 101;
+  animation: controlsAppear var(--duration-fast) var(--ease-out);
+}
+
+@keyframes controlsAppear {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }
 
 .fieldInfo {
-  font-size: 11px;
-  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
 }
 
+.typeBadge {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: var(--accent-primary-subtle);
+  border-radius: var(--radius-md);
+  font-size: var(--text-2xs);
+  font-weight: var(--font-semibold);
+  color: var(--accent-primary);
+  text-transform: uppercase;
+}
+
+.fieldName {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ==========================================================================
+   Control Buttons
+   ========================================================================== */
+.controlButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: 
+    color var(--duration-fast),
+    background var(--duration-fast);
+}
+
+.controlButton:hover {
+  color: var(--text-primary);
+  background: var(--bg-surface-hover);
+}
+
+.deleteButton:hover {
+  color: var(--color-error-500);
+  background: var(--color-error-subtle);
+}
+
+/* ==========================================================================
+   Resize Handles
+   ========================================================================== */
 .resizeHandle {
   position: absolute;
-  width: 8px;
-  height: 8px;
-  background: #007bff;
-  border: 1px solid white;
-  border-radius: 50%;
-  z-index: 1002;
+  width: 10px;
+  height: 10px;
+  background: var(--doc-bg);
+  border: 2px solid var(--accent-primary);
+  border-radius: 2px;
+  z-index: 102;
+  opacity: 0;
+  transition: 
+    opacity var(--duration-fast),
+    transform var(--duration-fast),
+    background var(--duration-fast);
+  touch-action: none;
+}
+
+/* Invisible expanded touch target */
+.resizeHandle::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
+}
+
+.selected .resizeHandle {
+  opacity: 1;
 }
 
 .resizeHandle:hover {
-  background: #0056b3;
+  background: var(--accent-primary);
   transform: scale(1.2);
 }
 
+.resizeHandle:active {
+  background: var(--accent-primary-active);
+}
+
+/* Corner positions */
 .bottomRight {
-  bottom: -4px;
-  right: -4px;
-  cursor: nw-resize;
+  bottom: -5px;
+  right: -5px;
+  cursor: nwse-resize;
 }
 
 .bottomLeft {
-  bottom: -4px;
-  left: -4px;
-  cursor: ne-resize;
+  bottom: -5px;
+  left: -5px;
+  cursor: nesw-resize;
 }
 
 .topRight {
-  top: -4px;
-  right: -4px;
-  cursor: ne-resize;
+  top: -5px;
+  right: -5px;
+  cursor: nesw-resize;
 }
 
 .topLeft {
-  top: -4px;
-  left: -4px;
-  cursor: nw-resize;
+  top: -5px;
+  left: -5px;
+  cursor: nwse-resize;
+}
+
+/* ==========================================================================
+   Drag State
+   ========================================================================== */
+.isDragging {
+  opacity: 0.8;
+  cursor: grabbing !important;
+  z-index: 1000 !important;
+}
+
+.isDragging * {
+  cursor: grabbing !important;
+}
+
+/* ==========================================================================
+   Mobile Enhancements
+   ========================================================================== */
+@media (max-width: 640px) {
+  .buildField {
+    min-width: var(--touch-target-min);
+    min-height: var(--touch-target-min);
+  }
+
+  .fieldControls {
+    top: -48px;
+    padding: var(--space-1-5);
+    gap: var(--space-1-5);
+  }
+
+  .controlButton {
+    width: 36px;
+    height: 36px;
+  }
+
+  /* Larger resize handles for touch */
+  .resizeHandle {
+    width: 16px;
+    height: 16px;
+  }
+
+  .bottomRight {
+    bottom: -8px;
+    right: -8px;
+  }
+
+  .bottomLeft {
+    bottom: -8px;
+    left: -8px;
+  }
+
+  .topRight {
+    top: -8px;
+    right: -8px;
+  }
+
+  .topLeft {
+    top: -8px;
+    left: -8px;
+  }
 }

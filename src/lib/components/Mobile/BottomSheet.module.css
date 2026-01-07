@@ -1,0 +1,158 @@
+/* ==========================================================================
+   BottomSheet - Swipeable mobile panel
+   ========================================================================== */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-overlay);
+  z-index: var(--z-overlay);
+  animation: fadeIn var(--duration-normal) var(--ease-out);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ==========================================================================
+   Sheet Container
+   ========================================================================== */
+
+.sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--bottom-sheet-bg);
+  border-radius: var(--bottom-sheet-radius) var(--bottom-sheet-radius) 0 0;
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.3);
+  z-index: var(--z-modal);
+  display: flex;
+  flex-direction: column;
+  max-height: 95vh;
+  transition: 
+    height var(--duration-slow) var(--ease-out),
+    transform var(--duration-slow) var(--ease-out);
+  will-change: height, transform;
+}
+
+/* Snap point states */
+.sheet.collapsed {
+  border-radius: var(--bottom-sheet-radius) var(--bottom-sheet-radius) 0 0;
+}
+
+.sheet.partial {
+  /* Uses CSS variable for height */
+}
+
+.sheet.full {
+  border-radius: 0;
+}
+
+/* Animation */
+.sheet {
+  animation: slideUp var(--duration-slow) var(--ease-out);
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+/* ==========================================================================
+   Handle Area
+   ========================================================================== */
+
+.handleArea {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3) var(--space-4);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.handleArea:active {
+  cursor: grabbing;
+}
+
+.handle {
+  width: 36px;
+  height: 4px;
+  background: var(--bottom-sheet-handle);
+  border-radius: var(--radius-full);
+  transition: background var(--transition-fast);
+}
+
+.handleArea:hover .handle {
+  background: var(--color-gray-500);
+}
+
+/* ==========================================================================
+   Header
+   ========================================================================== */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-4) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.title {
+  font-size: var(--text-lg);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+}
+
+/* ==========================================================================
+   Content
+   ========================================================================== */
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-4);
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent scrolling when collapsed */
+.collapsed .content {
+  overflow: hidden;
+}
+
+/* Custom scrollbar */
+.content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.content::-webkit-scrollbar-thumb {
+  background: var(--color-gray-700);
+  border-radius: var(--radius-full);
+}
+
+/* ==========================================================================
+   Safe Area
+   ========================================================================== */
+
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .content {
+    padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+  }
+}
+
+

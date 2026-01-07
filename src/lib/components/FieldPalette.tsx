@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { BuildModeField, BuildModeFieldType } from "../PDFEditor";
 import styles from "./FieldPalette.module.css";
 import {
@@ -13,6 +13,7 @@ import {
 interface FieldPaletteProps {
   onFieldDragStart: (fieldType: BuildModeFieldType) => void;
   onFieldDragEnd: () => void;
+  onTouchDrop?: (fieldType: BuildModeFieldType, clientX: number, clientY: number) => boolean;
   selectedField: BuildModeField | null;
   onUpdateField: (fieldId: string, updates: Partial<BuildModeField>) => void;
   onCloseEditor: () => void;
@@ -31,37 +32,37 @@ const fieldTypes: FieldTypeConfig[] = [
   {
     type: "text",
     label: "Text Field",
-    icon: <TextAa />,
+    icon: <TextAa weight="duotone" />,
     description: "Single line text input",
   },
   {
     type: "multiline",
     label: "Text Area",
-    icon: <TextAlignJustify />,
+    icon: <TextAlignJustify weight="duotone" />,
     description: "Multi-line text input",
   },
   {
     type: "checkbox",
     label: "Checkbox",
-    icon: <CheckSquare />,
+    icon: <CheckSquare weight="duotone" />,
     description: "Check/uncheck option",
   },
   {
     type: "dropdown",
     label: "Dropdown",
-    icon: <RowsPlusBottom />,
+    icon: <RowsPlusBottom weight="duotone" />,
     description: "Select from dropdown list",
   },
   {
     type: "radio",
-    label: "Radio Button",
-    icon: <RadioButton />,
+    label: "Radio",
+    icon: <RadioButton weight="duotone" />,
     description: "Single selection from group",
   },
   {
     type: "signature",
     label: "Signature",
-    icon: <Signature />,
+    icon: <Signature weight="duotone" />,
     description: "Digital signature field",
   },
 ];
@@ -69,6 +70,7 @@ const fieldTypes: FieldTypeConfig[] = [
 export const FieldPalette: React.FC<FieldPaletteProps> = ({
   onFieldDragStart,
   onFieldDragEnd,
+  onTouchDrop,
   selectedField,
   onUpdateField,
   onCloseEditor,
@@ -78,10 +80,65 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
   const [editingField, setEditingField] = useState<BuildModeField | null>(
     selectedField
   );
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const paletteRef = useRef<HTMLDivElement>(null);
+  const touchStartY = useRef<number>(0);
+  const touchCurrentY = useRef<number>(0);
+  const isDragging = useRef(false);
+
+  // Check for mobile viewport
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   useEffect(() => {
     setEditingField(selectedField);
-  }, [selectedField]);
+    // Auto-open drawer on mobile when field is selected
+    if (selectedField && isMobile) {
+      setIsMobileOpen(true);
+    }
+  }, [selectedField, isMobile]);
+
+  // Handle touch gestures for swipe to close
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    touchStartY.current = e.touches[0].clientY;
+    touchCurrentY.current = e.touches[0].clientY;
+    isDragging.current = false;
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    touchCurrentY.current = e.touches[0].clientY;
+    const deltaY = touchCurrentY.current - touchStartY.current;
+    
+    if (deltaY > 10) {
+      isDragging.current = true;
+    }
+
+    if (isDragging.current && paletteRef.current) {
+      const translateY = Math.max(0, deltaY);
+      paletteRef.current.style.transform = `translateY(calc(100% - 56px + ${translateY}px))`;
+    }
+  }, []);
+
+  const handleTouchEnd = useCallback(() => {
+    if (!paletteRef.current) return;
+
+    const deltaY = touchCurrentY.current - touchStartY.current;
+    paletteRef.current.style.transform = "";
+
+    if (isDragging.current && deltaY > 100) {
+      setIsMobileOpen(false);
+    }
+
+    isDragging.current = false;
+  }, []);
+
   const handleDragStart = (
     e: React.DragEvent,
     fieldType: BuildModeFieldType
@@ -93,6 +150,85 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
 
   const handleDragEnd = () => {
     onFieldDragEnd();
+  };
+
+  // Touch drag state for mobile
+  const [touchDragFieldType, setTouchDragFieldType] = useState<BuildModeFieldType | null>(null);
+  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
+  const dragIndicator = useRef<HTMLDivElement | null>(null);
+
+  // Handle touch start on field item for mobile drag
+  const handleFieldTouchStart = useCallback(
+    (e: React.TouchEvent, fieldType: BuildModeFieldType) => {
+      const touch = e.touches[0];
+      touchStartPos.current = { x: touch.clientX, y: touch.clientY };
+      setTouchDragFieldType(fieldType);
+      onFieldDragStart(fieldType);
+
+      // Create drag indicator element
+      const indicator = document.createElement("div");
+      indicator.style.cssText = `
+        position: fixed;
+        z-index: 9999;
+        padding: 8px 16px;
+        background: var(--color-primary-500, #00b298);
+        color: white;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        pointer-events: none;
+        transform: translate(-50%, -50%);
+        left: ${touch.clientX}px;
+        top: ${touch.clientY}px;
+      `;
+      indicator.textContent = fieldType.charAt(0).toUpperCase() + fieldType.slice(1);
+      document.body.appendChild(indicator);
+      dragIndicator.current = indicator;
+    },
+    [onFieldDragStart]
+  );
+
+  // Handle touch move for mobile drag
+  const handleFieldTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!touchDragFieldType || !dragIndicator.current) return;
+
+    const touch = e.touches[0];
+    dragIndicator.current.style.left = `${touch.clientX}px`;
+    dragIndicator.current.style.top = `${touch.clientY}px`;
+  }, [touchDragFieldType]);
+
+  // Handle touch end for mobile drop
+  const handleFieldTouchEnd = useCallback(
+    (e: React.TouchEvent) => {
+      if (!touchDragFieldType) return;
+
+      const touch = e.changedTouches[0];
+
+      // Remove drag indicator
+      if (dragIndicator.current) {
+        document.body.removeChild(dragIndicator.current);
+        dragIndicator.current = null;
+      }
+
+      // Try to drop the field
+      if (onTouchDrop) {
+        const dropped = onTouchDrop(touchDragFieldType, touch.clientX, touch.clientY);
+        if (dropped) {
+          setIsMobileOpen(false);
+        }
+      }
+
+      setTouchDragFieldType(null);
+      touchStartPos.current = null;
+      onFieldDragEnd();
+    },
+    [touchDragFieldType, onTouchDrop, onFieldDragEnd]
+  );
+
+  // Toggle mobile drawer
+  const toggleMobileDrawer = () => {
+    setIsMobileOpen(!isMobileOpen);
   };
 
   if (editingField) {
@@ -148,12 +284,30 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
       handleInput("properties.options", options);
     };
 
+    const handleBack = () => {
+      onCloseEditor();
+      if (isMobile) {
+        setIsMobileOpen(false);
+      }
+    };
+
     return (
-      <div className={styles.palette}>
+      <div
+        ref={paletteRef}
+        className={`${styles.palette} ${isMobileOpen ? styles.open : ""}`}
+        onTouchStart={isMobile ? handleTouchStart : undefined}
+        onTouchMove={isMobile ? handleTouchMove : undefined}
+        onTouchEnd={isMobile ? handleTouchEnd : undefined}
+      >
+        {/* Mobile drag handle */}
+        <div className={styles.dragHandle} onClick={toggleMobileDrawer}>
+          <div className={styles.dragBar} />
+        </div>
+
         <div className={styles.header}>
           <h3>Edit Field</h3>
           <p>
-            {editingField.type.toUpperCase()} • Page {editingField.page + 1}
+            {editingField.type.charAt(0).toUpperCase() + editingField.type.slice(1)} • Page {editingField.page + 1}
           </p>
         </div>
         <div className={styles.editorContent}>
@@ -166,29 +320,8 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
               className={styles.input}
             />
           </label>
+
           <div className={styles.row2}>
-            <label className={styles.label}>
-              <span>X</span>
-              <input
-                type="number"
-                value={Math.round(editingField.x)}
-                onChange={(e) =>
-                  handleInput("x", parseFloat(e.target.value) || 0)
-                }
-                className={styles.input}
-              />
-            </label>
-            <label className={styles.label}>
-              <span>Y</span>
-              <input
-                type="number"
-                value={Math.round(editingField.y)}
-                onChange={(e) =>
-                  handleInput("y", parseFloat(e.target.value) || 0)
-                }
-                className={styles.input}
-              />
-            </label>
             <label className={styles.label}>
               <span>Width</span>
               <input
@@ -242,6 +375,7 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
                     handleInput("properties.placeholder", e.target.value)
                   }
                   className={styles.input}
+                  placeholder="Enter placeholder text..."
                 />
               </label>
               <label className={styles.label}>
@@ -253,6 +387,7 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
                     handleInput("properties.defaultValue", e.target.value)
                   }
                   className={styles.input}
+                  placeholder="Enter default value..."
                 />
               </label>
             </>
@@ -260,18 +395,22 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
 
           {(editingField.type === "dropdown" ||
             editingField.type === "radio") && (
-            <div className={styles.editorContent}>
-              <div className={styles.actions}>
+            <div>
+              <div className={styles.sectionHeader}>
                 <span>Options</span>
-                <button type="button" onClick={addOption}>
-                  + Add
+                <button
+                  type="button"
+                  onClick={addOption}
+                  className={styles.addButton}
+                >
+                  + Add Option
                 </button>
               </div>
               {(editingField.properties.options || []).map((opt, idx) => (
                 <div key={idx} className={styles.row3}>
                   <input
                     type="text"
-                    placeholder="Display value"
+                    placeholder="Display text"
                     value={opt.displayValue}
                     onChange={(e) =>
                       handleOptionChange(idx, "displayValue", e.target.value)
@@ -280,15 +419,20 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
                   />
                   <input
                     type="text"
-                    placeholder="Export value"
+                    placeholder="Value"
                     value={opt.exportValue}
                     onChange={(e) =>
                       handleOptionChange(idx, "exportValue", e.target.value)
                     }
                     className={styles.input}
                   />
-                  <button type="button" onClick={() => removeOption(idx)}>
-                    −
+                  <button
+                    type="button"
+                    onClick={() => removeOption(idx)}
+                    className={styles.removeButton}
+                    aria-label="Remove option"
+                  >
+                    ×
                   </button>
                 </div>
               ))}
@@ -297,31 +441,29 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
 
           {/* Assignment */}
           {participants && participants.length > 0 && (
-            <div className={styles.editorContent}>
-              <label className={styles.label}>
-                <span>Assignee</span>
-                <select
-                  value={editingField.properties.assignees?.[0] || ""}
-                  onChange={(e) =>
-                    handleInput(
-                      "properties.assignees",
-                      e.target.value ? [e.target.value] : []
-                    )
-                  }
-                  className={styles.input}
-                >
-                  <option value="">No assignment</option>
-                  {participants.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            <label className={styles.label}>
+              <span>Assignee</span>
+              <select
+                value={editingField.properties.assignees?.[0] || ""}
+                onChange={(e) =>
+                  handleInput(
+                    "properties.assignees",
+                    e.target.value ? [e.target.value] : []
+                  )
+                }
+                className={styles.input}
+              >
+                <option value="">No assignment</option>
+                {participants.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label} {p.role && `(${p.role})`}
+                  </option>
+                ))}
+              </select>
+            </label>
           )}
 
-          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <label className={styles.checkboxRow}>
             <input
               type="checkbox"
               checked={editingField.properties.required || false}
@@ -333,13 +475,13 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
           </label>
 
           <div className={styles.actions}>
-            <button type="button" onClick={onCloseEditor}>
-              Back
+            <button type="button" onClick={handleBack}>
+              ← Back
             </button>
             <button
               type="button"
               onClick={() => onDeleteField(editingField.id)}
-              style={{ color: "#b00020" }}
+              className={styles.deleteButton}
             >
               Delete
             </button>
@@ -350,23 +492,37 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
   }
 
   return (
-    <div className={styles.palette}>
+    <div
+      ref={paletteRef}
+      className={`${styles.palette} ${isMobileOpen ? styles.open : ""}`}
+      onTouchStart={isMobile ? handleTouchStart : undefined}
+      onTouchMove={isMobile ? handleTouchMove : undefined}
+      onTouchEnd={isMobile ? handleTouchEnd : undefined}
+    >
+      {/* Mobile drag handle */}
+      <div className={styles.dragHandle} onClick={toggleMobileDrawer}>
+        <div className={styles.dragBar} />
+      </div>
+
       <div className={styles.header}>
         <h3>Form Fields</h3>
-        <p>Drag fields onto the PDF to add them</p>
+        <p>Drag fields onto the PDF</p>
       </div>
       <div className={styles.fieldGrid}>
-        {fieldTypes.map((field) => (
+        {fieldTypes.map((fieldConfig) => (
           <div
-            key={field.type}
+            key={fieldConfig.type}
             className={styles.fieldItem}
             draggable
-            onDragStart={(e) => handleDragStart(e, field.type)}
+            onDragStart={(e) => handleDragStart(e, fieldConfig.type)}
             onDragEnd={handleDragEnd}
-            title={field.description}
+            onTouchStart={(e) => handleFieldTouchStart(e, fieldConfig.type)}
+            onTouchMove={handleFieldTouchMove}
+            onTouchEnd={handleFieldTouchEnd}
+            title={fieldConfig.description}
           >
-            <div className={styles.fieldIcon}>{field.icon}</div>
-            <div className={styles.fieldLabel}>{field.label}</div>
+            <div className={styles.fieldIcon}>{fieldConfig.icon}</div>
+            <div className={styles.fieldLabel}>{fieldConfig.label}</div>
           </div>
         ))}
       </div>
