@@ -192,7 +192,7 @@
 .pageIndicator {
   font-size: var(--text-sm);
   font-weight: var(--font-medium);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   padding: var(--space-1) var(--space-3);
   background: var(--bg-base);
   border-radius: var(--radius-md);
@@ -227,7 +227,7 @@
 .zoomValue {
   font-size: var(--text-sm);
   font-weight: var(--font-medium);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   min-width: 44px;
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -247,7 +247,7 @@
   background: transparent;
   border: none;
   border-radius: var(--radius-md);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   cursor: pointer;
   transition: 
     color var(--transition-fast),
@@ -325,7 +325,7 @@
   background: transparent;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   cursor: pointer;
   transition: 
     color var(--transition-fast),

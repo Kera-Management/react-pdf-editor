@@ -598,17 +598,31 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // Calculate progress for the active participant
     const getProgressData = () => {
       const formFields = getAllFieldsValue();
-      const allFieldNames = Object.keys(formFields);
 
-      // Count total completed fields
-      const totalCompleted = allFieldNames.filter((fieldName) => {
+      // Get effective field assignments
+      const effectiveAssignments =
+        extractedFieldAssignments.current || fieldAssignments;
+
+      // Get fields assigned to the active participant
+      let assignedFieldNames: string[];
+      if (effectiveAssignments && activeParticipantId) {
+        assignedFieldNames = Object.entries(effectiveAssignments)
+          .filter(([, assignees]) => assignees.includes(activeParticipantId))
+          .map(([fieldName]) => fieldName);
+      } else {
+        // If no assignments, count all fields
+        assignedFieldNames = Object.keys(formFields);
+      }
+
+      // Count completed fields only for assigned fields
+      const totalCompleted = assignedFieldNames.filter((fieldName) => {
         const value = formFields[fieldName];
         return value && value.trim() !== "" && value !== "Off";
       }).length;
 
       return {
         formFields,
-        totalFields: allFieldNames.length,
+        totalFields: assignedFieldNames.length,
         completedFields: totalCompleted,
       };
     };
