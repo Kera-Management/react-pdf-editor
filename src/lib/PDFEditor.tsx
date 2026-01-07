@@ -171,6 +171,10 @@ export interface PDFEditorProps {
   fieldAssignments?: Record<string, string[]>;
   /** Theme for the editor UI. Defaults to "light". */
   theme?: "light" | "dark";
+  /** Optional callback when the close button is clicked */
+  onClose?: () => void;
+  /** Allowed modes to show in the mode selector. Defaults to all modes. */
+  allowedModes?: PDFEditorMode[];
 }
 
 // Use worker from the installed pdfjs-dist package to ensure version matching
@@ -192,14 +196,24 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       src,
       workerSrc,
       onSave,
-      mode = "edit",
+      mode: initialMode = "edit",
       participants,
       activeParticipantId,
       unassignedVisibility = "readonly",
       onBuildSave,
       fieldAssignments,
       theme = "light",
+      onClose,
+      allowedModes = ["build", "edit", "view"],
     } = props;
+
+    // Determine the effective initial mode - must be in allowedModes
+    const effectiveInitialMode = allowedModes.includes(initialMode)
+      ? initialMode
+      : allowedModes[0];
+
+    // Internal mode state
+    const [mode, setMode] = useState<PDFEditorMode>(effectiveInitialMode);
     const divRef = useRef<HTMLDivElement>(null);
     const [maxPageWidth, setMaxPageWidth] = useState(0);
     const [zoomLevel, setZoomLevel] = useState(6);
@@ -912,12 +926,15 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       }
     }, []);
 
-    // Handle mode change
-    const handleModeChange = useCallback((newMode: PDFEditorMode) => {
-      // Mode changes would need to be handled by parent component
-      // This is a controlled component, so we just log for now
-      console.log("Mode change requested:", newMode);
-    }, []);
+    // Handle mode change - only allow switching to allowed modes
+    const handleModeChange = useCallback(
+      (newMode: PDFEditorMode) => {
+        if (allowedModes.includes(newMode)) {
+          setMode(newMode);
+        }
+      },
+      [allowedModes]
+    );
 
     // Handle field duplication
     const duplicateField = useCallback(
@@ -1298,6 +1315,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         <HeaderBar
           mode={mode}
           onModeChange={handleModeChange}
+          allowedModes={allowedModes}
           zoomPercentage={zoomPercentage}
           onZoomIn={() =>
             setZoomLevel((prev) => Math.min(prev + 1, zoomLevels.length - 1))
@@ -1307,6 +1325,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           zoomOutDisabled={zoomLevel <= 0}
           onSave={onSaveAs}
           isSaving={isSaving}
+          onClose={onClose}
           currentPage={activePage}
           totalPages={pages?.length || 0}
           isMobile={isMobile}

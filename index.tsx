@@ -19,7 +19,10 @@ const App = () => {
         <option value="edit">Edit</option>
         <option value="view">View</option>
       </select>
-      <select value={theme} onChange={(e) => setTheme(e.target.value as "light" | "dark")}>
+      <select
+        value={theme}
+        onChange={(e) => setTheme(e.target.value as "light" | "dark")}
+      >
         <option value="light">Light</option>
         <option value="dark">Dark</option>
       </select>
@@ -31,6 +34,10 @@ const App = () => {
         activeParticipantId="1"
         mode={mode as PDFEditorMode}
         src={src}
+        allowedModes={["build", "edit", "view"]}
+        onClose={() => {
+          console.log("close");
+        }}
         theme={theme}
         onBuildSave={(pdfBytes) => {
           // Create a download link for the PDF
