@@ -28,6 +28,12 @@ import {
   PDFRadioGroup,
   PDFTextField,
 } from "pdf-lib";
+import {
+  calculateParticipantCompletion,
+  createEditorMetadata,
+  extractEditorMetadata,
+  serializeEditorMetadata,
+} from "./participantCompletion";
 // New component imports
 import { useResponsive } from "./hooks/useResponsive";
 import { usePanelState } from "./hooks/usePanelState";
@@ -232,9 +238,13 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       useState<BuildModeFieldType | null>(null);
     // Property editing is handled inside FieldPalette now
 
-    // Store extracted field assignments from PDF metadata
-    const extractedFieldAssignments = useRef<Record<string, string[]> | null>(
-      null
+    // Store extracted metadata from the PDF so edit mode can enforce
+    // assignees and required-field completion without extra host app state.
+    const extractedMetadata = useRef(
+      createEditorMetadata({
+        fieldAssignments: {},
+        requiredFields: [],
+      })
     );
 
     // Pinch-to-zoom state
@@ -269,27 +279,12 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           const doc = await getDocument(src).promise;
           setPdfDoc(doc);
 
-          // Try to extract field assignments from PDF metadata
+          // Try to extract editor metadata from the PDF.
           try {
             const pdfBytes = await doc.getData();
-            const libDoc = await PDFDocument.load(pdfBytes);
-            const title = libDoc.getTitle();
-
-            if (title && title.startsWith("REACT_PDF_EDITOR_ASSIGNMENTS:")) {
-              const assignmentsJson = title.replace(
-                "REACT_PDF_EDITOR_ASSIGNMENTS:",
-                ""
-              );
-              const extractedAssignments = JSON.parse(assignmentsJson);
-
-              // Store extracted assignments for internal use
-              extractedFieldAssignments.current = extractedAssignments;
-            }
+            extractedMetadata.current = await extractEditorMetadata(pdfBytes);
           } catch (error) {
-            console.warn(
-              "Failed to extract field assignments from PDF:",
-              error
-            );
+            console.warn("Failed to extract editor metadata from PDF:", error);
           }
 
           setDocReady(true);
@@ -446,7 +441,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             if (mode === "edit" && activeParticipantId && field) {
               // Prioritize extracted assignments from PDF metadata, fallback to prop
               const effectiveAssignments =
-                extractedFieldAssignments.current || fieldAssignments;
+                Object.keys(extractedMetadata.current.fieldAssignments).length >
+                0
+                  ? extractedMetadata.current.fieldAssignments
+                  : fieldAssignments;
               const assignedIds = effectiveAssignments?.[field.name];
               const isAssigned = assignedIds
                 ? assignedIds.includes(activeParticipantId)
@@ -598,32 +596,16 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // Calculate progress for the active participant
     const getProgressData = () => {
       const formFields = getAllFieldsValue();
-
-      // Get effective field assignments
-      const effectiveAssignments =
-        extractedFieldAssignments.current || fieldAssignments;
-
-      // Get fields assigned to the active participant
-      let assignedFieldNames: string[];
-      if (effectiveAssignments && activeParticipantId) {
-        assignedFieldNames = Object.entries(effectiveAssignments)
-          .filter(([, assignees]) => assignees.includes(activeParticipantId))
-          .map(([fieldName]) => fieldName);
-      } else {
-        // If no assignments, count all fields
-        assignedFieldNames = Object.keys(formFields);
-      }
-
-      // Count completed fields only for assigned fields
-      const totalCompleted = assignedFieldNames.filter((fieldName) => {
-        const value = formFields[fieldName];
-        return value && value.trim() !== "" && value !== "Off";
-      }).length;
+      const completion = calculateParticipantCompletion({
+        metadata: extractedMetadata.current,
+        formFields,
+        participantId: activeParticipantId,
+      });
 
       return {
         formFields,
-        totalFields: assignedFieldNames.length,
-        completedFields: totalCompleted,
+        totalFields: completion.requiredAssignedCount,
+        completedFields: completion.completedRequiredCount,
       };
     };
 
@@ -777,7 +759,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
 
           // Get assignments for this field from extracted metadata
           const fieldAssignments =
-            extractedFieldAssignments.current?.[field.name] || [];
+            extractedMetadata.current.fieldAssignments[field.name] || [];
+          const isRequired =
+            extractedMetadata.current.requiredFields.includes(field.name);
 
           initial.push({
             id: `existing_${field.id}`,
@@ -792,7 +776,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             page: page.proxy.pageNumber - 1,
             properties: {
               placeholder: field.type === "text" ? field.name : undefined,
-              required: false,
+              required: isRequired,
               defaultValue:
                 typeof field.value === "string"
                   ? field.value
@@ -1232,6 +1216,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         if (mode === "build" && onBuildSave) {
           // Create a mapping from field names to assignees for the parent app
           const fieldAssignmentsMap: Record<string, string[]> = {};
+          const requiredFields: string[] = [];
           buildModeFields.forEach((field) => {
             if (
               field.properties.assignees &&
@@ -1239,13 +1224,19 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             ) {
               fieldAssignmentsMap[field.name] = field.properties.assignees;
             }
+            if (field.properties.required) {
+              requiredFields.push(field.name);
+            }
           });
 
-          // Store field assignments in PDF metadata
-          const assignmentsJson = JSON.stringify(fieldAssignmentsMap);
-          const titleWithAssignments = `REACT_PDF_EDITOR_ASSIGNMENTS:${assignmentsJson}`;
-
-          libDoc.setTitle(titleWithAssignments);
+          libDoc.setTitle(
+            serializeEditorMetadata(
+              createEditorMetadata({
+                fieldAssignments: fieldAssignmentsMap,
+                requiredFields,
+              })
+            )
+          );
 
           // Re-save with metadata
           const savedDataWithMetadata = await libDoc.save();
@@ -1604,9 +1595,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                       activeParticipantId={activeParticipantId}
                       participants={participants}
                       fieldAssignments={
-                        extractedFieldAssignments.current ||
-                        fieldAssignments ||
-                        undefined
+                        Object.keys(extractedMetadata.current.fieldAssignments)
+                          .length > 0
+                          ? extractedMetadata.current.fieldAssignments
+                          : fieldAssignments || undefined
                       }
                       formFields={progressData.formFields}
                       totalFields={progressData.totalFields}
@@ -1650,9 +1642,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 activeParticipantId={activeParticipantId}
                 participants={participants}
                 fieldAssignments={
-                  extractedFieldAssignments.current ||
-                  fieldAssignments ||
-                  undefined
+                  Object.keys(extractedMetadata.current.fieldAssignments)
+                    .length > 0
+                    ? extractedMetadata.current.fieldAssignments
+                    : fieldAssignments || undefined
                 }
                 formFields={progressData.formFields}
                 totalFields={progressData.totalFields}
