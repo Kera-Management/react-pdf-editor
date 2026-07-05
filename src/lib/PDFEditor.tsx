@@ -10,6 +10,7 @@ import React, {
   useState,
 } from "react";
 import {
+  AnnotationMode,
   getDocument,
   GlobalWorkerOptions,
   PDFDocumentProxy,
@@ -70,12 +71,18 @@ interface PDFFormRawField {
   page: number;
   password: boolean;
   rect: number[];
-  type: "text" | "checkbox" | "combobox" | "radio" | "list";
+  // pdf.js emits "radiobutton" for radio widgets; we normalize it to "radio" at
+  // ingestion so the rest of the component's `=== "radio"` checks match.
+  type: "text" | "checkbox" | "combobox" | "radio" | "radiobutton" | "list";
   value: string | "Off" | "On";
   defaultValue: string | "Off" | "On";
   // combobox items
   items?: ComboboxItem[];
-  // TBD: actions, charLimit, combo, fillColor, rotation, strokeColor
+  /** Button's "on" value (checkbox/radio) — the value stored when selected. */
+  exportValues?: string;
+  /** Max characters for a text field (AcroForm /MaxLen), 0/undefined = no cap. */
+  charLimit?: number;
+  // TBD: actions, combo, fillColor, rotation, strokeColor
 }
 
 // Extended field type for build mode
@@ -321,14 +328,21 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 const proxy = await pdfDoc.getPage(i);
                 const fields = rawFormFields
                   ? Object.values(rawFormFields).flatMap((rawFields) =>
-                      rawFields.filter(
-                        (rawField) =>
-                          rawField.editable &&
-                          !rawField.hidden &&
-                          // form field page index start from 0
-                          // while page proxy pageNumber index start from 1
-                          rawField.page === proxy.pageNumber - 1
-                      )
+                      rawFields
+                        .filter(
+                          (rawField) =>
+                            rawField.editable &&
+                            !rawField.hidden &&
+                            // form field page index start from 0
+                            // while page proxy pageNumber index start from 1
+                            rawField.page === proxy.pageNumber - 1
+                        )
+                        // Normalize pdf.js's "radiobutton" → "radio".
+                        .map((rawField) =>
+                          rawField.type === "radiobutton"
+                            ? { ...rawField, type: "radio" as const }
+                            : rawField
+                        )
                     )
                   : [];
                 rawPages.push({ proxy, fields });
@@ -391,6 +405,11 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                     viewport: page.proxy.getViewport({
                       scale: scale * ratio, // draw ratio pixels into Canvas
                     }),
+                    // Don't paint form-field appearances onto the canvas — the
+                    // editor overlays its own inputs for them. Otherwise a
+                    // pre-filled AcroForm (e.g. the N1) double-renders: the baked
+                    // field text ghosts behind our inputs.
+                    annotationMode: AnnotationMode.ENABLE_FORMS,
                   });
                 } catch (renderError) {
                   console.error(
@@ -412,8 +431,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           const pageDivContainer = divRef.current?.querySelector(
             "div#page_div_container_" + page.proxy.pageNumber
           ) as HTMLDivElement;
-          pageDivContainer?.querySelectorAll("input, select").forEach((e) => {
-            const input = e as HTMLInputElement;
+          pageDivContainer
+            ?.querySelectorAll("input, select, textarea")
+            .forEach((e) => {
+              const input = e as HTMLInputElement;
             const field = page.fields?.find(
               (field) => field.id === input.dataset.fieldId
             );
@@ -1171,7 +1192,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           if (field instanceof PDFTextField) {
             (field as PDFTextField).setText(value || "");
           } else if (field instanceof PDFCheckBox) {
-            if (value === "On" || value) {
+            // "Off" is a truthy string, so guard on it explicitly.
+            if (value && value !== "Off") {
               (field as PDFCheckBox).check();
             } else {
               (field as PDFCheckBox).uncheck();
@@ -1181,11 +1203,27 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
               (field as PDFDropdown).select(value);
             }
           } else if (field instanceof PDFOptionList) {
-            // FIXME...not render the input elements for this part field yet
-            // TODO... handle multiple select, choice type in pdf.js
+            if (value) {
+              try {
+                (field as PDFOptionList).select(value);
+              } catch {
+                // value not a valid option in this list — skip
+              }
+            }
           } else if (field instanceof PDFRadioGroup) {
-            // TODO... handle A set of radio buttons where users can select only one option from the group.
-            // Specifically, for a radio button in a radio group, the fieldFlags property of the field object may contain the RADIO flag.
+            // Persist the selected radio option. This was a no-op before, so
+            // radio-group edits (e.g. the N1's "shade one of the following" and
+            // per month/week options, which are radio groups) were silently
+            // dropped on save and lost on reopen.
+            if (value && value !== "Off") {
+              try {
+                (field as PDFRadioGroup).select(value);
+              } catch {
+                // value not a valid option in this group — leave unchanged
+              }
+            } else {
+              (field as PDFRadioGroup).clear();
+            }
           }
         }
 
@@ -1465,56 +1503,115 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                   ))}
                                 </select>
                               );
+                            // Update this field's value. `byName` also updates
+                            // every field sharing the name — needed for radio
+                            // groups, where selecting one deselects the rest.
+                            const updateFieldValue = (
+                              newValue: string,
+                              byName: boolean
+                            ) =>
+                              setPages((prevPages) =>
+                                prevPages?.map((p) => ({
+                                  ...p,
+                                  fields: p.fields?.map((f) =>
+                                    (byName
+                                      ? f.name === field.name
+                                      : f.id === field.id)
+                                      ? { ...f, value: newValue }
+                                      : f
+                                  ),
+                                }))
+                              );
+                            const currentValue = field.value || field.defaultValue;
+
+                            if (field.type === "checkbox") {
+                              const onValue = field.exportValues || "On";
+                              return (
+                                <input
+                                  type="checkbox"
+                                  name={field.name}
+                                  key={field.id}
+                                  data-field-id={field.id}
+                                  className={styles.pdfInput}
+                                  style={style}
+                                  disabled={mode === "view"}
+                                  checked={!!currentValue && currentValue !== "Off"}
+                                  onChange={(e) => {
+                                    if (mode !== "view") {
+                                      updateFieldValue(
+                                        e.target.checked ? onValue : "Off",
+                                        false
+                                      );
+                                    }
+                                  }}
+                                />
+                              );
+                            }
+
+                            if (field.type === "radio") {
+                              return (
+                                <input
+                                  type="radio"
+                                  name={field.name}
+                                  key={field.id}
+                                  data-field-id={field.id}
+                                  className={styles.pdfInput}
+                                  style={style}
+                                  disabled={mode === "view"}
+                                  checked={currentValue === field.exportValues}
+                                  onChange={() => {
+                                    if (mode !== "view") {
+                                      updateFieldValue(
+                                        field.exportValues || "",
+                                        true
+                                      );
+                                    }
+                                  }}
+                                />
+                              );
+                            }
+
+                            const maxLength =
+                              field.charLimit && field.charLimit > 0
+                                ? field.charLimit
+                                : undefined;
+
+                            // Multiline text field → <textarea> so line breaks
+                            // and wrapping render like Acrobat.
+                            if (field.multiline) {
+                              return (
+                                <textarea
+                                  name={field.name}
+                                  key={field.id}
+                                  data-field-id={field.id}
+                                  className={styles.pdfInput}
+                                  style={style}
+                                  readOnly={mode === "view"}
+                                  maxLength={maxLength}
+                                  value={currentValue}
+                                  onChange={(e) => {
+                                    if (mode !== "view") {
+                                      updateFieldValue(e.target.value, false);
+                                    }
+                                  }}
+                                />
+                              );
+                            }
+
                             return (
                               <input
-                                type={field.type}
-                                {...(field.type === "checkbox"
-                                  ? {
-                                      checked:
-                                        (field.value || field.defaultValue) ===
-                                        "On",
-                                    }
-                                  : {
-                                      value: field.value || field.defaultValue,
-                                    })}
+                                type="text"
                                 name={field.name}
                                 key={field.id}
                                 data-field-id={field.id}
                                 className={styles.pdfInput}
                                 style={style}
                                 readOnly={mode === "view"}
+                                maxLength={maxLength}
+                                value={currentValue}
                                 onChange={(e) => {
                                   if (mode !== "view") {
-                                    const target = e.target as HTMLInputElement;
-                                    let newValue: string;
-
-                                    if (field.type === "checkbox") {
-                                      newValue = target.checked ? "On" : "Off";
-                                      if (target.checked) {
-                                        const sameNameCheckboxes =
-                                          document.querySelectorAll(
-                                            `input[type="checkbox"][name="${field.name}"]`
-                                          ) as NodeListOf<HTMLInputElement>;
-                                        sameNameCheckboxes.forEach((cb) => {
-                                          if (cb !== target) {
-                                            cb.checked = false;
-                                          }
-                                        });
-                                      }
-                                    } else {
-                                      newValue = target.value;
-                                    }
-
-                                    setPages((prevPages) =>
-                                      prevPages?.map((page) => ({
-                                        ...page,
-                                        fields: page.fields?.map((f) =>
-                                          f.id === field.id
-                                            ? { ...f, value: newValue }
-                                            : f
-                                        ),
-                                      }))
-                                    );
+                                    updateFieldValue(e.target.value, false);
                                   }
                                 }}
                               />
