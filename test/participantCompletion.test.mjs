@@ -136,6 +136,8 @@ test("keeps legacy assignment-only metadata compatible", async () => {
 
   const tenantCompletion = await getParticipantCompletion(pdfBytes, "tenant1");
 
+  // Assignment controls who may edit, not what must be completed: legacy
+  // metadata has no required flags, so nothing is required.
   assert.deepEqual(tenantCompletion, {
     requiredAssignedCount: 0,
     completedRequiredCount: 0,
@@ -143,6 +145,64 @@ test("keeps legacy assignment-only metadata compatible", async () => {
     remainingRequiredFields: [],
     isComplete: false,
   });
+});
+
+test("treats assigned-but-unflagged fields as optional", async () => {
+  // Assignment alone does not make a field mandatory; the landlord must
+  // explicitly mark it required.
+  const pdfBytes = await createLeasePdf({
+    title: serializeEditorMetadata(
+      createEditorMetadata({
+        fieldAssignments: { tenant_name: ["tenant1"] },
+        requiredFields: [],
+      })
+    ),
+  });
+
+  const tenantCompletion = await getParticipantCompletion(pdfBytes, "tenant1");
+
+  assert.equal(tenantCompletion.requiredAssignedCount, 0);
+  assert.equal(tenantCompletion.remainingRequiredCount, 0);
+});
+
+test("counts a filled required field as complete (multi-entry field tree)", async () => {
+  // pdf.js returns a valueless parent entry first for these fields; the
+  // value lives on a later entry and must still be found.
+  const pdfBytes = await createLeasePdf({
+    title: serializeEditorMetadata(
+      createEditorMetadata({
+        fieldAssignments: { tenant_name: ["tenant1"] },
+        requiredFields: ["tenant_name"],
+      })
+    ),
+    tenantName: "Bruce Wayne",
+  });
+
+  const tenantCompletion = await getParticipantCompletion(pdfBytes, "tenant1");
+
+  assert.deepEqual(tenantCompletion, {
+    requiredAssignedCount: 1,
+    completedRequiredCount: 1,
+    remainingRequiredCount: 0,
+    remainingRequiredFields: [],
+    isComplete: true,
+  });
+});
+
+test("does not double-count fields both required and assigned", async () => {
+  const pdfBytes = await createLeasePdf({
+    title: serializeEditorMetadata(
+      createEditorMetadata({
+        fieldAssignments: { tenant_name: ["tenant1"] },
+        requiredFields: ["tenant_name"],
+      })
+    ),
+  });
+
+  const tenantCompletion = await getParticipantCompletion(pdfBytes, "tenant1");
+
+  assert.equal(tenantCompletion.requiredAssignedCount, 1);
+  assert.equal(tenantCompletion.remainingRequiredCount, 1);
 });
 
 test("treats unchecked checkboxes and empty strings as incomplete", async () => {

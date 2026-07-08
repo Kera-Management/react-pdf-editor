@@ -668,7 +668,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           origin: "new",
           properties: {
             placeholder: type === "text" ? "Enter text..." : undefined,
-            required: false,
+            // Signatures exist to be collected — default them to required so
+            // completion checks block until they are signed.
+            required: type === "signature",
             fontSize: 12,
             fontColor: "#000000",
             backgroundColor: "#ffffff",

@@ -132,12 +132,31 @@ export const extractEditorMetadata = async (
   return parseEditorMetadataValue(libDoc.getTitle());
 };
 
-const getFieldValue = (field?: PDFFormRawField) => {
-  if (!field) {
+// pdf.js returns one entry per node of a field's tree: the first entry can be
+// a non-terminal parent with no `value`, with the actual widget value on a
+// later entry — scan them all instead of trusting entry [0].
+const getFieldValue = (fieldEntries?: PDFFormRawField[]) => {
+  if (!fieldEntries?.length) {
     return "";
   }
 
-  return field.value || field.defaultValue || "";
+  for (const entry of fieldEntries) {
+    if (entry && typeof entry.value === "string" && entry.value !== "") {
+      return entry.value;
+    }
+  }
+
+  for (const entry of fieldEntries) {
+    if (
+      entry &&
+      typeof entry.defaultValue === "string" &&
+      entry.defaultValue !== ""
+    ) {
+      return entry.defaultValue;
+    }
+  }
+
+  return "";
 };
 
 const isFieldComplete = (value?: string) =>
@@ -154,6 +173,8 @@ export const getRequiredAssignedFieldNames = ({
     return metadata.requiredFields;
   }
 
+  // Only explicitly required fields count: assignment controls who may edit
+  // a field, not whether it must be completed.
   return metadata.requiredFields.filter((fieldName) => {
     const assignees = metadata.fieldAssignments[fieldName];
     return assignees ? assignees.includes(participantId) : true;
@@ -209,7 +230,7 @@ export const getParticipantCompletion = async (
     const formFields = Object.fromEntries(
       Object.entries(rawFormFields || {}).map(([fieldName, fields]) => [
         fieldName,
-        getFieldValue(fields?.[0]),
+        getFieldValue(fields),
       ])
     );
 
