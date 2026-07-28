@@ -162,6 +162,27 @@ const getFieldValue = (fieldEntries?: PDFFormRawField[]) => {
 const isFieldComplete = (value?: string) =>
   Boolean(value && value.trim() !== "" && value !== "Off");
 
+/**
+ * Participant ids are matched loosely: trimmed and case-folded. The assignee ids
+ * baked into a PDF (e.g. a manager uid or an email) and the `activeParticipantId`
+ * the host app supplies can drift by whitespace or casing without either side
+ * being "wrong", and a strict mismatch silently locks a signer out of their own
+ * field. Normalize both sides everywhere ids are compared.
+ */
+export const normalizeParticipantId = (id?: string | null): string =>
+  (id ?? "").trim().toLowerCase();
+
+export const assigneesIncludeParticipant = (
+  assignees: string[] | undefined,
+  participantId?: string
+): boolean => {
+  if (!assignees?.length) {
+    return false;
+  }
+  const target = normalizeParticipantId(participantId);
+  return assignees.some((assignee) => normalizeParticipantId(assignee) === target);
+};
+
 export const getRequiredAssignedFieldNames = ({
   metadata,
   participantId,
@@ -173,11 +194,22 @@ export const getRequiredAssignedFieldNames = ({
     return metadata.requiredFields;
   }
 
+  // When no fields are explicitly marked required (e.g. inspection sign-offs,
+  // which carry only per-party assignments and no requiredFields), treat the
+  // fields assigned to this participant as their required set, so progress
+  // reflects the boxes they actually have to sign. Flows that DO declare
+  // requiredFields keep their existing semantics untouched.
+  if (metadata.requiredFields.length === 0) {
+    return Object.keys(metadata.fieldAssignments).filter((fieldName) =>
+      assigneesIncludeParticipant(metadata.fieldAssignments[fieldName], participantId)
+    );
+  }
+
   // Only explicitly required fields count: assignment controls who may edit
   // a field, not whether it must be completed.
   return metadata.requiredFields.filter((fieldName) => {
     const assignees = metadata.fieldAssignments[fieldName];
-    return assignees ? assignees.includes(participantId) : true;
+    return assignees ? assigneesIncludeParticipant(assignees, participantId) : true;
   });
 };
 

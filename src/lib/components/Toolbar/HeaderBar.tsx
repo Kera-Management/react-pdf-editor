@@ -4,6 +4,7 @@ import {
   MagnifyingGlassMinus,
   MagnifyingGlassPlus,
   FloppyDisk,
+  DownloadSimple,
   List,
   Spinner,
   CaretDown,
@@ -32,6 +33,13 @@ export interface HeaderBarProps {
   onSave: () => void;
   /** Whether save is in progress */
   isSaving?: boolean;
+  /**
+   * Optional callback for a download action. When provided, a Download button
+   * is rendered to the left of the Save button.
+   */
+  onDownload?: () => void;
+  /** Whether a download is in progress */
+  isDownloading?: boolean;
   /** Callback for close action */
   onClose?: () => void;
   /** Document title */
@@ -71,6 +79,8 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   zoomOutDisabled,
   onSave,
   isSaving,
+  onDownload,
+  isDownloading,
   onClose,
   title,
   currentPage,
@@ -213,6 +223,23 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             <MagnifyingGlassPlus weight="bold" size={18} />
           </button>
         </div>
+
+        {/* Download button */}
+        {onDownload && (
+          <button
+            type="button"
+            className={styles.downloadButton}
+            onClick={onDownload}
+            disabled={isDownloading}
+          >
+            {isDownloading ? (
+              <Spinner size={18} className={styles.spinning} />
+            ) : (
+              <DownloadSimple weight="bold" size={18} />
+            )}
+            {!isMobile && <span>Download</span>}
+          </button>
+        )}
 
         {/* Save button */}
         <button

@@ -302,6 +302,38 @@
   cursor: not-allowed;
 }
 
+/* ==========================================================================
+   Download Button
+   ========================================================================== */
+
+.downloadButton {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-surface-active);
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  cursor: pointer;
+  transition: background var(--transition-fast), transform var(--transition-fast);
+}
+
+.downloadButton:hover:not(:disabled) {
+  background: var(--border-strong);
+}
+
+.downloadButton:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.downloadButton:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
 .spinning {
   animation: spin 1s linear infinite;
 }
@@ -372,6 +404,10 @@
   }
 
   .saveButton {
+    padding: var(--space-2);
+  }
+
+  .downloadButton {
     padding: var(--space-2);
   }
 }

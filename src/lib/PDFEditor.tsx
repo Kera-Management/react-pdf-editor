@@ -30,6 +30,7 @@ import {
   PDFTextField,
 } from "pdf-lib";
 import {
+  assigneesIncludeParticipant,
   calculateParticipantCompletion,
   createEditorMetadata,
   extractEditorMetadata,
@@ -188,6 +189,13 @@ export interface PDFEditorProps {
   onClose?: () => void;
   /** Allowed modes to show in the mode selector. Defaults to all modes. */
   allowedModes?: PDFEditorMode[];
+  /**
+   * Optional callback for a download action. When provided, a Download button
+   * is rendered in the header bar, to the left of the Save button.
+   */
+  onDownload?: () => void;
+  /** Whether a download is in progress (drives the Download button spinner). */
+  isDownloading?: boolean;
 }
 
 // Use worker from the installed pdfjs-dist package to ensure version matching
@@ -218,6 +226,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       theme = "light",
       onClose,
       allowedModes = ["build", "edit", "view"],
+      onDownload,
+      isDownloading,
     } = props;
 
     // Determine the effective initial mode - must be in allowedModes
@@ -468,7 +478,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                   : fieldAssignments;
               const assignedIds = effectiveAssignments?.[field.name];
               const isAssigned = assignedIds
-                ? assignedIds.includes(activeParticipantId)
+                ? assigneesIncludeParticipant(assignedIds, activeParticipantId)
                 : true; // default allow if no mapping provided
 
               if (!isAssigned) {
@@ -1370,6 +1380,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           zoomOutDisabled={zoomLevel <= 0}
           onSave={onSaveAs}
           isSaving={isSaving}
+          onDownload={onDownload}
+          isDownloading={isDownloading}
           onClose={onClose}
           currentPage={activePage}
           totalPages={pages?.length || 0}
