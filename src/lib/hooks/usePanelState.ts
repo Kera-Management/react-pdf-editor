@@ -5,7 +5,9 @@ export type PanelId =
   | "fieldPalette"
   | "properties"
   | "progress"
-  | "mobileSheet";
+  | "mobileSheet"
+  | "hostPanel"
+  | "parties";
 
 export interface PanelConfig {
   id: PanelId;
@@ -51,6 +53,21 @@ const defaultPanelConfigs: Record<PanelId, PanelConfig> = {
     isOpen: false,
     isCollapsed: true,
     height: 80, // collapsed height
+  },
+  // Generic host-injected panel (e.g. a signing-recipients UI). Open by
+  // default, matching "progress" — a host that supplies sidebarPanel expects
+  // it visible immediately, not behind an extra toggle it has to know about.
+  hostPanel: {
+    id: "hostPanel",
+    isOpen: true,
+    isCollapsed: false,
+  },
+  // Recipients/parties panel. Open by default, matching hostPanel — a host
+  // that supplies a parties config expects it visible immediately.
+  parties: {
+    id: "parties",
+    isOpen: true,
+    isCollapsed: false,
   },
 };
 

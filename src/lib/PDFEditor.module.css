@@ -64,6 +64,21 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 
+/* A section that sizes to its own content instead of taking an equal
+   flex:1 share of the sidebar -- for panels like Properties that can be
+   much shorter than their siblings (Parties, Pages) and shouldn't stretch
+   to match them. Capped and independently scrollable so a very tall one
+   still can't dominate the sidebar. */
+.sidebarSectionAuto {
+  flex: 0 1 auto;
+  max-height: 50vh;
+}
+
+.sidebarSectionAuto .sidebarContent {
+  flex: 0 1 auto;
+  max-height: 100%;
+}
+
 .sidebarHeader {
   display: flex;
   align-items: center;
@@ -225,6 +240,13 @@
   overflow: hidden;
 }
 
+/* Wider slot for the parties/recipients panel -- it carries names, badges
+   and per-row controls that the default width (sized for the Properties
+   panel's short key/value list) would cramp. */
+.rightSidebar.partiesOpen {
+  width: var(--panel-width-lg);
+}
+
 /* ==========================================================================
    Floating Panels Container
    ========================================================================== */
@@ -320,6 +342,34 @@
   cursor: not-allowed;
 }
 
+/* Required-field indicator -- `data-required` is set by the gating loop in
+   renderPages (structural, from metadata) so it applies uniformly to
+   text/select inputs and the signature button without special-casing each
+   one's JSX. `data-complete` is its value-aware companion, set directly in
+   the field JSX (see isFieldValueComplete) since it must react to every
+   keystroke, which the imperative renderPages loop deliberately never
+   reruns on. The red ring only shows while required AND still empty. */
+.pdfInput[data-required="true"]:not([data-complete="true"]),
+.pdfSelect[data-required="true"]:not([data-complete="true"]),
+.signatureFieldButton[data-required="true"]:not([data-complete="true"]) {
+  box-shadow: 0 0 0 1px var(--color-error-500);
+}
+
+.pdfInput[data-required="true"]:not([data-complete="true"]):focus,
+.pdfSelect[data-required="true"]:not([data-complete="true"]):focus,
+.signatureFieldButton[data-required="true"]:not([data-complete="true"]):focus-visible {
+  box-shadow: 0 0 0 2px var(--color-error-500);
+}
+
+/* Required field the signer HAS completed -- a quiet accent tint instead
+   of no indicator at all, so a completed required field still reads as
+   "this one mattered" rather than looking identical to an optional one. */
+.pdfInput[data-required="true"][data-complete="true"],
+.pdfSelect[data-required="true"][data-complete="true"],
+.signatureFieldButton[data-required="true"][data-complete="true"] {
+  box-shadow: 0 0 0 1px var(--accent-primary);
+}
+
 /* Textarea */
 .pdfInput[data-type="multiline"] {
   resize: none;
@@ -357,6 +407,160 @@
   outline: none;
   border-color: var(--accent-primary);
   box-shadow: 0 0 0 2px var(--accent-primary-subtle);
+}
+
+/* ==========================================================================
+   Signature Field (click-to-sign, edit/view mode)
+   ========================================================================== */
+
+.signatureFieldButton {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px dashed var(--accent-primary);
+  border-radius: 2px;
+  padding: 2px 4px;
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.signatureFieldButton:hover:not(:disabled) {
+  background: white;
+  border-color: var(--accent-primary-hover);
+}
+
+.signatureFieldButton:focus-visible {
+  outline: none;
+  border-style: solid;
+  box-shadow: 0 0 0 2px var(--accent-primary-subtle);
+}
+
+.signatureFieldButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.signatureFieldPrompt {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 11px;
+  font-weight: var(--font-medium);
+  color: var(--accent-primary);
+  white-space: nowrap;
+}
+
+/* Mirrors the saved stamp's sizing rule: bounded by the field's width, but
+   never squashed below a legible height -- on short line fields the ink
+   rises above the field box (buttons don't clip overflow), sitting on the
+   line like a real signature. */
+.signatureFieldImage {
+  position: absolute;
+  bottom: 1px;
+  left: 50%;
+  transform: translateX(-50%);
+  height: max(100%, 40px);
+  max-width: 100%;
+  object-fit: contain;
+  object-position: bottom center;
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   Unsaved-changes close guard
+   ========================================================================== */
+
+.unsavedGuardBody {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.unsavedGuardPrimaryButton {
+  appearance: none;
+  border: none;
+  /* min-height + nowrap, never a fixed height: three-word labels in a small
+     modal must widen or wrap the footer ROW, not clip inside the button. */
+  min-height: var(--btn-height);
+  white-space: nowrap;
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--btn-radius);
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+  font-size: var(--text-sm);
+  font-weight: var(--btn-font-weight);
+  cursor: pointer;
+}
+
+.unsavedGuardPrimaryButton:hover:not(:disabled) {
+  background: var(--accent-primary-hover);
+}
+
+.unsavedGuardPrimaryButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.unsavedGuardSecondaryButton {
+  appearance: none;
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+  min-height: var(--btn-height);
+  white-space: nowrap;
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--btn-radius);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--btn-font-weight);
+  cursor: pointer;
+}
+
+.unsavedGuardSecondaryButton:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.unsavedGuardSecondaryButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Danger variant of unsavedGuardPrimaryButton, for the decline-to-sign
+   confirm -- same shape, error tokens instead of the accent color. */
+.declineDangerButton {
+  appearance: none;
+  border: none;
+  min-height: var(--btn-height);
+  white-space: nowrap;
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--btn-radius);
+  background: var(--color-error-500);
+  color: var(--text-on-accent);
+  font-size: var(--text-sm);
+  font-weight: var(--btn-font-weight);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.declineDangerButton:hover:not(:disabled) {
+  background: var(--color-error-600);
+}
+
+.declineDangerButton:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* Reuses the `spin` keyframes already defined below (.loadingSpinner). */
+.spinning {
+  animation: spin 1s linear infinite;
 }
 
 /* ==========================================================================
@@ -462,6 +666,57 @@
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* ==========================================================================
+   Full-editor States (initial load skeleton, load error)
+   ========================================================================== */
+
+.stateContainer {
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8);
+}
+
+.loadingSkeleton {
+  width: min(100%, 640px);
+  height: min(80vh, 800px);
+  border-radius: var(--radius-lg);
+}
+
+.errorPanel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 420px;
+  text-align: center;
+}
+
+.errorIcon {
+  color: var(--color-error-500);
+}
+
+.errorHeading {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+}
+
+.errorBody {
+  margin: 0;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.errorDetail {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-family: monospace;
+  word-break: break-word;
 }
 
 /* ==========================================================================
@@ -576,3 +831,179 @@
 .pageContainer:nth-child(3) { animation-delay: 100ms; }
 .pageContainer:nth-child(4) { animation-delay: 150ms; }
 .pageContainer:nth-child(5) { animation-delay: 200ms; }
+
+/* ==========================================================================
+   Unsaved-Prepare notice (Fill & Sign mode)
+   ========================================================================== */
+
+.unsavedPrepareNotice {
+  /* Above the canvasArea grid pseudo-element. */
+  position: relative;
+  z-index: 1;
+  margin: var(--space-2) var(--space-3) 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--accent-primary-subtle);
+  border: 1px solid var(--accent-primary);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal, 1.5);
+  flex-shrink: 0;
+}
+
+/* ==========================================================================
+   Field Popover (build mode, desktop) -- name/size/placeholder/options for
+   the selected field, anchored via the Popover primitive. Class names and
+   rules mirror PropertiesPanel/OptionsEditor's own formGroup/label/input
+   conventions so the rendered output reads as part of the same design
+   system, without depending on either component's CSS module.
+   ========================================================================== */
+
+.fieldPopoverForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.fieldPopoverTypeIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--accent-primary-subtle);
+  border-radius: var(--radius-md);
+  color: var(--accent-primary);
+}
+
+.fieldPopoverFormGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.fieldPopoverLabel {
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  margin: 0;
+  padding: 0;
+}
+
+.fieldPopoverInput {
+  width: 100%;
+  height: var(--input-height);
+  padding: 0 var(--space-3);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.fieldPopoverInput::placeholder {
+  color: var(--text-muted);
+}
+
+.fieldPopoverInput:hover {
+  border-color: var(--border-strong);
+}
+
+.fieldPopoverInput:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: var(--input-focus-ring);
+}
+
+.fieldPopoverEditOptionsButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--input-height);
+  padding: 0 var(--space-3);
+  background: transparent;
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  color: var(--accent-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.fieldPopoverEditOptionsButton:hover {
+  border-color: var(--accent-primary);
+  background: var(--accent-primary-subtle);
+}
+
+/* Reset native fieldset chrome -- used purely for the legend/group
+   semantics, not its default border+padding box. */
+.fieldPopoverSizeFieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+
+.fieldPopoverSizeRow {
+  /* Stacked, not side-by-side: the popover is narrow, and two half-width
+     number inputs cramp before full-width rows ever need to scroll. */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.fieldPopoverSizeField {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fieldPopoverSizeLabel {
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  color: var(--text-muted);
+  /* Wide enough for "Height" so both inputs left-align. */
+  width: 44px;
+  flex-shrink: 0;
+}
+
+.fieldPopoverSizeInput {
+  flex: 1;
+  height: var(--input-height);
+  padding: 0 var(--space-2);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.fieldPopoverSizeInput:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: var(--input-focus-ring);
+}
+
+/* Hide number input spinners */
+.fieldPopoverSizeInput::-webkit-outer-spin-button,
+.fieldPopoverSizeInput::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.fieldPopoverSizeInput[type="number"] {
+  -moz-appearance: textfield;
+}

@@ -13,9 +13,14 @@ export type PDFEditorSource =
   | DocumentInitParameters;
 
 export interface PDFEditorMetadata {
-  version: 2;
+  version: 2 | 3;
   fieldAssignments: Record<string, string[]>;
   requiredFields: string[];
+  /**
+   * Field names that are signature fields (as opposed to text/checkbox
+   * fields). Introduced in v3; a v2 document parses with `[]`.
+   */
+  signatureFields: string[];
 }
 
 export interface ParticipantCompletion {
@@ -36,9 +41,10 @@ const LEGACY_ASSIGNMENTS_PREFIX = "REACT_PDF_EDITOR_ASSIGNMENTS:";
 const METADATA_PREFIX = "REACT_PDF_EDITOR_METADATA:";
 
 const EMPTY_METADATA: PDFEditorMetadata = {
-  version: 2,
+  version: 3,
   fieldAssignments: {},
   requiredFields: [],
+  signatureFields: [],
 };
 
 const normalizeFieldAssignments = (
@@ -72,16 +78,30 @@ const normalizeRequiredFields = (requiredFields: unknown): string[] => {
   );
 };
 
+const normalizeSignatureFields = (signatureFields: unknown): string[] => {
+  if (!Array.isArray(signatureFields)) {
+    return [];
+  }
+
+  return signatureFields.filter(
+    (fieldName): fieldName is string =>
+      typeof fieldName === "string" && fieldName.trim().length > 0
+  );
+};
+
 export const createEditorMetadata = ({
   fieldAssignments,
   requiredFields,
+  signatureFields = [],
 }: {
   fieldAssignments: Record<string, string[]>;
   requiredFields: string[];
+  signatureFields?: string[];
 }): PDFEditorMetadata => ({
-  version: 2,
+  version: 3,
   fieldAssignments: normalizeFieldAssignments(fieldAssignments),
   requiredFields: normalizeRequiredFields(requiredFields),
+  signatureFields: normalizeSignatureFields(signatureFields),
 });
 
 export const serializeEditorMetadata = (metadata: PDFEditorMetadata): string =>
@@ -97,13 +117,24 @@ export const parseEditorMetadataValue = (
   if (value.startsWith(METADATA_PREFIX)) {
     try {
       const parsed = JSON.parse(value.slice(METADATA_PREFIX.length));
+      const isObject = parsed && typeof parsed === "object";
 
-      return createEditorMetadata({
-        fieldAssignments:
-          parsed && typeof parsed === "object" ? parsed.fieldAssignments : {},
-        requiredFields:
-          parsed && typeof parsed === "object" ? parsed.requiredFields : [],
-      });
+      // A v2 document has no `signatureFields` key at all -- it normalizes
+      // to `[]` below and its `version` is preserved as-is (2), so a
+      // not-yet-touched-by-signatures document stays honestly labelled v2
+      // until it is next written (createEditorMetadata always writes v3).
+      return {
+        version: isObject && parsed.version === 2 ? 2 : 3,
+        fieldAssignments: normalizeFieldAssignments(
+          isObject ? parsed.fieldAssignments : {}
+        ),
+        requiredFields: normalizeRequiredFields(
+          isObject ? parsed.requiredFields : []
+        ),
+        signatureFields: normalizeSignatureFields(
+          isObject ? parsed.signatureFields : []
+        ),
+      };
     } catch (error) {
       console.warn("Failed to parse react-pdf-editor metadata:", error);
       return EMPTY_METADATA;
@@ -113,10 +144,12 @@ export const parseEditorMetadataValue = (
   if (value.startsWith(LEGACY_ASSIGNMENTS_PREFIX)) {
     try {
       const parsed = JSON.parse(value.slice(LEGACY_ASSIGNMENTS_PREFIX.length));
-      return createEditorMetadata({
-        fieldAssignments: parsed,
+      return {
+        version: 2,
+        fieldAssignments: normalizeFieldAssignments(parsed),
         requiredFields: [],
-      });
+        signatureFields: [],
+      };
     } catch (error) {
       console.warn("Failed to parse legacy react-pdf-editor metadata:", error);
     }

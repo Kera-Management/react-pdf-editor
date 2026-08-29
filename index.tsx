@@ -2,6 +2,11 @@ import React, { useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import PDFEditor, { PDFEditorMode, PDFEditorRef } from "./src/lib/PDFEditor";
 
+// This is a plain dev-harness entry point (not a library module -- nothing
+// under src/ imports it), so it has no exports for react-refresh to key off
+// of. That's expected here; disable the rule rather than restructuring a
+// file that exists only to run `yarn dev` locally.
+// eslint-disable-next-line react-refresh/only-export-components
 const App = () => {
   const [src, setSrc] = useState("/generated-form.pdf");
   const [mode, setMode] = useState("build");

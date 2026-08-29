@@ -19,6 +19,12 @@ interface FieldPaletteProps {
     clientX: number,
     clientY: number
   ) => boolean;
+  /**
+   * Adds a field of this type without drag-and-drop -- fired on click, and
+   * on Enter/Space when a palette item has keyboard focus. The host
+   * decides where it lands (typically the center of the current view).
+   */
+  onFieldAdd?: (fieldType: BuildModeFieldType) => void;
   selectedField: BuildModeField | null;
   onCloseEditor: () => void;
   isCollapsed?: boolean;
@@ -28,7 +34,6 @@ interface FieldTypeConfig {
   type: BuildModeFieldType;
   label: string;
   icon: React.ReactNode;
-  shortcut?: string;
 }
 
 const fieldTypes: FieldTypeConfig[] = [
@@ -36,37 +41,31 @@ const fieldTypes: FieldTypeConfig[] = [
     type: "text",
     label: "Text",
     icon: <TextAa weight="duotone" size={20} />,
-    shortcut: "T",
   },
   {
     type: "multiline",
     label: "Text Area",
     icon: <TextAlignJustify weight="duotone" size={20} />,
-    shortcut: "A",
   },
   {
     type: "checkbox",
     label: "Checkbox",
     icon: <CheckSquare weight="duotone" size={20} />,
-    shortcut: "C",
   },
   {
     type: "dropdown",
     label: "Dropdown",
     icon: <RowsPlusBottom weight="duotone" size={20} />,
-    shortcut: "D",
   },
   {
     type: "radio",
     label: "Radio",
     icon: <RadioButton weight="duotone" size={20} />,
-    shortcut: "R",
   },
   {
     type: "signature",
     label: "Signature",
     icon: <Signature weight="duotone" size={20} />,
-    shortcut: "S",
   },
 ];
 
@@ -74,6 +73,7 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
   onFieldDragStart,
   onFieldDragEnd,
   onTouchDrop,
+  onFieldAdd,
   isCollapsed = false,
 }) => {
   const [activeType, setActiveType] = useState<BuildModeFieldType | null>(null);
@@ -145,6 +145,13 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
             onTouchStart={(e) => handleTouchStart(e, field.type)}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
+            onClick={() => onFieldAdd?.(field.type)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onFieldAdd?.(field.type);
+              }
+            }}
             role="button"
             tabIndex={0}
             aria-label={`Add ${field.label} field`}
@@ -154,9 +161,6 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
             </div>
             <div className={styles.fieldIcon}>{field.icon}</div>
             <span className={styles.fieldLabel}>{field.label}</span>
-            {field.shortcut && (
-              <span className={styles.shortcut}>{field.shortcut}</span>
-            )}
           </div>
         ))}
       </div>

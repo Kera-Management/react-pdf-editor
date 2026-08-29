@@ -120,6 +120,30 @@
 }
 
 /* ==========================================================================
+   Guided Navigation (Start / Next)
+   ========================================================================== */
+
+.guidedButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: var(--accent-primary);
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--text-on-accent);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.guidedButton:hover {
+  background: var(--accent-primary-hover);
+}
+
+/* ==========================================================================
    Remaining Section
    ========================================================================== */
 
@@ -127,6 +151,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  min-height: 0;
 }
 
 .remainingHeader {
@@ -142,6 +167,11 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  /* The full list renders (no 5-item truncation) -- scrolls in place
+     rather than growing the sidebar unboundedly. No virtualization: field
+     counts here are small enough that plain DOM + overflow is enough. */
+  max-height: 240px;
+  overflow-y: auto;
 }
 
 .remainingItem {
@@ -166,16 +196,15 @@
   color: var(--text-primary);
 }
 
+.remainingItem.active {
+  background: var(--accent-primary-subtle);
+  color: var(--accent-primary);
+}
+
 .remainingItem span {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.moreFields {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  padding-left: var(--space-3);
 }
 
 /* ==========================================================================
@@ -224,6 +253,29 @@
   color: var(--text-tertiary) !important;
 }
 
+.finishButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--touch-target-min);
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-6);
+  background: var(--color-success-500);
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--text-on-accent);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.finishButton:hover {
+  opacity: 0.9;
+}
+
 /* ==========================================================================
    Responsive
    ========================================================================== */
@@ -231,7 +283,6 @@
 @media (max-width: 640px) {
   .remainingList {
     max-height: 150px;
-    overflow-y: auto;
   }
 }
 

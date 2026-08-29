@@ -1,13 +1,19 @@
-import React, { useRef, useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import styles from "./ContextToolbar.module.css";
-import {
-  Trash,
-  Copy,
-  User,
-  Lock,
-  LockOpen,
-  DotsThree,
-} from "@phosphor-icons/react";
+import { Trash, Copy, Asterisk, PencilSimple, CaretDown } from "@phosphor-icons/react";
+import { positionFloatingElement } from "../shared/positionFloating";
+import { fieldTypeIcons } from "../shared/fieldTypeMeta";
+import { BuildModeFieldType } from "../../PDFEditor";
+
+/**
+ * Identifies the selected field in the toolbar's context chip -- the icon
+ * comes from the shared fieldTypeMeta map, the name is whatever the field is
+ * currently called.
+ */
+export interface ContextToolbarFieldContext {
+  fieldName: string;
+  fieldType: BuildModeFieldType;
+}
 
 export interface ContextToolbarProps {
   /** Position relative to the selected element */
@@ -16,111 +22,121 @@ export interface ContextToolbarProps {
   containerRef?: React.RefObject<HTMLElement>;
   /** Whether the toolbar is visible */
   isVisible: boolean;
+  /**
+   * The selected field's name + type, shown in the leading context chip.
+   * The chip (and its trailing divider) simply doesn't render without it,
+   * so a host mid-migration to the new contract still gets a working
+   * toolbar -- but every host should pass it: it's how a non-tech-savvy
+   * user tells which field they're editing.
+   */
+  context?: ContextToolbarFieldContext;
+  /**
+   * Transient confirmation text (e.g. "Added to 4 pages") that temporarily
+   * replaces the context chip's field name after an action completes. Pass
+   * null/undefined (or omit) to show the field name.
+   */
+  feedbackText?: string | null;
+  /** Whether the field is required */
+  isRequired?: boolean;
+  /** Callback for required toggle */
+  onToggleRequired?: () => void;
+  /** Callback to open the field's properties (opens the field Popover) */
+  onOpenProperties?: () => void;
+  /** Duplicate this field in place, on the current page. */
+  onDuplicate?: () => void;
+  /** Duplicate this field onto every other page in the document. */
+  onDuplicateAllPages?: () => void;
   /** Callback for delete action */
   onDelete?: () => void;
-  /** Callback for duplicate action */
-  onDuplicate?: () => void;
-  /** Callback for assign action */
-  onAssign?: () => void;
-  /** Callback for lock/unlock toggle */
+  /**
+   * Callback for lock/unlock toggle. Accepted for API stability but not
+   * wired to any control yet -- no lock button renders.
+   */
   onToggleLock?: () => void;
-  /** Whether the field is locked */
+  /** Whether the field is locked. Same status as onToggleLock -- unwired. */
   isLocked?: boolean;
-  /** Additional actions */
+  /** Additional actions, rendered after Duplicate and before Delete. */
   additionalActions?: React.ReactNode;
-  /** Participants for assignment */
-  participants?: { id: string; label: string }[];
-  /** Currently assigned participant */
-  assignedParticipant?: string;
 }
 
 type Position = "top" | "bottom";
+
+// Gap between the target element and the toolbar, in px.
+const GAP = 8;
 
 export const ContextToolbar: React.FC<ContextToolbarProps> = ({
   targetRect,
   containerRef,
   isVisible,
-  onDelete,
+  context,
+  feedbackText,
+  isRequired = false,
+  onToggleRequired,
+  onOpenProperties,
   onDuplicate,
-  onAssign,
-  onToggleLock,
-  isLocked = false,
+  onDuplicateAllPages,
+  onDelete,
   additionalActions,
 }) => {
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const duplicateGroupRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<Position>("top");
   const [coords, setCoords] = useState({ x: 0, y: 0 });
-  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [isDuplicateMenuOpen, setIsDuplicateMenuOpen] = useState(false);
 
   // Calculate position based on target element
   useEffect(() => {
     if (!isVisible || !targetRect || !toolbarRef.current) return;
 
-    const toolbar = toolbarRef.current;
-    const toolbarRect = toolbar.getBoundingClientRect();
+    const toolbarRect = toolbarRef.current.getBoundingClientRect();
     const containerRect = containerRef?.current?.getBoundingClientRect();
 
-    // Calculate horizontal center
-    let x = targetRect.left + targetRect.width / 2 - toolbarRect.width / 2;
+    const result = positionFloatingElement(
+      targetRect,
+      toolbarRect,
+      containerRect,
+      GAP
+    );
 
-    // Calculate vertical position (prefer top, fallback to bottom)
-    const spaceAbove = containerRect
-      ? targetRect.top - containerRect.top
-      : targetRect.top;
-    const spaceBelow = containerRect
-      ? containerRect.bottom - targetRect.bottom
-      : window.innerHeight - targetRect.bottom;
-
-    const toolbarHeight = toolbarRect.height + 8; // 8px gap
-
-    let y: number;
-    let pos: Position;
-
-    if (spaceAbove >= toolbarHeight || spaceAbove > spaceBelow) {
-      // Position above
-      y = targetRect.top - toolbarHeight;
-      pos = "top";
-    } else {
-      // Position below
-      y = targetRect.bottom + 8;
-      pos = "bottom";
-    }
-
-    // Constrain to viewport/container
-    const minX = containerRect ? containerRect.left + 8 : 8;
-    const maxX = containerRect
-      ? containerRect.right - toolbarRect.width - 8
-      : window.innerWidth - toolbarRect.width - 8;
-    const minY = containerRect ? containerRect.top + 8 : 8;
-    const maxY = containerRect
-      ? containerRect.bottom - toolbarRect.height - 8
-      : window.innerHeight - toolbarRect.height - 8;
-
-    x = Math.max(minX, Math.min(maxX, x));
-    y = Math.max(minY, Math.min(maxY, y));
-
-    setCoords({ x, y });
-    setPosition(pos);
+    setCoords({ x: result.x, y: result.y });
+    setPosition(result.placement);
   }, [isVisible, targetRect, containerRef]);
 
-  // Close more menu when clicking outside
+  // The duplicate menu belongs to whichever field is currently selected --
+  // close it whenever the toolbar hides or re-anchors to a different field,
+  // so it never lingers open over the wrong selection.
   useEffect(() => {
-    if (!showMoreMenu) return;
+    setIsDuplicateMenuOpen(false);
+  }, [isVisible, targetRect]);
 
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        toolbarRef.current &&
-        !toolbarRef.current.contains(e.target as Node)
-      ) {
-        setShowMoreMenu(false);
-      }
+  // Click-outside and Escape close the duplicate menu.
+  useEffect(() => {
+    if (!isDuplicateMenuOpen) return undefined;
+
+    const handlePointerDown = (e: MouseEvent) => {
+      if (duplicateGroupRef.current?.contains(e.target as Node)) return;
+      setIsDuplicateMenuOpen(false);
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsDuplicateMenuOpen(false);
     };
 
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showMoreMenu]);
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isDuplicateMenuOpen]);
 
   if (!isVisible || !targetRect) return null;
+
+  // Two distinct duplicate actions only need a menu when BOTH are wired --
+  // with just one, the button performs it directly, same as any other
+  // single-purpose action in the bar.
+  const hasBothDuplicateActions = !!onDuplicate && !!onDuplicateAllPages;
+  const showDuplicate = !!(onDuplicate || onDuplicateAllPages);
+  const chipText = feedbackText ?? context?.fieldName;
 
   return (
     <div
@@ -133,94 +149,131 @@ export const ContextToolbar: React.FC<ContextToolbarProps> = ({
       role="toolbar"
       aria-label="Field actions"
     >
-      {/* Duplicate */}
-      {onDuplicate && (
+      {/* Context chip: type icon + field name (or transient feedback) */}
+      {context && (
+        <>
+          <div className={styles.chip} aria-live="polite">
+            <span className={styles.chipIcon} aria-hidden="true">
+              {fieldTypeIcons[context.fieldType]}
+            </span>
+            <span className={styles.chipText}>{chipText}</span>
+          </div>
+
+          <div className={styles.divider} aria-hidden="true" />
+        </>
+      )}
+
+      {/* Required */}
+      {onToggleRequired && (
         <button
           type="button"
-          className={styles.button}
-          onClick={onDuplicate}
-          title="Duplicate (Ctrl+D)"
+          className={`${styles.button} ${isRequired ? styles.active : ""}`}
+          onClick={onToggleRequired}
+          aria-label="Required"
+          aria-pressed={isRequired}
         >
-          <Copy weight="bold" size={16} />
+          <span className={styles.requiredDot} aria-hidden="true" />
+          <Asterisk weight="bold" size={14} aria-hidden="true" />
+          <span className={styles.buttonLabel}>Required</span>
         </button>
       )}
 
-      {/* Assign */}
-      {onAssign && (
+      {/* Field properties */}
+      {onOpenProperties && (
         <button
           type="button"
           className={styles.button}
-          onClick={onAssign}
-          title="Assign to participant"
+          onClick={onOpenProperties}
+          aria-label="Edit"
         >
-          <User weight="bold" size={16} />
+          <PencilSimple weight="bold" size={14} aria-hidden="true" />
+          <span className={styles.buttonLabel}>Edit</span>
         </button>
       )}
 
-      {/* Lock/Unlock */}
-      {onToggleLock && (
-        <button
-          type="button"
-          className={`${styles.button} ${isLocked ? styles.active : ""}`}
-          onClick={onToggleLock}
-          title={isLocked ? "Unlock field" : "Lock field"}
-        >
-          {isLocked ? (
-            <Lock weight="bold" size={16} />
-          ) : (
-            <LockOpen weight="bold" size={16} />
+      {/* Duplicate -- opens a small labeled menu when BOTH duplicate
+          actions are wired (the normal, fully-wired case); with just one
+          available, the button performs it directly. */}
+      {showDuplicate && hasBothDuplicateActions && (
+        <div className={styles.duplicateGroup} ref={duplicateGroupRef}>
+          <button
+            type="button"
+            className={styles.button}
+            onClick={() => setIsDuplicateMenuOpen((open) => !open)}
+            aria-label="Duplicate"
+            aria-haspopup="menu"
+            aria-expanded={isDuplicateMenuOpen}
+          >
+            <Copy weight="bold" size={14} aria-hidden="true" />
+            <span className={styles.buttonLabel}>Duplicate</span>
+            <CaretDown weight="bold" size={10} aria-hidden="true" />
+          </button>
+
+          {isDuplicateMenuOpen && (
+            <div
+              className={styles.menu}
+              role="menu"
+              aria-label="Duplicate options"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.menuItem}
+                onClick={() => {
+                  setIsDuplicateMenuOpen(false);
+                  onDuplicate?.();
+                }}
+              >
+                On this page
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.menuItem}
+                onClick={() => {
+                  setIsDuplicateMenuOpen(false);
+                  onDuplicateAllPages?.();
+                }}
+              >
+                On every page
+              </button>
+            </div>
           )}
+        </div>
+      )}
+
+      {showDuplicate && !hasBothDuplicateActions && (
+        <button
+          type="button"
+          className={styles.button}
+          onClick={() => (onDuplicate ?? onDuplicateAllPages)?.()}
+          aria-label="Duplicate"
+        >
+          <Copy weight="bold" size={14} aria-hidden="true" />
+          <span className={styles.buttonLabel}>Duplicate</span>
         </button>
       )}
 
       {/* Additional actions */}
       {additionalActions}
 
-      {/* Divider */}
-      <div className={styles.divider} />
-
       {/* Delete */}
       {onDelete && (
-        <button
-          type="button"
-          className={`${styles.button} ${styles.danger}`}
-          onClick={onDelete}
-          title="Delete (Backspace)"
-        >
-          <Trash weight="bold" size={16} />
-        </button>
+        <>
+          <div className={styles.divider} aria-hidden="true" />
+          <button
+            type="button"
+            className={`${styles.button} ${styles.danger}`}
+            onClick={onDelete}
+            aria-label="Delete"
+          >
+            <Trash weight="bold" size={14} aria-hidden="true" />
+            <span className={styles.buttonLabel}>Delete</span>
+          </button>
+        </>
       )}
-
-      {/* More menu */}
-      <div className={styles.moreWrapper}>
-        <button
-          type="button"
-          className={styles.button}
-          onClick={() => setShowMoreMenu(!showMoreMenu)}
-          aria-expanded={showMoreMenu}
-          title="More options"
-        >
-          <DotsThree weight="bold" size={16} />
-        </button>
-
-        {showMoreMenu && (
-          <div className={styles.moreMenu}>
-            <button type="button" className={styles.menuItem}>
-              <span>Bring to front</span>
-              <span className={styles.shortcut}>⌘]</span>
-            </button>
-            <button type="button" className={styles.menuItem}>
-              <span>Send to back</span>
-              <span className={styles.shortcut}>⌘[</span>
-            </button>
-          </div>
-        )}
-      </div>
     </div>
   );
 };
 
 export default ContextToolbar;
-
-
-

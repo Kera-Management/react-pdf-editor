@@ -1,20 +1,22 @@
-import React, { useState, useCallback } from "react";
-import { BuildModeField, BuildModeFieldType } from "../../PDFEditor";
+import React, { useCallback, useId } from "react";
+import { BuildModeField } from "../../PDFEditor";
 import styles from "./PropertiesPanel.module.css";
-import {
-  Trash,
-  TextAa,
-  CheckSquare,
-  RowsPlusBottom,
-  RadioButton,
-  Signature,
-  TextAlignJustify,
-  Plus,
-  X,
-} from "@phosphor-icons/react";
+import { OptionsEditor } from "./OptionsEditor";
+import { Trash, X } from "@phosphor-icons/react";
+import { fieldTypeIcons, fieldTypeLabels } from "../shared/fieldTypeMeta";
+
+export interface PropertiesPanelParticipant {
+  id: string;
+  label: string;
+  role?: string;
+}
 
 interface PropertiesPanelProps {
-  /** Currently selected field */
+  /**
+   * Currently selected field. The panel renders nothing (returns `null`) when this is
+   * `null` -- a host gates its own sidebar section on this same value rather than
+   * duplicating the empty state.
+   */
   selectedField: BuildModeField | null;
   /** Callback when field is updated */
   onUpdateField: (fieldId: string, updates: Partial<BuildModeField>) => void;
@@ -22,27 +24,22 @@ interface PropertiesPanelProps {
   onDeleteField: (fieldId: string) => void;
   /** Callback to close the panel */
   onClose: () => void;
-  /** Available participants for assignment */
-  participants?: { id: string; label: string; role?: string }[];
+  /**
+   * Participants assignable to fields -- typically the host's ASSIGNABLE list
+   * (participants minus anyone currently excluded). Drives which rows appear as
+   * freshly-checkable in "Assign to".
+   */
+  participants?: PropertiesPanelParticipant[];
+  /**
+   * The FULL, unfiltered participant list. Used only to resolve a display name for an
+   * id already present in `selectedField.properties.assignees` that no longer appears
+   * in `participants` (e.g. a party was excluded after fields were assigned to them),
+   * so that row keeps showing their name instead of a raw id. Falls back to
+   * `participants` when omitted, and to the raw id if the name isn't found in either
+   * list.
+   */
+  allParticipants?: PropertiesPanelParticipant[];
 }
-
-const fieldTypeIcons: Record<BuildModeFieldType, React.ReactNode> = {
-  text: <TextAa weight="duotone" size={16} />,
-  multiline: <TextAlignJustify weight="duotone" size={16} />,
-  checkbox: <CheckSquare weight="duotone" size={16} />,
-  dropdown: <RowsPlusBottom weight="duotone" size={16} />,
-  radio: <RadioButton weight="duotone" size={16} />,
-  signature: <Signature weight="duotone" size={16} />,
-};
-
-const fieldTypeLabels: Record<BuildModeFieldType, string> = {
-  text: "Text Field",
-  multiline: "Text Area",
-  checkbox: "Checkbox",
-  dropdown: "Dropdown",
-  radio: "Radio Button",
-  signature: "Signature",
-};
 
 export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   selectedField,
@@ -50,8 +47,9 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   onDeleteField,
   onClose,
   participants = [],
+  allParticipants,
 }) => {
-  const [newOption, setNewOption] = useState("");
+  const idPrefix = useId();
 
   const handleNameChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -105,8 +103,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   const handleAssignmentChange = useCallback(
     (participantId: string, checked: boolean) => {
       if (selectedField) {
-        const currentAssignments =
-          selectedField.properties.assignees || [];
+        const currentAssignments = selectedField.properties.assignees || [];
         const newAssignments = checked
           ? [...currentAssignments, participantId]
           : currentAssignments.filter((id: string) => id !== participantId);
@@ -121,22 +118,24 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     [selectedField, onUpdateField]
   );
 
-  const handleAddOption = useCallback(() => {
-    if (selectedField && newOption.trim()) {
-      const currentOptions = selectedField.properties.options || [];
-      const newOptionItem = {
-        exportValue: newOption.trim().toLowerCase().replace(/\s+/g, "_"),
-        displayValue: newOption.trim(),
-      };
-      onUpdateField(selectedField.id, {
-        properties: {
-          ...selectedField.properties,
-          options: [...currentOptions, newOptionItem],
-        },
-      });
-      setNewOption("");
-    }
-  }, [selectedField, newOption, onUpdateField]);
+  const handleAddOption = useCallback(
+    (label: string) => {
+      if (selectedField && label.trim()) {
+        const currentOptions = selectedField.properties.options || [];
+        const newOptionItem = {
+          exportValue: label.trim().toLowerCase().replace(/\s+/g, "_"),
+          displayValue: label.trim(),
+        };
+        onUpdateField(selectedField.id, {
+          properties: {
+            ...selectedField.properties,
+            options: [...currentOptions, newOptionItem],
+          },
+        });
+      }
+    },
+    [selectedField, onUpdateField]
+  );
 
   const handleRemoveOption = useCallback(
     (index: number) => {
@@ -154,15 +153,36 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   );
 
   if (!selectedField) {
-    return (
-      <div className={styles.empty}>
-        <p>Select a field to edit its properties</p>
-      </div>
-    );
+    return null;
   }
 
   const needsOptions =
     selectedField.type === "dropdown" || selectedField.type === "radio";
+
+  const nameInputId = `${idPrefix}-name`;
+  const placeholderInputId = `${idPrefix}-placeholder`;
+  const widthInputId = `${idPrefix}-width`;
+  const heightInputId = `${idPrefix}-height`;
+  const assignHeadingId = `${idPrefix}-assign-to`;
+
+  // Assign-to keeps rendering the ASSIGNABLE list (`participants`) for freshly-checkable
+  // rows, but any id already in `assignees` that has fallen out of that list (e.g. the
+  // party was excluded after being assigned) still gets a row so the assignment stays
+  // visible -- its label is resolved from the FULL participant list, never the raw id.
+  const assignedIds = selectedField.properties.assignees || [];
+  const labelSource = allParticipants ?? participants;
+  const staleAssignedRows = assignedIds
+    .filter((id) => !participants.some((p) => p.id === id))
+    .map((id) => ({
+      id,
+      label: labelSource.find((p) => p.id === id)?.label ?? id,
+      role: undefined as string | undefined,
+      excluded: true,
+    }));
+  const assignRows = [
+    ...participants.map((p) => ({ ...p, excluded: false })),
+    ...staleAssignedRows,
+  ];
 
   return (
     <div className={styles.panel}>
@@ -174,156 +194,164 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
           </span>
           <span>{fieldTypeLabels[selectedField.type]}</span>
         </div>
-        <button
-          type="button"
-          className={styles.deleteButton}
-          onClick={() => onDeleteField(selectedField.id)}
-          title="Delete field"
-        >
-          <Trash weight="bold" size={16} />
-        </button>
+        <div className={styles.headerActions}>
+          <button
+            type="button"
+            className={styles.deleteButton}
+            onClick={() => onDeleteField(selectedField.id)}
+            title="Delete field"
+            aria-label="Delete field"
+          >
+            <Trash weight="bold" size={16} />
+          </button>
+          <button
+            type="button"
+            className={styles.closeButton}
+            onClick={onClose}
+            title="Close"
+            aria-label="Close"
+          >
+            <X weight="bold" size={16} />
+          </button>
+        </div>
       </div>
 
       {/* Properties Form */}
       <div className={styles.form}>
-        {/* Field Name */}
-        <div className={styles.formGroup}>
-          <label className={styles.label}>Field Name</label>
-          <input
-            type="text"
-            className={styles.input}
-            value={selectedField.name}
-            onChange={handleNameChange}
-            placeholder="Enter field name"
-          />
-        </div>
+        {/* Structure: what the field is made of */}
+        <div className={styles.section}>
+          <h3 className={styles.sectionTitle}>Structure</h3>
 
-        {/* Placeholder (for text fields) */}
-        {(selectedField.type === "text" ||
-          selectedField.type === "multiline") && (
           <div className={styles.formGroup}>
-            <label className={styles.label}>Placeholder</label>
+            <label htmlFor={nameInputId} className={styles.label}>
+              Field Name
+            </label>
             <input
+              id={nameInputId}
               type="text"
               className={styles.input}
-              value={selectedField.properties.placeholder || ""}
-              onChange={handlePlaceholderChange}
-              placeholder="Enter placeholder text"
+              value={selectedField.name}
+              onChange={handleNameChange}
+              placeholder="Enter field name"
             />
           </div>
-        )}
 
-        {/* Options (for dropdown/radio) */}
-        {needsOptions && (
-          <div className={styles.formGroup}>
-            <label className={styles.label}>Options</label>
-            <div className={styles.optionsList}>
-              {(selectedField.properties.options || []).map((option, index) => (
-                <div key={index} className={styles.optionItem}>
-                  <span>{option.displayValue}</span>
-                  <button
-                    type="button"
-                    className={styles.optionRemove}
-                    onClick={() => handleRemoveOption(index)}
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              ))}
-              <div className={styles.addOption}>
-                <input
-                  type="text"
-                  className={styles.input}
-                  value={newOption}
-                  onChange={(e) => setNewOption(e.target.value)}
-                  placeholder="Add option"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleAddOption();
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  className={styles.addButton}
-                  onClick={handleAddOption}
-                  disabled={!newOption.trim()}
-                >
-                  <Plus size={16} />
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Size */}
-        <div className={styles.formGroup}>
-          <label className={styles.label}>Size</label>
-          <div className={styles.sizeInputs}>
-            <div className={styles.sizeField}>
-              <span className={styles.sizeLabel}>W</span>
+          {(selectedField.type === "text" ||
+            selectedField.type === "multiline") && (
+            <div className={styles.formGroup}>
+              <label htmlFor={placeholderInputId} className={styles.label}>
+                Placeholder
+              </label>
               <input
-                type="number"
-                className={styles.sizeInput}
-                value={Math.round(selectedField.width)}
-                onChange={(e) => handleSizeChange("width", e.target.value)}
-                min={20}
+                id={placeholderInputId}
+                type="text"
+                className={styles.input}
+                value={selectedField.properties.placeholder || ""}
+                onChange={handlePlaceholderChange}
+                placeholder="Enter placeholder text"
               />
             </div>
-            <div className={styles.sizeField}>
-              <span className={styles.sizeLabel}>H</span>
-              <input
-                type="number"
-                className={styles.sizeInput}
-                value={Math.round(selectedField.height)}
-                onChange={(e) => handleSizeChange("height", e.target.value)}
-                min={20}
-              />
-            </div>
-          </div>
-        </div>
+          )}
 
-        {/* Required */}
-        <div className={styles.formGroup}>
-          <label className={styles.checkbox}>
-            <input
-              type="checkbox"
-              checked={selectedField.properties.required || false}
-              onChange={handleRequiredChange}
+          {needsOptions && (
+            <OptionsEditor
+              options={selectedField.properties.options || []}
+              onAddOption={handleAddOption}
+              onRemoveOption={handleRemoveOption}
             />
-            <span className={styles.checkmark} />
-            <span>Required field</span>
-          </label>
-        </div>
+          )}
 
-        {/* Assignment */}
-        {participants.length > 0 && (
           <div className={styles.formGroup}>
-            <label className={styles.label}>Assign to</label>
-            <div className={styles.participantList}>
-              {participants.map((participant) => {
-                const isAssigned = (
-                  selectedField.properties.assignees || []
-                ).includes(participant.id);
-                return (
-                  <label key={participant.id} className={styles.checkbox}>
-                    <input
-                      type="checkbox"
-                      checked={isAssigned}
-                      onChange={(e) =>
-                        handleAssignmentChange(participant.id, e.target.checked)
-                      }
-                    />
-                    <span className={styles.checkmark} />
-                    <span>{participant.label}</span>
-                    {participant.role && (
-                      <span className={styles.role}>{participant.role}</span>
-                    )}
+            <fieldset className={styles.fieldset}>
+              <legend className={styles.label}>Size</legend>
+              <div className={styles.sizeInputs}>
+                <div className={styles.sizeField}>
+                  <label htmlFor={widthInputId} className={styles.sizeLabel}>
+                    W
                   </label>
-                );
-              })}
-            </div>
+                  <input
+                    id={widthInputId}
+                    type="number"
+                    className={styles.sizeInput}
+                    value={Math.round(selectedField.width)}
+                    onChange={(e) => handleSizeChange("width", e.target.value)}
+                    min={20}
+                  />
+                </div>
+                <div className={styles.sizeField}>
+                  <label htmlFor={heightInputId} className={styles.sizeLabel}>
+                    H
+                  </label>
+                  <input
+                    id={heightInputId}
+                    type="number"
+                    className={styles.sizeInput}
+                    value={Math.round(selectedField.height)}
+                    onChange={(e) =>
+                      handleSizeChange("height", e.target.value)
+                    }
+                    min={20}
+                  />
+                </div>
+              </div>
+            </fieldset>
+          </div>
+        </div>
+
+        {/* Behaviour: how the field acts */}
+        <div className={styles.section}>
+          <h3 className={styles.sectionTitle}>Behaviour</h3>
+          <div className={styles.formGroup}>
+            <label className={styles.checkbox}>
+              <input
+                type="checkbox"
+                checked={selectedField.properties.required || false}
+                onChange={handleRequiredChange}
+              />
+              <span className={styles.checkmark} />
+              <span>Required field</span>
+            </label>
+          </div>
+        </div>
+
+        {/* Assign to */}
+        {assignRows.length > 0 && (
+          <div className={styles.section}>
+            <fieldset className={styles.fieldset}>
+              <legend id={assignHeadingId} className={styles.sectionTitle}>
+                Assign to
+              </legend>
+              <div className={styles.participantList}>
+                {assignRows.map((participant) => {
+                  const isAssigned = assignedIds.includes(participant.id);
+                  return (
+                    <label key={participant.id} className={styles.checkbox}>
+                      <input
+                        type="checkbox"
+                        checked={isAssigned}
+                        onChange={(e) =>
+                          handleAssignmentChange(
+                            participant.id,
+                            e.target.checked
+                          )
+                        }
+                      />
+                      <span className={styles.checkmark} />
+                      <span>{participant.label}</span>
+                      {participant.excluded ? (
+                        <span className={styles.excludedTag}>Excluded</span>
+                      ) : (
+                        participant.role && (
+                          <span className={styles.role}>
+                            {participant.role}
+                          </span>
+                        )
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
           </div>
         )}
       </div>
@@ -332,4 +360,3 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 };
 
 export default PropertiesPanel;
-
