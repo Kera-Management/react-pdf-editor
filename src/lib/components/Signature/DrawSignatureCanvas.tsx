@@ -47,7 +47,9 @@ function getCanvasPoint(
 function configureStrokeStyle(ctx: CanvasRenderingContext2D): void {
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.lineWidth = 2.5;
+  // 3.25, not 2.5: the stamp scales the drawing DOWN into a ~36pt-tall box
+  // on the signature line, and thinner strokes turn wispy at that size.
+  ctx.lineWidth = 3.25;
   ctx.strokeStyle = INK_COLOR;
   ctx.fillStyle = INK_COLOR;
 }

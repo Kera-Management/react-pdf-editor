@@ -17,7 +17,7 @@ describe("signatureStampGeometry", () => {
     const rect = { x: 100, y: 500, width: 200, height: 24 };
     const box = signatureStampGeometry(rect, scaleToFit2to1);
 
-    // Height-bound by the minimum, not the 24pt field: 48 tall, 96 wide.
+    // Height-bound by the minimum, not the 24pt field: 36 tall, 72 wide.
     expect(box.height).toBe(MIN_SIGNATURE_STAMP_HEIGHT);
     expect(box.width).toBe(MIN_SIGNATURE_STAMP_HEIGHT * 2);
     // Sitting ON the field's bottom edge (the line), centered horizontally.

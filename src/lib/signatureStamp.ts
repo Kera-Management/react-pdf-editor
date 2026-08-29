@@ -19,10 +19,12 @@ export interface StampRect {
 
 /**
  * Minimum height (PDF points) a stamped signature may occupy, regardless
- * of how short its field is. ~2/3 inch: legible handwriting height on a
- * standard signature line.
+ * of how short its field is. Half an inch: legible handwriting height on a
+ * standard signature line. Was 48; on dense forms (Nova Scotia lease) the
+ * extra rise above a ~20pt line field crossed into the PARAGRAPH TEXT
+ * above it, and black ink over black bold text reads as missing strokes.
  */
-export const MIN_SIGNATURE_STAMP_HEIGHT = 48;
+export const MIN_SIGNATURE_STAMP_HEIGHT = 36;
 
 export const signatureStampGeometry = (
   rect: StampRect,
