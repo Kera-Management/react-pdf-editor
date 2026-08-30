@@ -1005,12 +1005,20 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
 
             // Enforce assignment in edit mode by disabling or hiding
             if (mode === "edit" && activeParticipantId && field) {
-              // Prioritize extracted assignments from PDF metadata, fallback to prop
+              // The HOST'S assignments win over the PDF's embedded metadata:
+              // a host passing the prop is asserting live source-of-truth
+              // data (e.g. a signing request's field->recipient pairs), and
+              // baked-in metadata can be stale or keyed in a different
+              // identity vocabulary (seen live: an inspection PDF keyed the
+              // landlord field to the ORG id while the request and the
+              // active participant used the signer's uid, so the metadata
+              // priority made every field read as someone else's).
+              // Embedded metadata remains the fallback for hosts that pass
+              // nothing, which is how lease PDFs built in Prepare work.
               const effectiveAssignments =
-                Object.keys(extractedMetadata.current.fieldAssignments).length >
-                0
-                  ? extractedMetadata.current.fieldAssignments
-                  : fieldAssignments;
+                fieldAssignments && Object.keys(fieldAssignments).length > 0
+                  ? fieldAssignments
+                  : extractedMetadata.current.fieldAssignments;
               const assignedIds = effectiveAssignments?.[field.name];
               const isAssigned = assignedIds
                 ? assigneesIncludeParticipant(assignedIds, activeParticipantId)
