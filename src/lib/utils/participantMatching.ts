@@ -52,6 +52,24 @@ export const assigneesIncludeParticipant = (
  * fallback for hosts that pass nothing, which is how documents built in
  * this library's own Prepare mode work (they only ever carry embedded
  * metadata).
+ *
+ * THE RULE EVERY CALLER OF THE RESOLVED MAP MUST FOLLOW: a non-empty
+ * mapping means absence of an entry for a field means "not yours"; an
+ * empty mapping means unrestricted. Concretely: once this map has even one
+ * entry, a field with NO entry here is nobody's-in-particular, not
+ * everyone's -- it must be treated exactly like "assigned to someone
+ * else" (locked/hidden per `unassignedVisibility`, excluded from this
+ * participant's required/remaining counts). Only when the resolved map is
+ * empty altogether does a field default to "anyone editing may fill it" --
+ * that's plain fill & sign with no per-field assignment concept at all.
+ * Getting this backwards is exactly how a lease with 120 AcroForm fields
+ * but only 6 explicit assignments let ANY signer fill the other 114: the
+ * gate defaulted an unmapped field to "allow" instead of "not yours". The
+ * server enforces the same boundary independently on submit (Kera's
+ * `submitSignerFields` allowlists writes to a recipient's assigned fields
+ * only) -- the client-side rule here exists so the UI reflects that
+ * boundary instead of silently letting a signer fill (and lose) work the
+ * server was always going to reject.
  */
 export const resolveEffectiveFieldAssignments = (
   hostAssignments: Record<string, string[]> | undefined,

@@ -226,22 +226,42 @@ export const getRequiredAssignedFieldNames = ({
     return metadata.requiredFields;
   }
 
+  // Same "does a mapping exist AT ALL" rule the edit-mode gate uses (see
+  // resolveEffectiveFieldAssignments's doc comment): once ANY field has an
+  // assignments entry, a field with NO entry is nobody's-in-particular --
+  // NOT everyone's. A completely empty mapping means the host isn't using
+  // per-field assignment at all, so nothing here restricts whose work a
+  // required field is.
+  const hasAssignmentMapping = Object.keys(metadata.fieldAssignments).length > 0;
+
   // When no fields are explicitly marked required (e.g. inspection sign-offs,
   // which carry only per-party assignments and no requiredFields), treat the
   // fields assigned to this participant as their required set, so progress
   // reflects the boxes they actually have to sign. Flows that DO declare
-  // requiredFields keep their existing semantics untouched.
+  // requiredFields keep their existing semantics untouched. (This already
+  // only ever considers fields that are KEYS in fieldAssignments, so an
+  // unmapped field can never surface here regardless of hasAssignmentMapping.)
   if (metadata.requiredFields.length === 0) {
     return Object.keys(metadata.fieldAssignments).filter((fieldName) =>
       assigneesIncludeParticipant(metadata.fieldAssignments[fieldName], participantId)
     );
   }
 
-  // Only explicitly required fields count: assignment controls who may edit
-  // a field, not whether it must be completed.
+  // Explicitly required fields count for this participant only when the
+  // field is also theirs to fill. A required field with no fieldAssignments
+  // entry is "not yours" once a non-empty mapping exists -- mirroring the
+  // edit-mode gate exactly, since a field this participant is locked out of
+  // editing must never show up in their own remaining-work count (it would
+  // otherwise permanently block them: uneditable, yet still "required").
+  // Under a wholly empty mapping, an unmapped required field still belongs
+  // to whoever's editing -- unchanged plain fill & sign behavior for hosts
+  // that don't use per-field assignment.
   return metadata.requiredFields.filter((fieldName) => {
     const assignees = metadata.fieldAssignments[fieldName];
-    return assignees ? assigneesIncludeParticipant(assignees, participantId) : true;
+    if (assignees) {
+      return assigneesIncludeParticipant(assignees, participantId);
+    }
+    return !hasAssignmentMapping;
   });
 };
 

@@ -468,3 +468,67 @@ describe("calculateParticipantCompletion with renderedFieldNames", () => {
     expect(completion.isComplete).toBe(false);
   });
 });
+
+describe("getRequiredAssignedFieldNames: unmapped fields under a non-empty mapping", () => {
+  it("excludes a required field with no fieldAssignments entry once ANY field has one", () => {
+    // Mirrors the v2.10.1 gate fix: a lease with far more AcroForm fields
+    // than explicit assignments must not treat an unmapped required field
+    // as belonging to every participant -- they're locked out of editing
+    // it by the gate, so counting it against them would permanently block
+    // Finish over a field they can never touch.
+    const metadata = participantCompletion.createEditorMetadata({
+      fieldAssignments: { tenant_name: ["tenant1"] },
+      requiredFields: ["tenant_name", "unmapped_field"],
+    });
+
+    const names = participantCompletion.getRequiredAssignedFieldNames({
+      metadata,
+      participantId: "tenant1",
+    });
+
+    expect(names).toEqual(["tenant_name"]);
+  });
+
+  it("still counts a required field with no fieldAssignments entry when the mapping is wholly empty", () => {
+    // Plain fill & sign, no per-field assignment concept in use at all --
+    // unchanged behavior.
+    const metadata = participantCompletion.createEditorMetadata({
+      fieldAssignments: {},
+      requiredFields: ["shared_field"],
+    });
+
+    const names = participantCompletion.getRequiredAssignedFieldNames({
+      metadata,
+      participantId: "anyone",
+    });
+
+    expect(names).toEqual(["shared_field"]);
+  });
+
+  it("composes with renderedFieldNames: an unmapped AND unrendered field appears in neither list", () => {
+    const metadata = participantCompletion.createEditorMetadata({
+      fieldAssignments: { tenant_name: ["tenant1"] },
+      requiredFields: ["tenant_name", "unmapped_field"],
+    });
+
+    const completion = participantCompletion.calculateParticipantCompletion({
+      metadata,
+      formFields: { tenant_name: "Bruce Wayne" },
+      participantId: "tenant1",
+      // unmapped_field never rendered either (it failed the pre-render
+      // filter too) -- it must not surface via unrenderableAssignedFields
+      // (that list is for fields that WERE this participant's but didn't
+      // render) since it was never this participant's field to begin with.
+      renderedFieldNames: new Set(["tenant_name"]),
+    });
+
+    expect(completion).toEqual({
+      requiredAssignedCount: 1,
+      completedRequiredCount: 1,
+      remainingRequiredCount: 0,
+      remainingRequiredFields: [],
+      unrenderableAssignedFields: [],
+      isComplete: true,
+    });
+  });
+});

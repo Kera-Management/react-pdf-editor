@@ -1034,10 +1034,21 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 fieldAssignments,
                 extractedMetadata.current.fieldAssignments
               );
+              // Whether a mapping exists AT ALL, not just whether THIS field
+              // has an entry -- see resolveEffectiveFieldAssignments's doc
+              // comment for the full rule. A lease with 120 AcroForm fields
+              // but only 6 explicit assignments is exactly the case this
+              // guards: without it, every one of the other 114 defaulted to
+              // "allow", so any signer could fill any field the app never
+              // meant for them (the server's field-write allowlist, e.g.
+              // Kera's submitSignerFields, rejects those submissions
+              // anyway -- but the client let the signer fill them first).
+              const hasAssignmentMapping =
+                Object.keys(effectiveAssignments).length > 0;
               const assignedIds = effectiveAssignments?.[field.name];
               const isAssigned = assignedIds
                 ? assigneesIncludeParticipant(assignedIds, activeParticipantId)
-                : true; // default allow if no mapping provided
+                : !hasAssignmentMapping; // unmapped: "not yours" once ANY mapping exists, unrestricted only when none does
 
               if (!isAssigned) {
                 if (unassignedVisibility === "hidden") {
@@ -1049,7 +1060,11 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                   // from the same full `participants` roster
                   // assignableParticipants/allParticipants derive from, so
                   // it names the assignee even if that party has since been
-                  // excluded from the assignable list.
+                  // excluded from the assignable list. A field with NO
+                  // assignee entry at all gets its own distinct label --
+                  // "assigned to someone else" and "assigned to no one in
+                  // particular" are different anomalies, and conflating them
+                  // as one generic message would hide which one this is.
                   const firstAssigneeId = assignedIds?.[0];
                   const assigneeLabel = firstAssigneeId
                     ? participants?.find(
@@ -1058,9 +1073,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                           normalizeParticipantId(firstAssigneeId)
                       )?.label
                     : undefined;
-                  const gatedLabel = `Assigned to ${
-                    assigneeLabel || "another signer"
-                  }`;
+                  const gatedLabel = assignedIds
+                    ? `Assigned to ${assigneeLabel || "another signer"}`
+                    : "Not assigned to a signer";
                   el.setAttribute("title", gatedLabel);
                   el.setAttribute("aria-label", gatedLabel);
                 }
@@ -1070,12 +1085,14 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 // Only clear a title/aria-label THIS gating loop added --
                 // never strips a combobox's own JSX-managed
                 // `title={field.name}`.
-                if (el.getAttribute("title")?.startsWith("Assigned to ")) {
+                const isGatedLabel = (value: string | null) =>
+                  !!value &&
+                  (value.startsWith("Assigned to ") ||
+                    value === "Not assigned to a signer");
+                if (isGatedLabel(el.getAttribute("title"))) {
                   el.removeAttribute("title");
                 }
-                if (
-                  el.getAttribute("aria-label")?.startsWith("Assigned to ")
-                ) {
+                if (isGatedLabel(el.getAttribute("aria-label"))) {
                   el.removeAttribute("aria-label");
                 }
               }
