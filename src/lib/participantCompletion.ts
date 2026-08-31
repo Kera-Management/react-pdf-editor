@@ -4,6 +4,18 @@ import {
   TypedArray,
 } from "pdfjs-dist/types/src/display/api";
 import { PDFDocument } from "pdf-lib";
+import {
+  assigneesIncludeParticipant,
+  normalizeParticipantId,
+  resolveEffectiveFieldAssignments,
+} from "./utils/participantMatching";
+
+// Re-exported for backward compatibility: every existing consumer imports
+// these from "./participantCompletion". The implementations live in
+// utils/participantMatching.ts instead (see that file's header comment) so
+// a lightweight consumer like ProgressPanel can use them without pulling in
+// this module's pdfjs-dist/pdf-lib dependency.
+export { assigneesIncludeParticipant, normalizeParticipantId, resolveEffectiveFieldAssignments };
 
 export type PDFEditorSource =
   | string
@@ -28,6 +40,14 @@ export interface ParticipantCompletion {
   completedRequiredCount: number;
   remainingRequiredCount: number;
   remainingRequiredFields: string[];
+  /**
+   * Required/assigned fields for this participant that were excluded from
+   * every count above because they never rendered (see `renderedFieldNames`
+   * on `calculateParticipantCompletion`). Always `[]` when the caller
+   * doesn't pass `renderedFieldNames` -- nothing is excluded, so there's
+   * nothing to report here.
+   */
+  unrenderableAssignedFields: string[];
   isComplete: boolean;
 }
 
@@ -195,27 +215,6 @@ const getFieldValue = (fieldEntries?: PDFFormRawField[]) => {
 const isFieldComplete = (value?: string) =>
   Boolean(value && value.trim() !== "" && value !== "Off");
 
-/**
- * Participant ids are matched loosely: trimmed and case-folded. The assignee ids
- * baked into a PDF (e.g. a manager uid or an email) and the `activeParticipantId`
- * the host app supplies can drift by whitespace or casing without either side
- * being "wrong", and a strict mismatch silently locks a signer out of their own
- * field. Normalize both sides everywhere ids are compared.
- */
-export const normalizeParticipantId = (id?: string | null): string =>
-  (id ?? "").trim().toLowerCase();
-
-export const assigneesIncludeParticipant = (
-  assignees: string[] | undefined,
-  participantId?: string
-): boolean => {
-  if (!assignees?.length) {
-    return false;
-  }
-  const target = normalizeParticipantId(participantId);
-  return assignees.some((assignee) => normalizeParticipantId(assignee) === target);
-};
-
 export const getRequiredAssignedFieldNames = ({
   metadata,
   participantId,
@@ -250,31 +249,69 @@ export const calculateParticipantCompletion = ({
   metadata,
   formFields,
   participantId,
+  renderedFieldNames,
 }: {
   metadata: PDFEditorMetadata;
   formFields: Record<string, string>;
   participantId?: string;
+  /**
+   * Field names that actually rendered in the editor (survived the
+   * editable/hidden/button pre-render filter pdf.js's raw field list goes
+   * through before it becomes DOM). A field can be assigned or required in
+   * metadata yet fail that filter entirely -- e.g. a server bug left it
+   * read-only in the AcroForm -- in which case it never got a DOM node to
+   * fill in the first place.
+   *
+   * SEMANTICS: such a field is EXCLUDED from every count/list above
+   * (`requiredAssignedCount`, `remainingRequiredFields`, `isComplete`, ...)
+   * rather than counted as perpetually incomplete, and reported separately
+   * via `unrenderableAssignedFields` instead. The alternative -- counting it
+   * as required-but-incomplete -- would permanently block a signer who has
+   * genuinely completed every field they can see, over an anomaly that is
+   * not theirs to fix; excluding it unblocks them while
+   * `unrenderableAssignedFields` still gives the host a way to surface the
+   * anomaly (e.g. a "couldn't be shown, contact the sender" notice).
+   *
+   * Omitted entirely (undefined): every assigned/required field is treated
+   * as renderable, i.e. behavior is unchanged from before this concept
+   * existed. This is the case for callers with no rendering context at all,
+   * such as the headless `getParticipantCompletion()` read path below.
+   */
+  renderedFieldNames?: Set<string> | string[];
 }): ParticipantCompletion => {
   const requiredAssignedFields = getRequiredAssignedFieldNames({
     metadata,
     participantId,
   });
 
-  const completedRequiredFields = requiredAssignedFields.filter((fieldName) =>
+  const renderedSet = renderedFieldNames
+    ? renderedFieldNames instanceof Set
+      ? renderedFieldNames
+      : new Set(renderedFieldNames)
+    : null;
+
+  const renderableFields = renderedSet
+    ? requiredAssignedFields.filter((fieldName) => renderedSet.has(fieldName))
+    : requiredAssignedFields;
+  const unrenderableAssignedFields = renderedSet
+    ? requiredAssignedFields.filter((fieldName) => !renderedSet.has(fieldName))
+    : [];
+
+  const completedRequiredFields = renderableFields.filter((fieldName) =>
     isFieldComplete(formFields[fieldName])
   );
-  const remainingRequiredFields = requiredAssignedFields.filter(
+  const remainingRequiredFields = renderableFields.filter(
     (fieldName) => !completedRequiredFields.includes(fieldName)
   );
 
   return {
-    requiredAssignedCount: requiredAssignedFields.length,
+    requiredAssignedCount: renderableFields.length,
     completedRequiredCount: completedRequiredFields.length,
     remainingRequiredCount: remainingRequiredFields.length,
     remainingRequiredFields,
+    unrenderableAssignedFields,
     isComplete:
-      requiredAssignedFields.length > 0 &&
-      remainingRequiredFields.length === 0,
+      renderableFields.length > 0 && remainingRequiredFields.length === 0,
   };
 };
 

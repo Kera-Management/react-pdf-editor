@@ -159,3 +159,101 @@ describe("ProgressPanel guided signing", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe("ProgressPanel unrendered-field handling", () => {
+  // signature_field is assigned to signer-1 but deliberately left out of
+  // renderedFieldNames, simulating a field that failed the editor's
+  // editable/hidden pre-render filter (e.g. a server bug locked it
+  // read-only in the AcroForm) and so never got a DOM node.
+  const renderedFieldNames = new Set(["tenant_full_name", "move_in_date"]);
+
+  it("excludes an unrendered field from the remaining-fields list and count", () => {
+    render(
+      <ProgressPanel
+        {...baseProps}
+        formFields={{}}
+        totalFields={2}
+        completedFields={0}
+        renderedFieldNames={renderedFieldNames}
+      />
+    );
+
+    expect(screen.getByText("2 fields remaining")).toBeInTheDocument();
+    expect(screen.queryByText("Signature Field")).not.toBeInTheDocument();
+  });
+
+  it("surfaces unrendered fields as a separate warning, not as remaining work", () => {
+    render(
+      <ProgressPanel
+        {...baseProps}
+        formFields={{}}
+        totalFields={2}
+        completedFields={0}
+        renderedFieldNames={renderedFieldNames}
+      />
+    );
+
+    expect(
+      screen.getByText(/1 field couldn't be shown/i)
+    ).toBeInTheDocument();
+  });
+
+  it("does not block Finish when every RENDERED field is complete, despite an unrenderable one", () => {
+    const onFinish = vi.fn();
+    render(
+      <ProgressPanel
+        {...baseProps}
+        formFields={{
+          tenant_full_name: "Jane Tenant",
+          move_in_date: "2026-01-01",
+        }}
+        totalFields={2}
+        completedFields={2}
+        renderedFieldNames={renderedFieldNames}
+        onFinish={onFinish}
+      />
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Finish and save" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/1 field couldn't be shown/i)
+    ).toBeInTheDocument();
+  });
+
+  it("without renderedFieldNames, every assigned field counts as remaining (unchanged behavior)", () => {
+    render(
+      <ProgressPanel
+        {...baseProps}
+        formFields={{}}
+        totalFields={3}
+        completedFields={0}
+      />
+    );
+
+    expect(screen.getByText("3 fields remaining")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/couldn't be shown/i)
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("ProgressPanel fieldLabels prop", () => {
+  it("shows a host-supplied label instead of the humanized guess", () => {
+    render(
+      <ProgressPanel
+        {...baseProps}
+        formFields={{}}
+        totalFields={3}
+        completedFields={0}
+        fieldLabels={{ tenant_full_name: "Full Legal Name" }}
+      />
+    );
+
+    expect(screen.getByText("Full Legal Name")).toBeInTheDocument();
+    expect(screen.queryByText("Tenant Full Name")).not.toBeInTheDocument();
+    // Fields with no override still fall back to humanizeFieldName.
+    expect(screen.getByText("Move In Date")).toBeInTheDocument();
+  });
+});

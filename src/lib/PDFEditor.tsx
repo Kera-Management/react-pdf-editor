@@ -39,6 +39,7 @@ import {
   createEditorMetadata,
   extractEditorMetadata,
   normalizeParticipantId,
+  resolveEffectiveFieldAssignments,
   serializeEditorMetadata,
 } from "./participantCompletion";
 // New component imports
@@ -341,6 +342,16 @@ export interface PDFEditorProps {
    * from `buildModeFields`, set by dragging a Signature field onto the page.
    */
   signatureFieldNames?: string[];
+  /**
+   * Friendly-label overrides for the Progress panel's remaining-fields
+   * list, keyed by field NAME (as in `fieldAssignments`). When a field's
+   * name has an entry here, that string is shown instead of the library's
+   * best-effort `humanizeFieldName` guess (e.g. "tenant_full_name" ->
+   * "Tenant Full Name") -- useful when the host already has real labels
+   * (from its own form-builder metadata) and wants those shown verbatim.
+   * Omitting this prop leaves every existing consumer unchanged.
+   */
+  fieldLabels?: Record<string, string>;
 }
 
 // Use worker from the installed pdfjs-dist package to ensure version matching
@@ -409,6 +420,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       // shadowing it (and the TDZ error a `new Set(signatureFieldNames)`
       // referencing itself before assignment would throw).
       signatureFieldNames: signatureFieldNamesProp,
+      fieldLabels,
     } = props;
 
     // Determine the effective initial mode - must be in allowedModes
@@ -1015,10 +1027,13 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
               // priority made every field read as someone else's).
               // Embedded metadata remains the fallback for hosts that pass
               // nothing, which is how lease PDFs built in Prepare work.
-              const effectiveAssignments =
-                fieldAssignments && Object.keys(fieldAssignments).length > 0
-                  ? fieldAssignments
-                  : extractedMetadata.current.fieldAssignments;
+              // (Shared with the progress counter and completion math via
+              // resolveEffectiveFieldAssignments -- see its doc comment for
+              // why they must never resolve this differently.)
+              const effectiveAssignments = resolveEffectiveFieldAssignments(
+                fieldAssignments,
+                extractedMetadata.current.fieldAssignments
+              );
               const assignedIds = effectiveAssignments?.[field.name];
               const isAssigned = assignedIds
                 ? assigneesIncludeParticipant(assignedIds, activeParticipantId)
@@ -1337,6 +1352,24 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       return formFields;
     };
 
+    // Field NAMES that actually rendered -- i.e. survived the
+    // editable/hidden/button pre-render filter in the pages-load effect
+    // above, so `pages[].fields` already IS that filtered set. A field can
+    // be assigned or required in metadata yet fail that filter entirely
+    // (e.g. a server bug left it read-only in the AcroForm), in which case
+    // it never got a DOM node at all. Fed into completion math and
+    // ProgressPanel so neither ever counts such a field as "remaining" --
+    // see calculateParticipantCompletion's `renderedFieldNames` doc comment
+    // for the full semantics.
+    const getRenderedFieldNames = (): Set<string> | undefined => {
+      if (!pages) return undefined;
+      const names = new Set<string>();
+      pages.forEach((page) => {
+        page.fields?.forEach((field) => names.add(field.name));
+      });
+      return names;
+    };
+
     // Field NAMES whose current value is an untouched seed (another
     // signer's context value from `initialFieldValues`). A Prepare-mode
     // save flattens the original form after writing values into it -- an
@@ -1366,9 +1399,16 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     const getProgressData = () => {
       const formFields = getAllFieldsValue();
       const completion = calculateParticipantCompletion({
-        metadata: extractedMetadata.current,
+        metadata: {
+          ...extractedMetadata.current,
+          fieldAssignments: resolveEffectiveFieldAssignments(
+            fieldAssignments,
+            extractedMetadata.current.fieldAssignments
+          ),
+        },
         formFields,
         participantId: activeParticipantId,
+        renderedFieldNames: getRenderedFieldNames(),
       });
 
       return {
@@ -1827,9 +1867,16 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       if (autoScrolledRef.current) return;
       autoScrolledRef.current = true;
       const completion = calculateParticipantCompletion({
-        metadata: extractedMetadata.current,
+        metadata: {
+          ...extractedMetadata.current,
+          fieldAssignments: resolveEffectiveFieldAssignments(
+            fieldAssignments,
+            extractedMetadata.current.fieldAssignments
+          ),
+        },
         formFields: getAllFieldsValue(),
         participantId: activeParticipantId,
+        renderedFieldNames: getRenderedFieldNames(),
       });
       const firstIncomplete = completion.remainingRequiredFields[0];
       if (firstIncomplete) {
@@ -2381,9 +2428,16 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     const handleSaveClick = () => {
       if (mode === "edit") {
         const completion = calculateParticipantCompletion({
-          metadata: extractedMetadata.current,
+          metadata: {
+            ...extractedMetadata.current,
+            fieldAssignments: resolveEffectiveFieldAssignments(
+              fieldAssignments,
+              extractedMetadata.current.fieldAssignments
+            ),
+          },
           formFields: getAllFieldsValue(),
           participantId: activeParticipantId,
+          renderedFieldNames: getRenderedFieldNames(),
         });
         if (completion.requiredAssignedCount > 0 && !completion.isComplete) {
           setShowIncompleteSaveDialog(true);
@@ -3373,18 +3427,18 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                     <ProgressPanel
                       activeParticipantId={activeParticipantId}
                       participants={assignableParticipants}
-                      fieldAssignments={
-                        Object.keys(extractedMetadata.current.fieldAssignments)
-                          .length > 0
-                          ? extractedMetadata.current.fieldAssignments
-                          : fieldAssignments || undefined
-                      }
+                      fieldAssignments={resolveEffectiveFieldAssignments(
+                        fieldAssignments,
+                        extractedMetadata.current.fieldAssignments
+                      )}
                       formFields={progressData.formFields}
                       totalFields={progressData.totalFields}
                       completedFields={progressData.completedFields}
                       mode={mode}
                       onFieldFocus={handleFieldFocus}
                       onFinish={handleSaveClick}
+                      renderedFieldNames={getRenderedFieldNames()}
+                      fieldLabels={fieldLabels}
                     />
                   </div>
                 </div>
@@ -3456,18 +3510,18 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
               <ProgressPanel
                 activeParticipantId={activeParticipantId}
                 participants={assignableParticipants}
-                fieldAssignments={
-                  Object.keys(extractedMetadata.current.fieldAssignments)
-                    .length > 0
-                    ? extractedMetadata.current.fieldAssignments
-                    : fieldAssignments || undefined
-                }
+                fieldAssignments={resolveEffectiveFieldAssignments(
+                  fieldAssignments,
+                  extractedMetadata.current.fieldAssignments
+                )}
                 formFields={progressData.formFields}
                 totalFields={progressData.totalFields}
                 completedFields={progressData.completedFields}
                 mode={mode}
                 onFieldFocus={handleFieldFocus}
                 onFinish={handleSaveClick}
+                renderedFieldNames={getRenderedFieldNames()}
+                fieldLabels={fieldLabels}
               />
             )}
           </BottomSheet>

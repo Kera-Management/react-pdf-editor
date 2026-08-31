@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import styles from "./ProgressPanel.module.css";
 import { CheckCircle, Circle, PlayCircle, Warning } from "@phosphor-icons/react";
 import { humanizeFieldName } from "../../utils/fieldLabels";
+import { assigneesIncludeParticipant } from "../../utils/participantMatching";
 
 export interface ProgressPanelProps {
   /** Active participant ID */
@@ -26,6 +27,31 @@ export interface ProgressPanelProps {
    * button rendered) -- additive, so existing hosts see no change.
    */
   onFinish?: () => void;
+  /**
+   * Field names that actually rendered in the editor (survived the
+   * host's editable/hidden pre-render filter). A field can be assigned to
+   * the active participant yet never render at all -- e.g. a server bug
+   * left it read-only in the AcroForm -- in which case there is no way for
+   * the signer to ever complete it.
+   *
+   * SEMANTICS: when provided, such a field is EXCLUDED from `remainingFields`
+   * (and therefore from guided Start/Next navigation) rather than shown as
+   * a checklist item the signer can never check off, and is instead
+   * surfaced as its own warning line below the remaining list. This
+   * unblocks a signer who has completed every field they can actually see,
+   * while still making the anomaly visible rather than silently dropping
+   * it. Omitted entirely: every assigned field is treated as renderable,
+   * i.e. unchanged from this panel's behavior before this concept existed.
+   */
+  renderedFieldNames?: Set<string>;
+  /**
+   * Friendly-label overrides, keyed by field NAME (as in
+   * `fieldAssignments`). When a field's name has an entry here, that string
+   * is shown in place of `humanizeFieldName(name)` -- lets a host that
+   * already has real labels (e.g. from its own form-builder metadata) show
+   * those instead of a best-effort guess.
+   */
+  fieldLabels?: Record<string, string>;
 }
 
 export const ProgressPanel: React.FC<ProgressPanelProps> = ({
@@ -38,6 +64,8 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
   mode,
   onFieldFocus,
   onFinish,
+  renderedFieldNames,
+  fieldLabels,
 }) => {
   // Which remaining field guided navigation ("Start"/"Next") last sent the
   // signer to. Tracked by name, not list position -- the remaining list
@@ -61,23 +89,49 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
   const progressPercentage =
     totalFields > 0 ? Math.round((completedFields / totalFields) * 100) : 0;
 
-  // Get assigned fields for active participant
+  // Get assigned fields for active participant. Matched via the same
+  // normalized comparator every other assignment check in this library
+  // uses (trimmed + case-folded) -- a raw `.includes()` here used to let a
+  // whitespace/casing drift between the id baked into a field and the
+  // `activeParticipantId` the host supplies silently exclude a signer's own
+  // field from their list.
   const assignedFields = React.useMemo(() => {
     if (!fieldAssignments || !activeParticipantId) return [];
     return Object.entries(fieldAssignments)
-      .filter(([, ids]) => ids.includes(activeParticipantId))
+      .filter(([, ids]) => assigneesIncludeParticipant(ids, activeParticipantId))
       .map(([fieldName]) => fieldName);
   }, [fieldAssignments, activeParticipantId]);
+
+  // Split assigned fields into ones that actually rendered vs ones that
+  // didn't (see `renderedFieldNames` doc comment). Unrendered fields are
+  // dropped out of the remaining-fields/guided-navigation flow entirely --
+  // a signer can never complete a field with no DOM node to fill in -- and
+  // surfaced separately as a warning below instead.
+  const { renderableAssignedFields, unrenderedAssignedFields } =
+    React.useMemo(() => {
+      if (!renderedFieldNames) {
+        return {
+          renderableAssignedFields: assignedFields,
+          unrenderedAssignedFields: [] as string[],
+        };
+      }
+      const renderable: string[] = [];
+      const unrendered: string[] = [];
+      assignedFields.forEach((name) => {
+        (renderedFieldNames.has(name) ? renderable : unrendered).push(name);
+      });
+      return { renderableAssignedFields: renderable, unrenderedAssignedFields: unrendered };
+    }, [assignedFields, renderedFieldNames]);
 
   // Get remaining (incomplete) fields, in document order (the order
   // fieldAssignments/formFields were built in) -- this is also the order
   // Start/Next walk through.
   const remainingFields = React.useMemo(() => {
-    return assignedFields.filter((name) => {
+    return renderableAssignedFields.filter((name) => {
       const value = formFields[name];
       return !value || value.trim() === "" || value === "Off";
     });
-  }, [assignedFields, formFields]);
+  }, [renderableAssignedFields, formFields]);
 
   // Check if all fields are complete
   const isComplete = completedFields === totalFields && totalFields > 0;
@@ -196,10 +250,26 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
                 onClick={() => goToField(fieldName)}
               >
                 <Circle weight="regular" size={14} />
-                <span>{humanizeFieldName(fieldName)}</span>
+                <span>{fieldLabels?.[fieldName] ?? humanizeFieldName(fieldName)}</span>
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Unrendered-but-assigned fields -- couldn't be shown at all (e.g. a
+          server bug locked one read-only in the AcroForm), so they're never
+          part of remainingFields/guided navigation above. Surfaced here
+          purely as a heads-up: the signer isn't blocked by them, but
+          something is wrong and the sender needs to know. */}
+      {unrenderedAssignedFields.length > 0 && (
+        <div className={styles.unrenderedWarning}>
+          <Warning weight="fill" size={14} />
+          <span>
+            {unrenderedAssignedFields.length}{" "}
+            {unrenderedAssignedFields.length === 1 ? "field" : "fields"}{" "}
+            couldn't be shown. Contact the sender.
+          </span>
         </div>
       )}
 

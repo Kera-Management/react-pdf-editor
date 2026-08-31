@@ -227,6 +227,7 @@ describe("getParticipantCompletion (ported from the dead .mjs)", () => {
       completedRequiredCount: 0,
       remainingRequiredCount: 0,
       remainingRequiredFields: [],
+      unrenderableAssignedFields: [],
       isComplete: false,
     });
     expect(tenantCompletion).toEqual({
@@ -234,6 +235,7 @@ describe("getParticipantCompletion (ported from the dead .mjs)", () => {
       completedRequiredCount: 0,
       remainingRequiredCount: 2,
       remainingRequiredFields: ["tenant_name", "tenant_ack"],
+      unrenderableAssignedFields: [],
       isComplete: false,
     });
   });
@@ -261,6 +263,7 @@ describe("getParticipantCompletion (ported from the dead .mjs)", () => {
       completedRequiredCount: 0,
       remainingRequiredCount: 1,
       remainingRequiredFields: ["tenant_name"],
+      unrenderableAssignedFields: [],
       isComplete: false,
     });
   });
@@ -335,6 +338,7 @@ describe("getParticipantCompletion (ported from the dead .mjs)", () => {
       completedRequiredCount: 1,
       remainingRequiredCount: 0,
       remainingRequiredFields: [],
+      unrenderableAssignedFields: [],
       isComplete: true,
     });
   });
@@ -383,7 +387,84 @@ describe("getParticipantCompletion (ported from the dead .mjs)", () => {
       completedRequiredCount: 0,
       remainingRequiredCount: 2,
       remainingRequiredFields: ["tenant_name", "tenant_ack"],
+      unrenderableAssignedFields: [],
       isComplete: false,
     });
+  });
+});
+
+describe("resolveEffectiveFieldAssignments", () => {
+  it("prefers a non-empty host map over embedded metadata", () => {
+    const host = { tenant_name: ["tenant1"] };
+    const embedded = { tenant_name: ["someone-else"], landlord_name: ["landlord1"] };
+    expect(participantCompletion.resolveEffectiveFieldAssignments(host, embedded)).toBe(host);
+  });
+
+  it("falls back to embedded metadata when the host map is empty", () => {
+    const embedded = { tenant_name: ["tenant1"] };
+    expect(participantCompletion.resolveEffectiveFieldAssignments({}, embedded)).toBe(embedded);
+  });
+
+  it("falls back to embedded metadata when the host map is undefined", () => {
+    const embedded = { tenant_name: ["tenant1"] };
+    expect(
+      participantCompletion.resolveEffectiveFieldAssignments(undefined, embedded)
+    ).toBe(embedded);
+  });
+});
+
+describe("calculateParticipantCompletion with renderedFieldNames", () => {
+  const buildMetadata = () =>
+    participantCompletion.createEditorMetadata({
+      fieldAssignments: {
+        tenant_name: ["tenant1"],
+        tenant_signature: ["tenant1"],
+      },
+      requiredFields: ["tenant_name", "tenant_signature"],
+    });
+
+  it("excludes an assigned-but-unrendered field from every count and reports it separately", () => {
+    // tenant_signature is assigned/required but never rendered -- e.g. a
+    // server bug locked it read-only in the AcroForm, so it never got a DOM
+    // node in the first place.
+    const completion = participantCompletion.calculateParticipantCompletion({
+      metadata: buildMetadata(),
+      formFields: { tenant_name: "Bruce Wayne" },
+      participantId: "tenant1",
+      renderedFieldNames: new Set(["tenant_name"]),
+    });
+
+    expect(completion).toEqual({
+      requiredAssignedCount: 1,
+      completedRequiredCount: 1,
+      remainingRequiredCount: 0,
+      remainingRequiredFields: [],
+      unrenderableAssignedFields: ["tenant_signature"],
+      isComplete: true,
+    });
+  });
+
+  it("also accepts renderedFieldNames as a plain array", () => {
+    const completion = participantCompletion.calculateParticipantCompletion({
+      metadata: buildMetadata(),
+      formFields: { tenant_name: "Bruce Wayne" },
+      participantId: "tenant1",
+      renderedFieldNames: ["tenant_name"],
+    });
+
+    expect(completion.unrenderableAssignedFields).toEqual(["tenant_signature"]);
+    expect(completion.isComplete).toBe(true);
+  });
+
+  it("treats every field as renderable when renderedFieldNames is omitted", () => {
+    const completion = participantCompletion.calculateParticipantCompletion({
+      metadata: buildMetadata(),
+      formFields: { tenant_name: "Bruce Wayne" },
+      participantId: "tenant1",
+    });
+
+    expect(completion.unrenderableAssignedFields).toEqual([]);
+    expect(completion.remainingRequiredFields).toEqual(["tenant_signature"]);
+    expect(completion.isComplete).toBe(false);
   });
 });
