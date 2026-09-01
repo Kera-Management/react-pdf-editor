@@ -11,3 +11,9 @@ export { PropertiesPanel } from "./PropertiesPanel";
 export { ProgressPanel } from "./ProgressPanel";
 export type { ProgressPanelProps } from "./ProgressPanel";
 
+export { PartiesPanel } from "./PartiesPanel";
+export type {
+  PartiesPanelProps,
+  PartiesPanelParticipant,
+} from "./PartiesPanel";
+

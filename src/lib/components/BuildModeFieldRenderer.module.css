@@ -160,93 +160,83 @@
 }
 
 /* ==========================================================================
-   Field Controls (shown when selected)
+   Assignee Chips (who a placed field is assigned to)
    ========================================================================== */
-.fieldControls {
+.assigneeChips {
   position: absolute;
-  top: -40px;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: 100%;
+  margin-bottom: 2px;
+  left: var(--space-1);
   display: flex;
   align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1);
-  background: var(--panel-bg-elevated);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xl);
+  flex-wrap: wrap;
+  gap: 2px;
+  /* Wide enough for a full name on a narrow field; grows upward via wrap
+     rather than ever clipping a name. */
+  min-width: max-content;
+  max-width: 240px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.assigneeChip {
+  display: inline-block;
+  /* A person's name never truncates (product rule). The row wraps instead;
+     fields too small for even one label already collapse to a count. */
   white-space: nowrap;
-  z-index: 101;
-  animation: controlsAppear var(--duration-fast) var(--ease-out);
-}
-
-@keyframes controlsAppear {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-  }
-}
-
-.fieldInfo {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 0 var(--space-2);
-}
-
-.typeBadge {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
-  background: var(--accent-primary-subtle);
-  border-radius: var(--radius-md);
-  font-size: var(--text-2xs);
+  padding: 1px var(--space-1-5);
+  border-radius: var(--radius-full);
+  background: var(--accent-primary);
+  color: var(--doc-bg);
+  font-size: 9px;
   font-weight: var(--font-semibold);
-  color: var(--accent-primary);
-  text-transform: uppercase;
-}
-
-.fieldName {
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-  max-width: 100px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.4;
+  box-shadow: var(--shadow-xs);
 }
 
 /* ==========================================================================
-   Control Buttons
+   Required Indicator (always visible, unselected or selected)
    ========================================================================== */
-.controlButton {
+.requiredIndicator {
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-error-500);
+  border: 2px solid var(--doc-bg);
+  pointer-events: none;
+  z-index: 11;
+}
+
+/* ==========================================================================
+   Color / Initials Badge (assignee color, visible on hover)
+   ========================================================================== */
+.colorBadge {
+  position: absolute;
+  top: -8px;
+  right: -8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-md);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: 
-    color var(--duration-fast),
-    background var(--duration-fast);
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-full);
+  background: var(--accent-primary);
+  color: #ffffff;
+  font-size: 8px;
+  font-weight: var(--font-semibold);
+  line-height: 1;
+  box-shadow: var(--shadow-xs);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+  pointer-events: none;
+  z-index: 11;
 }
 
-.controlButton:hover {
-  color: var(--text-primary);
-  background: var(--bg-surface-hover);
-}
-
-.deleteButton:hover {
-  color: var(--color-error-500);
-  background: var(--color-error-subtle);
+.buildField:hover .colorBadge {
+  opacity: 1;
 }
 
 /* ==========================================================================
@@ -333,17 +323,6 @@
   .buildField {
     min-width: var(--touch-target-min);
     min-height: var(--touch-target-min);
-  }
-
-  .fieldControls {
-    top: -48px;
-    padding: var(--space-1-5);
-    gap: var(--space-1-5);
-  }
-
-  .controlButton {
-    width: 36px;
-    height: 36px;
   }
 
   /* Larger resize handles for touch */

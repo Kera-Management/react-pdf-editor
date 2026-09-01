@@ -86,6 +86,12 @@ export const PageThumbnails: React.FC<PageThumbnailsProps> = ({
 
   // Render all thumbnails
   useEffect(() => {
+    // Capture the ref's current Map now -- by the time the cleanup below
+    // runs, renderTasksRef.current still points at this same Map instance
+    // (it's never reassigned), but reading through the ref in the cleanup
+    // itself is what the exhaustive-deps rule warns about.
+    const renderTasks = renderTasksRef.current;
+
     // Render sequentially to avoid concurrent canvas operations
     const renderSequentially = async () => {
       for (const page of pages) {
@@ -100,8 +106,8 @@ export const PageThumbnails: React.FC<PageThumbnailsProps> = ({
 
     // Cleanup on unmount
     return () => {
-      renderTasksRef.current.forEach((task) => task.cancel());
-      renderTasksRef.current.clear();
+      renderTasks.forEach((task) => task.cancel());
+      renderTasks.clear();
     };
   }, [pages, renderThumbnail]);
 

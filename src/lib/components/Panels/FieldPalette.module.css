@@ -98,22 +98,6 @@
   color: var(--text-primary);
 }
 
-/* Keyboard shortcut */
-.shortcut {
-  font-size: var(--text-xs);
-  font-family: var(--font-mono);
-  color: var(--text-muted);
-  padding: var(--space-0-5) var(--space-1);
-  background: var(--bg-base);
-  border-radius: var(--radius-sm);
-  opacity: 0;
-  transition: opacity var(--transition-fast);
-}
-
-.fieldItem:hover .shortcut {
-  opacity: 1;
-}
-
 /* ==========================================================================
    Hint
    ========================================================================== */
@@ -169,10 +153,6 @@
   .fieldLabel {
     font-size: var(--text-xs);
     text-align: center;
-  }
-
-  .shortcut {
-    display: none;
   }
 
   .hint {

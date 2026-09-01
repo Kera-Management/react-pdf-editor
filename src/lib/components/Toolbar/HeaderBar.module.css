@@ -270,6 +270,33 @@
 }
 
 /* ==========================================================================
+   Decline Button
+   ========================================================================== */
+
+/* Quiet secondary -- offers a way out without competing with Save for
+   attention. Bordered/transparent like modeButton, muted text like
+   iconButton, no icon (the label carries the meaning on its own). */
+.declineButton {
+  display: flex;
+  align-items: center;
+  padding: var(--space-1-5) var(--space-3);
+  background: transparent;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.declineButton:hover {
+  color: var(--color-error-500);
+  border-color: var(--color-error-500);
+}
+
+/* ==========================================================================
    Save Button
    ========================================================================== */
 
@@ -300,6 +327,56 @@
 .saveButton:disabled {
   opacity: 0.7;
   cursor: not-allowed;
+}
+
+.saveIconWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+/* Unsaved-changes indicator on the Save button's icon. */
+.dirtyDot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--color-warning-500, #f59e0b);
+  border: 1px solid var(--accent-primary);
+}
+
+/* ==========================================================================
+   Progress Button (mobile, edit mode)
+   ========================================================================== */
+
+/* Labeled "2/5" entry point into the signer's progress panel -- a chip, not
+   a bare icon, so its state (how much is left) is visible at a glance
+   rather than hidden behind a tap. */
+.progressButton {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  height: 36px;
+  padding: 0 var(--space-3);
+  background: var(--accent-primary-subtle);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--accent-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.progressButton:hover {
+  border-color: var(--accent-primary);
+}
+
+.progressButton:active {
+  transform: scale(0.98);
 }
 
 /* ==========================================================================

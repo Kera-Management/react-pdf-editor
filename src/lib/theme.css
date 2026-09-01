@@ -303,7 +303,24 @@
   --field-bg-default: rgba(6, 59, 38, 0.08);
   --field-bg-selected: rgba(6, 59, 38, 0.15);
   --field-resize-handle: var(--accent-primary);
-  
+
+  /* ==========================================================================
+     Recipient Colors (Light Theme)
+     Index-based palette for per-party identity: swatches/initials badges in
+     the parties panel and field border/tint on canvas. No red (avoids the
+     red-green confusion pair). Each value is AA-checked (>=3:1, non-text UI
+     component contrast) against --bg-surface AND against the always-white
+     document page (--doc-bg never changes with theme).
+     ========================================================================== */
+  --recipient-1: #1e63d2; /* blue */
+  --recipient-2: #0f7585; /* teal */
+  --recipient-3: #7d3dd6; /* violet */
+  --recipient-4: #c2297a; /* magenta */
+  --recipient-5: #a55212; /* orange */
+  --recipient-6: #9e654c; /* brown */
+  --recipient-readonly: #71717a; /* neutral gray - no-longer-editable parties */
+  --recipient-readonly-bg: rgba(113, 113, 122, 0.08);
+
   /* Bottom Sheet (Mobile) */
   --bottom-sheet-bg: #ffffff;
   --bottom-sheet-handle: #d4d4d8;
@@ -396,7 +413,20 @@
   --input-bg: #0f0f0f;
   --bottom-sheet-bg: #252525;
   --bottom-sheet-handle: #52525b;
-  
+
+  /* Recipient Colors (Dark Theme) - re-tuned, not reused: the document page
+     stays white in every theme, so these can't simply brighten like other
+     dark tokens do. Each value is picked to clear >=3:1 against --bg-surface
+     (#252525) AND >=3:1 against the white document page at the same time. */
+  --recipient-1: #4780dc; /* blue */
+  --recipient-2: #218b9c; /* teal */
+  --recipient-3: #9a6adc; /* violet */
+  --recipient-4: #d54d96; /* magenta */
+  --recipient-5: #c16825; /* orange */
+  --recipient-6: #a86f57; /* brown */
+  --recipient-readonly: #808080; /* neutral gray - no-longer-editable parties */
+  --recipient-readonly-bg: rgba(128, 128, 128, 0.12);
+
   /* Scrollbar (Dark) */
   --scrollbar-thumb: #3f3f46;
   --scrollbar-thumb-hover: #52525b;

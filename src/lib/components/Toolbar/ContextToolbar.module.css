@@ -1,5 +1,8 @@
 /* ==========================================================================
-   ContextToolbar - Floating toolbar near selected elements
+   ContextToolbar - the single, fully-labeled floating toolbar for a
+   selected field. Every action shows an icon AND a visible text label --
+   no hover-to-reveal, no icon-only buttons -- so it reads clearly for
+   non-tech-savvy users on both mouse and touch.
    ========================================================================== */
 
 .toolbar {
@@ -36,24 +39,60 @@
 }
 
 /* ==========================================================================
-   Buttons
+   Context chip -- field type icon + field name (or transient feedback)
+   ========================================================================== */
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  padding: 0 var(--space-2);
+  min-width: 0;
+}
+
+.chipIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}
+
+.chipText {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+/* ==========================================================================
+   Buttons -- icon + always-visible label
    ========================================================================== */
 
 .button {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
+  gap: var(--space-1);
+  height: var(--btn-height-sm);
+  padding: 0 var(--space-2-5);
   background: transparent;
   border: none;
   border-radius: var(--radius-md);
   color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  white-space: nowrap;
   cursor: pointer;
-  transition: 
+  transition:
     color var(--transition-fast),
     background var(--transition-fast);
+}
+
+.buttonLabel {
+  display: inline-block;
 }
 
 .button:hover {
@@ -75,6 +114,67 @@
   background: var(--color-error-subtle);
 }
 
+/* Required toggle's state dot -- an outline when off, filled when on, so
+   the state reads at a glance even before noticing the label/color. */
+.requiredDot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid currentColor;
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.button.active .requiredDot {
+  background: currentColor;
+}
+
+/* ==========================================================================
+   Duplicate menu
+   ========================================================================== */
+
+.duplicateGroup {
+  position: relative;
+  display: flex;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+  min-width: 160px;
+  padding: var(--space-1);
+  background: var(--panel-bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  z-index: var(--z-popover);
+  animation: toolbarAppear var(--duration-fast) var(--ease-out);
+}
+
+.menuItem {
+  display: block;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.menuItem:hover {
+  background: var(--bg-surface-hover);
+}
+
 /* ==========================================================================
    Divider
    ========================================================================== */
@@ -84,65 +184,7 @@
   height: 20px;
   background: var(--border-default);
   margin: 0 var(--space-1);
-}
-
-/* ==========================================================================
-   More Menu
-   ========================================================================== */
-
-.moreWrapper {
-  position: relative;
-}
-
-.moreMenu {
-  position: absolute;
-  top: calc(100% + var(--space-2));
-  right: 0;
-  min-width: 180px;
-  background: var(--panel-bg-elevated);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xl);
-  padding: var(--space-1);
-  z-index: var(--z-dropdown);
-  animation: menuAppear var(--duration-fast) var(--ease-out);
-}
-
-@keyframes menuAppear {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.menuItem {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: var(--space-2) var(--space-3);
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: var(--text-sm);
-  color: var(--text-primary);
-  cursor: pointer;
-  text-align: left;
-  transition: background var(--transition-fast);
-}
-
-.menuItem:hover {
-  background: var(--bg-surface-hover);
-}
-
-.shortcut {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
+  flex-shrink: 0;
 }
 
 /* ==========================================================================
@@ -156,10 +198,14 @@
   }
 
   .button {
-    width: 40px;
-    height: 40px;
+    height: var(--touch-target-min);
+  }
+
+  .menuItem {
+    padding: var(--space-3);
+  }
+
+  .chipText {
+    max-width: 100px;
   }
 }
-
-
-
