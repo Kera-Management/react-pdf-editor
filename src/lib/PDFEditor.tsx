@@ -207,9 +207,19 @@ export interface PDFEditorProps {
    *
    * @param pdfBytes A Uint8Array representing the binary data of the PDF file.
    * @param formFields An object of type PDFFormFields containing information about the form fields within the PDF.
+   *
+   * May return a Promise: the editor AWAITS it, keeping the header's
+   * "Saving" spinner up and the save button disabled until the host's own
+   * persistence (upload, API call) settles -- without this, the spinner
+   * stopped the moment bytes were handed over and a multi-second host save
+   * looked like nothing was happening. A rejected promise clears the
+   * spinner and leaves the document marked dirty (the save did not land).
    * @returns
    */
-  onSave?: (pdfBytes: Uint8Array, formFields: PDFFormFields) => void;
+  onSave?: (
+    pdfBytes: Uint8Array,
+    formFields: PDFFormFields
+  ) => void | Promise<void>;
   /**
    * Participants that can be assigned to fields in build mode.
    *
@@ -234,11 +244,12 @@ export interface PDFEditorProps {
   /** Visibility rule for fields not assigned to the active participant in edit mode */
   unassignedVisibility?: "readonly" | "hidden";
   /** Optional callback to receive the built schema along with saved PDF in build mode */
+  /** Same awaitable contract as `onSave` -- see its doc comment. */
   onBuildSave?: (
     pdfBytes: Uint8Array,
     buildSchema: BuildModeField[],
     fieldAssignments: Record<string, string[]>
-  ) => void;
+  ) => void | Promise<void>;
   /** Optional mapping from field name to participant ids for enforcement in edit mode. If not provided, will be automatically extracted from PDF metadata. */
   fieldAssignments?: Record<string, string[]>;
   /** Theme for the editor UI. Defaults to "light". */
@@ -2088,6 +2099,19 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
 
     const onSaveAs = async () => {
       setIsSaving(true);
+      try {
+        await runSaveAs();
+      } finally {
+        // The awaited host handler (onSave/onBuildSave) may reject; the
+        // spinner must never survive a failed save. Dirty state is only
+        // cleared inside runSaveAs AFTER the handler settles successfully,
+        // so a failed save stays "Unsaved changes" -- accurate on both
+        // counts.
+        setIsSaving(false);
+      }
+    };
+
+    const runSaveAs = async () => {
       const originData = await pdfDoc?.getData();
       if (originData) {
         const libDoc = await PDFDocument.load(originData);
@@ -2390,7 +2414,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           // Re-save with metadata
           const savedDataWithMetadata = await libDoc.save();
 
-          onBuildSave(
+          // AWAITED: a host returning a promise keeps the "Saving" spinner
+          // up until its own persistence lands -- see the onSave doc
+          // comment. A void-returning host resolves immediately (unchanged).
+          await onBuildSave(
             savedDataWithMetadata,
             buildModeFields,
             fieldAssignmentsMap
@@ -2402,7 +2429,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           // without waiting for the host to hand back a new `src`.
           setReloadBytes(savedDataWithMetadata);
         } else if (onSave) {
-          onSave(savedData, formFields);
+          // AWAITED -- same contract as onBuildSave above.
+          await onSave(savedData, formFields);
         } else {
           // default behavior, save to local machine
           // Trigger the save-as dialog
@@ -2432,7 +2460,6 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           setHasUnsavedBuildChanges(false);
         }
       }
-      setIsSaving(false);
     };
 
     // SIGNER COMPLETION save gate: the header Save button (and the
