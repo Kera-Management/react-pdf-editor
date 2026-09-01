@@ -59,7 +59,11 @@ export type PartiesConfig = {
   }) => { order: string[]; groupedWithPrevious: Record<string, boolean> } | null;
   /** Panel heading. Defaults to "Recipients". */
   title?: string;
-  /** Editor modes the panel renders in. Defaults to ["build", "edit"] -- NEVER "view" by default. */
+  /**
+   * Editor modes the panel renders in. Defaults to ["build"] -- who signs
+   * and in what order is a preparation decision, and in Fill & Sign the
+   * panel crowded out the progress panel (user feedback). NEVER "view".
+   */
   modes?: PDFEditorMode[];
   /** Presence enables the native expiry input, pre-filled with `defaultDays`. */
   expiry?: { defaultDays: number };

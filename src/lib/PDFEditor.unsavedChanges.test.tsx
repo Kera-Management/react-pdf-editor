@@ -366,4 +366,51 @@ describe("PDFEditor Save and continue actually saves", () => {
       expect(getByRole("button", { name: /fill & sign/i })).toBeInTheDocument()
     );
   });
+
+  it("keeps the guard open and stays in Prepare when the host's save fails", async () => {
+    // Regression: a `finally` dismissed this dialog even when onBuildSave
+    // rejected, dropping the signer back into Prepare with unsaved fields
+    // and no failure signal (this library has no toast surface).
+    const srcDoc = await PDFDocument.create();
+    srcDoc.addPage([200, 300]);
+    const realBytes = await srcDoc.save();
+
+    const page = makeFakePage();
+    const doc = makeFakeDoc(page);
+    doc.getData = vi.fn(
+      async (): Promise<Uint8Array<ArrayBuffer>> =>
+        realBytes as Uint8Array<ArrayBuffer>
+    );
+    fakeDocRef.current = doc;
+    getDocumentMock.mockReset();
+    getDocumentMock.mockImplementation(() => ({
+      promise: Promise.resolve(fakeDocRef.current),
+    }));
+
+    const onBuildSave = vi.fn(() => Promise.reject(new Error("upload failed")));
+    const { getByRole, queryByRole } = render(
+      <PDFEditor
+        src="fake://document.pdf"
+        mode="build"
+        allowedModes={["edit", "build"]}
+        onBuildSave={onBuildSave}
+      />
+    );
+
+    const addText = await waitFor(() =>
+      getByRole("button", { name: /add text field/i })
+    );
+    fireEvent.click(addText);
+
+    fireEvent.click(getByRole("button", { name: /prepare/i }));
+    fireEvent.click(getByRole("option", { name: /fill & sign/i }));
+    fireEvent.click(getByRole("button", { name: "Save and continue" }));
+
+    await waitFor(() => expect(onBuildSave).toHaveBeenCalledTimes(1));
+    // Dialog survives, mode never switched.
+    await waitFor(() =>
+      expect(getByRole("button", { name: "Save and continue" })).toBeInTheDocument()
+    );
+    expect(queryByRole("button", { name: /^fill & sign$/i })).toBeNull();
+  });
 });

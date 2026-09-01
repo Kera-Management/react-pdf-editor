@@ -96,11 +96,25 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
   // `activeParticipantId` the host supplies silently exclude a signer's own
   // field from their list.
   const assignedFields = React.useMemo(() => {
-    if (!fieldAssignments || !activeParticipantId) return [];
+    // "Empty mapping means unrestricted" -- the same rule
+    // resolveEffectiveFieldAssignments and getRequiredAssignedFieldNames
+    // apply (see their doc comments). A host that declares no per-field
+    // assignment at all (plain fill & sign) is not saying "nothing is
+    // yours", it is saying "assignment does not apply here", so every
+    // field is the filler's. Returning [] here instead used to leave the
+    // remaining-fields checklist and Start/Next navigation permanently
+    // empty while the header's X/Y count -- which goes through the
+    // completion math and DOES apply this rule -- showed real work
+    // outstanding: the exact counter-vs-list divergence this panel's
+    // matching logic was unified to prevent.
+    const hasAssignmentMapping =
+      !!fieldAssignments && Object.keys(fieldAssignments).length > 0;
+    if (!hasAssignmentMapping) return Object.keys(formFields);
+    if (!activeParticipantId) return [];
     return Object.entries(fieldAssignments)
       .filter(([, ids]) => assigneesIncludeParticipant(ids, activeParticipantId))
       .map(([fieldName]) => fieldName);
-  }, [fieldAssignments, activeParticipantId]);
+  }, [fieldAssignments, activeParticipantId, formFields]);
 
   // Split assigned fields into ones that actually rendered vs ones that
   // didn't (see `renderedFieldNames` doc comment). Unrendered fields are
@@ -152,15 +166,32 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
     const currentIndex = activeFieldName
       ? remainingFields.indexOf(activeFieldName)
       : -1;
-    // The active field either advanced to the next one in the list, or (far
-    // more often) it was just completed and dropped out of `remainingFields`
-    // entirely -- in which case index 0 IS the next one to do, since
-    // everything before it in document order is already done.
-    const next =
-      currentIndex >= 0 && currentIndex + 1 < remainingFields.length
-        ? remainingFields[currentIndex + 1]
-        : remainingFields[0];
-    goToField(next);
+    if (currentIndex >= 0) {
+      // Still in the list: walk forward, wrapping at the end.
+      const next =
+        currentIndex + 1 < remainingFields.length
+          ? remainingFields[currentIndex + 1]
+          : remainingFields[0];
+      goToField(next);
+      return;
+    }
+    // The active field just dropped out of `remainingFields` (completed).
+    // "Next" must mean the next one AFTER it in document order, not index
+    // 0 -- the remaining list is directly clickable, so a signer who jumped
+    // ahead to field 4 and completed it would otherwise be thrown back to
+    // field 0. Fall back to index 0 only when nothing remains after it
+    // (wrap), or when no field was ever active.
+    const orderedFields = renderableAssignedFields;
+    const completedPosition = activeFieldName
+      ? orderedFields.indexOf(activeFieldName)
+      : -1;
+    const nextAfterCompleted =
+      completedPosition >= 0
+        ? remainingFields.find(
+            (name) => orderedFields.indexOf(name) > completedPosition
+          )
+        : undefined;
+    goToField(nextAfterCompleted ?? remainingFields[0]);
   };
 
   if (mode !== "edit") return null;

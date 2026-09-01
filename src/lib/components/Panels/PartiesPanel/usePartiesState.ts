@@ -259,7 +259,20 @@ export const usePartiesState = (
       partyId in roles ? roles[partyId] : undefined;
 
     const validOrder = order.filter((id) => ids.includes(id));
-    const steps = deriveSteps(validOrder, groupedWithPrevious);
+    // A party the HOST dropped from `participants` (without bumping
+    // seedKey) leaves the same way an in-panel removal does, so its chain
+    // flags need the same repair: a follower marked "grouped with
+    // previous" behind a departed group HEAD would otherwise silently
+    // re-chain to whoever now sits above it, merging two people into one
+    // signing step nobody asked to merge. Every in-hook mutation routes
+    // through repairFollowerFlags for exactly this; derivation from props
+    // must not be the one path that skips it.
+    const departed = order.filter((id) => !ids.includes(id));
+    const repairedFlags = departed.reduce(
+      (flags, leavingId) => repairFollowerFlags(order, flags, leavingId),
+      groupedWithPrevious
+    );
+    const steps = deriveSteps(validOrder, repairedFlags);
     const signers = validOrder.map((id, i) => ({ id, step: steps[i] }));
 
     const viewerIds = ids.filter((id) => currentRole(id) === "viewer");

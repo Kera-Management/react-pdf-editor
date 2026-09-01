@@ -1888,8 +1888,13 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
 
     // SIGNER COMPLETION auto-scroll: once per document load, land an
     // edit-mode signer directly on their first incomplete required field
-    // instead of leaving them to find the Start button themselves. Reuses
-    // the exact same jump logic ProgressPanel's own "Start" button drives.
+    // instead of leaving them to find the Start button themselves. Uses
+    // the same focus/highlight jump ProgressPanel's "Start" button drives,
+    // but its own target: the first remaining REQUIRED field, where Start
+    // walks every remaining ASSIGNED field. On a document whose assigned
+    // set is wider than its required set the two can land differently --
+    // deliberate, since the point of the auto-jump is the work the signer
+    // cannot skip.
     useEffect(() => {
       if (mode !== "edit" || !pagesReady || !activeParticipantId) return;
       if (autoScrolledRef.current) return;
@@ -2557,8 +2562,25 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // onSaveAs that closes over pdfDoc === undefined and silently saves
     // NOTHING before performing the action anyway. That was a live bug for
     // Save-and-continue, pinned by a regression test.
+    /**
+     * Runs the save for a "save, then do X" guard action and reports
+     * whether it landed. Both callers are onClick handlers, so a rejection
+     * allowed to escape becomes an unhandled promise rejection in the
+     * console -- the HOST already knows its own onSave/onBuildSave threw
+     * (and owns surfacing it; this library has no toast of its own), so
+     * the only thing left to decide here is whether to proceed with X.
+     */
+    const trySaveForGuardAction = async (): Promise<boolean> => {
+      try {
+        await onSaveAs();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
     const handleSaveAndClose = async () => {
-      await onSaveAs();
+      if (!(await trySaveForGuardAction())) return;
       setShowUnsavedGuard(false);
       onClose?.();
     };
@@ -2567,12 +2589,14 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // Prepare mode (that's the save path that writes fields into the PDF);
     // only a save that didn't throw proceeds to the switch.
     const handleSavePreparedAndFill = async () => {
-      try {
-        await onSaveAs();
-        setMode("edit");
-      } finally {
-        setShowUnsavedPrepareDialog(false);
-      }
+      // Only a save that actually landed closes the dialog and switches
+      // modes. A `finally` here dismissed the guard even when onSaveAs
+      // threw, dropping the signer back into Prepare with unsaved fields
+      // and no indication anything failed -- same reasoning as
+      // handleSaveAndClose, which also leaves its guard open on failure.
+      if (!(await trySaveForGuardAction())) return;
+      setMode("edit");
+      setShowUnsavedPrepareDialog(false);
     };
 
     const handleFillWithoutSaving = useCallback(() => {

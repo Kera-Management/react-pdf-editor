@@ -257,3 +257,113 @@ describe("ProgressPanel fieldLabels prop", () => {
     expect(screen.getByText("Move In Date")).toBeInTheDocument();
   });
 });
+
+describe("ProgressPanel empty-assignment (plain fill & sign)", () => {
+  // Regression: with no per-field assignment mapping at all, the panel used
+  // to return [] assigned fields -- an empty checklist and dead Start/Next
+  // -- while the header's X/Y count (computed through the completion math,
+  // which treats an empty mapping as unrestricted) showed real work left.
+  it("treats every field as the filler's when no mapping exists", () => {
+    const onFieldFocus = vi.fn();
+    render(
+      <ProgressPanel
+        activeParticipantId="signer-1"
+        participants={[{ id: "signer-1", label: "Jane Tenant" }]}
+        fieldAssignments={{}}
+        mode="edit"
+        formFields={{ tenant_full_name: "", move_in_date: "" }}
+        totalFields={2}
+        completedFields={0}
+        onFieldFocus={onFieldFocus}
+      />
+    );
+
+    expect(screen.getByText("Tenant Full Name")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^start$/i }));
+    expect(onFieldFocus).toHaveBeenCalledWith("tenant_full_name");
+  });
+
+  it("still scopes to the participant once ANY field is mapped", () => {
+    render(
+      <ProgressPanel
+        activeParticipantId="signer-1"
+        participants={[{ id: "signer-1", label: "Jane Tenant" }]}
+        fieldAssignments={{ landlord_only: ["signer-2"] }}
+        mode="edit"
+        formFields={{ landlord_only: "", unmapped_field: "" }}
+        totalFields={2}
+        completedFields={0}
+      />
+    );
+
+    expect(screen.queryByText("Landlord Only")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unmapped Field")).not.toBeInTheDocument();
+  });
+});
+
+describe("ProgressPanel out-of-order navigation", () => {
+  // Regression: the remaining list is directly clickable, so a signer can
+  // complete field 3 first. "Next field" used to fall back to index 0 and
+  // throw them backward past work they had deliberately skipped ahead of.
+  it("Next advances past a field completed out of order, not back to the top", () => {
+    const onFieldFocus = vi.fn();
+    const { rerender } = render(
+      <ProgressPanel
+        {...baseProps}
+        formFields={{}}
+        totalFields={3}
+        completedFields={0}
+        onFieldFocus={onFieldFocus}
+      />
+    );
+
+    // Jump straight to the third field from the clickable list.
+    fireEvent.click(screen.getByText("Signature Field"));
+    expect(onFieldFocus).toHaveBeenCalledWith("signature_field");
+
+    // It gets completed and drops out of the remaining list.
+    rerender(
+      <ProgressPanel
+        {...baseProps}
+        formFields={{ signature_field: "signed" }}
+        totalFields={3}
+        completedFields={1}
+        onFieldFocus={onFieldFocus}
+      />
+    );
+
+    // Nothing remains after it, so Next wraps to the top rather than
+    // stranding the signer.
+    fireEvent.click(screen.getByRole("button", { name: /next field/i }));
+    expect(onFieldFocus).toHaveBeenLastCalledWith("tenant_full_name");
+  });
+
+  it("Next picks the field after the one just completed, when one exists", () => {
+    const onFieldFocus = vi.fn();
+    const { rerender } = render(
+      <ProgressPanel
+        {...baseProps}
+        formFields={{}}
+        totalFields={3}
+        completedFields={0}
+        onFieldFocus={onFieldFocus}
+      />
+    );
+
+    fireEvent.click(screen.getByText("Move In Date"));
+    expect(onFieldFocus).toHaveBeenCalledWith("move_in_date");
+
+    rerender(
+      <ProgressPanel
+        {...baseProps}
+        formFields={{ move_in_date: "2026-09-01" }}
+        totalFields={3}
+        completedFields={1}
+        onFieldFocus={onFieldFocus}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /next field/i }));
+    expect(onFieldFocus).toHaveBeenLastCalledWith("signature_field");
+  });
+});
