@@ -256,6 +256,8 @@ export interface PDFEditorProps {
   theme?: "light" | "dark";
   /** Optional callback when the close button is clicked */
   onClose?: () => void;
+  /** Once per successful document/page load; never fires for failed or cancelled loads. */
+  onDocumentReady?: () => void;
   /** Allowed modes to show in the mode selector. Defaults to all modes. */
   allowedModes?: PDFEditorMode[];
   /**
@@ -408,6 +410,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       fieldAssignments,
       theme = "light",
       onClose,
+      onDocumentReady,
       // Defaults to JUST the initial mode, not every mode -- a host that
       // wants the mode switcher must opt in explicitly by passing
       // `allowedModes`. `initialMode` is already bound above (destructuring
@@ -723,6 +726,12 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // A genuinely new host document supersedes any internal post-save copy.
     const lastSrcRef = useRef(src);
 
+    const documentLoadGeneration = useRef(0);
+    const [loadedDocumentGeneration, setLoadedDocumentGeneration] = useState(0);
+    const readyGeneration = useRef(0);
+    const onDocumentReadyRef = useRef(onDocumentReady);
+    onDocumentReadyRef.current = onDocumentReady;
+
     useEffect(() => {
       if (lastSrcRef.current !== src) {
         lastSrcRef.current = src;
@@ -732,7 +741,13 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           return undefined;
         }
       }
+      let cancelled = false;
+      let loadedDocument: PDFDocumentProxy | undefined;
+      const generation = ++documentLoadGeneration.current;
       const loadDocument = async () => {
+        setPdfDoc(undefined);
+        setPages(undefined);
+        setPagesReady(false);
         setDocReady(false);
         setLoadError(null);
         // A new document is loading -- clear any values left over from a
@@ -757,18 +772,26 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             // never see a detached buffer.
             reloadBytes ? { data: reloadBytes.slice(0) } : src
           ).promise;
+          loadedDocument = doc;
+          if (cancelled) { await doc.destroy(); return; }
           setPdfDoc(doc);
 
           // Try to extract editor metadata from the PDF.
           try {
             const pdfBytes = await doc.getData();
-            extractedMetadata.current = await extractEditorMetadata(pdfBytes);
+            const metadata = await extractEditorMetadata(pdfBytes);
+            if (cancelled) return;
+            extractedMetadata.current = metadata;
           } catch (error) {
             console.warn("Failed to extract editor metadata from PDF:", error);
           }
 
-          setDocReady(true);
+          if (!cancelled && generation === documentLoadGeneration.current) {
+            setLoadedDocumentGeneration(generation);
+            setDocReady(true);
+          }
         } catch (error) {
+          if (cancelled) return;
           console.error("Failed to load PDF document:", error);
           setLoadError(
             error instanceof Error ? error : new Error(String(error))
@@ -782,11 +805,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       };
       loadDocument();
       return () => {
-        if (pdfDoc) {
-          pdfDoc.destroy();
-          setPdfDoc(undefined);
-          setDocReady(false);
-        }
+        cancelled = true;
+        loadedDocument?.destroy();
       };
       // since getDocument is async api
       // pdfDoc is keeping change while loading the pdf
@@ -795,16 +815,20 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     }, [src, reloadBytes]);
 
     useEffect(() => {
+      let cancelled = false;
+      const generation = documentLoadGeneration.current;
       const loadFormFieldsAndPages = async () => {
-        if (pdfDoc) {
+        if (pdfDoc && docReady && loadedDocumentGeneration === generation) {
           try {
             const rawFormFields =
               (await pdfDoc.getFieldObjects()) as PDFFormRawFields;
             const rawPages: PDFPageAndFormFields[] = [];
+            if (cancelled) return;
             setPagesReady(false);
             for (let i = 1; i <= pdfDoc?.numPages; i++) {
               try {
                 const proxy = await pdfDoc.getPage(i);
+                if (cancelled) return;
                 const fields = rawFormFields
                   ? Object.values(rawFormFields).flatMap((rawFields) =>
                       rawFields
@@ -841,18 +865,30 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 console.error(`Failed to load page ${i}:`, pageError);
               }
             }
+            if (cancelled || generation !== documentLoadGeneration.current) return;
             setPages(rawPages);
             setPagesReady(true);
           } catch (error) {
+            if (cancelled) return;
             console.error("Failed to load form fields and pages:", error);
             setPagesReady(true);
           }
         }
       };
       loadFormFieldsAndPages();
+      return () => { cancelled = true; };
       // intend not include pdfDoc, since it is a proxy
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [docReady]);
+    }, [docReady, loadedDocumentGeneration]);
+
+    useEffect(() => {
+      if (!docReady || !pagesReady || loadError || !pdfDoc ||
+          loadedDocumentGeneration !== documentLoadGeneration.current ||
+          pdfDoc.numPages < 1 || pages?.length !== pdfDoc.numPages ||
+          readyGeneration.current === documentLoadGeneration.current) return;
+      readyGeneration.current = documentLoadGeneration.current;
+      onDocumentReadyRef.current?.();
+    }, [docReady, pagesReady, loadError, pdfDoc, pages, loadedDocumentGeneration]);
 
     // Seed host-supplied initialFieldValues into useFieldValues once the
     // freshly-loaded document's field ids are known. `initialFieldValues`
