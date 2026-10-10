@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 
+import { renderWithChakra as render } from "../../testUtils";
 import { ProgressPanel } from "./ProgressPanel";
+import { getAvatarPalette } from "./avatarPalette";
 
 const baseProps = {
   activeParticipantId: "signer-1",
@@ -108,7 +110,7 @@ describe("ProgressPanel guided signing", () => {
     );
 
     expect(
-      screen.getByText("You've completed all your fields!")
+      screen.getByText("You've completed all your fields.")
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /finish/i })
@@ -178,7 +180,8 @@ describe("ProgressPanel unrendered-field handling", () => {
       />
     );
 
-    expect(screen.getByText("2 fields remaining")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Remaining" })).toBeInTheDocument();
+    expect(screen.getByText("2", { selector: "span" })).toBeInTheDocument();
     expect(screen.queryByText("Signature Field")).not.toBeInTheDocument();
   });
 
@@ -232,7 +235,8 @@ describe("ProgressPanel unrendered-field handling", () => {
       />
     );
 
-    expect(screen.getByText("3 fields remaining")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Remaining" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Signature Field|Move In Date|Tenant Full Name/ })).toHaveLength(3);
     expect(
       screen.queryByText(/couldn't be shown/i)
     ).not.toBeInTheDocument();
@@ -365,5 +369,118 @@ describe("ProgressPanel out-of-order navigation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /next field/i }));
     expect(onFieldFocus).toHaveBeenLastCalledWith("signature_field");
+  });
+});
+
+describe("ProgressPanel Chakra redesign (spec §3.4, copy #10-13)", () => {
+  it("shows the count as a '2 of 5' badge and drops the percentage line", () => {
+    render(
+      <ProgressPanel
+        {...baseProps}
+        formFields={{ tenant_full_name: "Jane" }}
+        totalFields={5}
+        completedFields={2}
+      />
+    );
+    expect(screen.getByRole("heading", { name: "Progress" })).toBeInTheDocument();
+    expect(screen.getByText("2 of 5")).toBeInTheDocument();
+    expect(screen.queryByText(/% complete/)).not.toBeInTheDocument();
+    expect(screen.queryByText("2 / 5")).not.toBeInTheDocument();
+  });
+
+  it("renders a progress bar carrying the percentage", () => {
+    render(
+      <ProgressPanel
+        {...baseProps}
+        formFields={{}}
+        totalFields={4}
+        completedFields={1}
+      />
+    );
+    expect(screen.getByRole("progressbar")).toHaveAttribute(
+      "aria-valuenow",
+      "25"
+    );
+  });
+
+  it("labels the remaining list with a count badge, not a sentence", () => {
+    render(
+      <ProgressPanel
+        {...baseProps}
+        formFields={{}}
+        totalFields={3}
+        completedFields={0}
+      />
+    );
+    expect(screen.getByRole("heading", { name: "Remaining" })).toBeInTheDocument();
+    expect(screen.queryByText(/fields remaining/)).not.toBeInTheDocument();
+  });
+
+  it("marks the field guided navigation last visited with aria-current", () => {
+    render(
+      <ProgressPanel
+        {...baseProps}
+        formFields={{}}
+        totalFields={3}
+        completedFields={0}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^start$/i }));
+    expect(
+      screen.getByRole("button", { name: "Tenant Full Name" })
+    ).toHaveAttribute("aria-current", "step");
+    expect(
+      screen.getByRole("button", { name: "Move In Date" })
+    ).not.toHaveAttribute("aria-current");
+  });
+
+  it("shows the participant as 'Name · Role'", () => {
+    render(
+      <ProgressPanel
+        {...baseProps}
+        participants={[{ id: "signer-1", label: "Jane Tenant", role: "Tenant" }]}
+        formFields={{}}
+        totalFields={3}
+        completedFields={0}
+      />
+    );
+    expect(screen.getByText("Jane Tenant")).toBeInTheDocument();
+    expect(screen.getByText(/· Tenant/)).toBeInTheDocument();
+  });
+
+  it("puts type=button on every button (the host wraps the editor in a form)", () => {
+    render(
+      <ProgressPanel
+        {...baseProps}
+        formFields={{}}
+        totalFields={3}
+        completedFields={0}
+      />
+    );
+    for (const button of screen.getAllByRole("button")) {
+      expect(button).toHaveAttribute("type", "button");
+    }
+  });
+
+  it("gives a person the same avatar colour as the app does", () => {
+    // Expected values come from the app's utils/avatarPalette.ts.
+    expect(getAvatarPalette("Raj Patel")).toBe("green");
+    expect(getAvatarPalette("Tim Canon")).toBe("blue");
+    expect(getAvatarPalette("Jane")).toBe("orange");
+    expect(getAvatarPalette("  JANE ")).toBe("orange");
+    expect(getAvatarPalette("")).toBe("gray");
+  });
+
+  it("returns nothing outside edit mode", () => {
+    const { container } = render(
+      <ProgressPanel
+        {...baseProps}
+        mode="build"
+        formFields={{}}
+        totalFields={3}
+        completedFields={0}
+      />
+    );
+    expect(container).toBeEmptyDOMElement();
   });
 });

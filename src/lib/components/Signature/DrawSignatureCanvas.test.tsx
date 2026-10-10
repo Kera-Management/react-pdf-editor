@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
+
+import { renderWithChakra } from "../../testUtils";
 
 import { DrawSignatureCanvas } from "./DrawSignatureCanvas";
 import { BLANK_IMAGE_DATA, drawAGesture, inkedImageData, stubCanvas } from "./testUtils";
@@ -15,7 +17,7 @@ describe("DrawSignatureCanvas", () => {
     ctx.getImageData.mockReturnValue(BLANK_IMAGE_DATA);
     const onChange = vi.fn();
 
-    render(<DrawSignatureCanvas onChange={onChange} />);
+    renderWithChakra(<DrawSignatureCanvas onChange={onChange} />);
 
     expect(onChange).toHaveBeenLastCalledWith(null);
   });
@@ -25,7 +27,7 @@ describe("DrawSignatureCanvas", () => {
     ctx.getImageData.mockReturnValue(BLANK_IMAGE_DATA);
     const onChange = vi.fn();
 
-    render(<DrawSignatureCanvas onChange={onChange} />);
+    renderWithChakra(<DrawSignatureCanvas onChange={onChange} />);
     onChange.mockClear();
 
     const canvas = screen.getByRole("img", { name: /signature drawing area/i });
@@ -41,7 +43,7 @@ describe("DrawSignatureCanvas", () => {
     ctx.getImageData.mockReturnValue(BLANK_IMAGE_DATA);
     const onChange = vi.fn();
 
-    render(<DrawSignatureCanvas onChange={onChange} />);
+    renderWithChakra(<DrawSignatureCanvas onChange={onChange} />);
 
     ctx.getImageData.mockReturnValue(inkedImageData());
     const canvas = screen.getByRole("img", { name: /signature drawing area/i });
@@ -55,7 +57,7 @@ describe("DrawSignatureCanvas", () => {
     ctx.getImageData.mockReturnValue(BLANK_IMAGE_DATA);
     const onChange = vi.fn();
 
-    render(<DrawSignatureCanvas onChange={onChange} />);
+    renderWithChakra(<DrawSignatureCanvas onChange={onChange} />);
 
     ctx.getImageData.mockReturnValue(inkedImageData());
     const canvas = screen.getByRole("img", { name: /signature drawing area/i });
@@ -80,7 +82,7 @@ describe("DrawSignatureCanvas", () => {
     ctx.getImageData.mockReturnValue(BLANK_IMAGE_DATA);
     const onChange = vi.fn();
 
-    render(<DrawSignatureCanvas onChange={onChange} />);
+    renderWithChakra(<DrawSignatureCanvas onChange={onChange} />);
 
     ctx.getImageData.mockReturnValue(inkedImageData());
     const canvas = screen.getByRole("img", { name: /signature drawing area/i });
@@ -100,7 +102,7 @@ describe("DrawSignatureCanvas", () => {
   it("undo and clear start disabled with nothing drawn", () => {
     stubCanvas();
 
-    render(<DrawSignatureCanvas onChange={vi.fn()} />);
+    renderWithChakra(<DrawSignatureCanvas onChange={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: /undo/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /clear/i })).toBeDisabled();

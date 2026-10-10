@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Build Mode Field Renderer - Figma-style Dark Theme
+   Build Mode Field Renderer (canvas: native DOM, token colours)
    ========================================================================== */
 
 /* ==========================================================================
@@ -9,10 +9,10 @@
   position: absolute;
   box-sizing: border-box;
   outline: none;
-  border-radius: var(--radius-sm);
+  border-radius: 4px;
   transition: 
-    box-shadow var(--duration-fast) var(--ease-out),
-    transform var(--duration-fast) var(--ease-out);
+    box-shadow 100ms cubic-bezier(0, 0, 0.2, 1),
+    transform 100ms cubic-bezier(0, 0, 0.2, 1);
   cursor: move;
   touch-action: none;
   user-select: none;
@@ -22,39 +22,48 @@
   outline: none;
 }
 
-.buildField:hover:not(.selected) {
-  box-shadow: 0 0 0 2px var(--field-border-hover);
+.buildField:hover:not([data-selected="true"]) {
+  box-shadow: 0 0 0 2px var(--pdfe-field-border-hover);
 }
 
 /* ==========================================================================
-   Selection State
+   Selection State (spec §4)
+   Selected or multi-selected (A6): 2px outline in --pdfe-selection. Only a
+   single selection shows resize handles (rendered by the component).
    ========================================================================== */
-.selected {
+.buildField[data-selected="true"] {
   z-index: 100 !important;
-  box-shadow: 
-    0 0 0 2px var(--field-border-selected),
-    0 0 0 4px var(--accent-primary-subtle);
+  outline: 2px solid var(--pdfe-selection);
+  outline-offset: 1px;
 }
 
-/* Selection ring animation */
-.selected::after {
-  content: "";
+/* ==========================================================================
+   Invalid (A7): dropdown/radio with no options
+   ========================================================================== */
+.buildField[data-invalid="true"] .fieldPreview {
+  border-color: var(--pdfe-invalid);
+}
+
+.buildField[data-invalid="true"]:not([data-selected="true"]) {
+  outline: 2px solid var(--pdfe-invalid);
+  outline-offset: 1px;
+}
+
+.invalidChip {
   position: absolute;
-  inset: -4px;
-  border: 1px dashed var(--accent-primary);
-  border-radius: calc(var(--radius-sm) + 4px);
-  opacity: 0.5;
+  top: 0;
+  left: 0;
+  transform: translateY(calc(-100% - 3px));
+  padding: 0 6px;
+  border-radius: 9999px;
+  background: var(--pdfe-invalid-chip-bg);
+  color: var(--pdfe-invalid-chip-fg);
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  white-space: nowrap;
   pointer-events: none;
-  animation: dashRotate 20s linear infinite;
-}
-
-@keyframes dashRotate {
-  0% {
-    stroke-dashoffset: 0;
-  }
-  100% {
-    stroke-dashoffset: -100;
-  }
+  z-index: 12;
 }
 
 /* ==========================================================================
@@ -67,96 +76,92 @@
   align-items: center;
   justify-content: center;
   pointer-events: none;
-  background: var(--field-bg-default);
-  border: 2px solid var(--field-border-default);
-  border-radius: var(--radius-sm);
-  transition: 
-    background var(--duration-fast),
-    border-color var(--duration-fast);
+  background: var(--pdfe-field-bg);
+  border: 2px solid var(--pdfe-field-border);
+  border-radius: 4px;
+  transition:
+    background 100ms,
+    border-color 100ms;
 }
 
-.selected .fieldPreview {
-  background: var(--field-bg-selected);
-  border-color: var(--field-border-selected);
+.buildField[data-selected="true"] .fieldPreview {
+  background: var(--pdfe-field-bg-selected);
+  border-color: var(--pdfe-field-border-selected);
 }
 
-/* Field type label */
-.fieldTypeLabel {
-  font-size: var(--text-2xs);
-  font-weight: var(--font-semibold);
-  color: var(--accent-primary);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wider);
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-
-.fieldTypeLabel svg {
-  opacity: 0.8;
-}
-
-/* Text input preview */
+/* Text input preview: dark text on the white page in both modes. */
 .fieldPreview input[type="text"],
 .fieldPreview textarea {
   width: 100%;
   height: 100%;
-  padding: var(--space-1) var(--space-2);
+  padding: 4px 8px;
   background: transparent;
   border: none;
-  font-size: var(--text-xs);
-  color: var(--accent-primary);
+  font-size: 12px;
+  color: var(--pdfe-field-fg);
   pointer-events: none;
   resize: none;
 }
 
 .fieldPreview input[type="text"]::placeholder,
 .fieldPreview textarea::placeholder {
-  color: var(--accent-primary);
-  opacity: 0.6;
+  color: var(--pdfe-field-placeholder);
 }
 
-/* Checkbox preview */
-.fieldPreview input[type="checkbox"] {
-  appearance: none;
-  width: 18px;
-  height: 18px;
-  background: rgba(255, 255, 255, 0.9);
-  border: 2px solid var(--accent-primary);
-  border-radius: var(--radius-sm);
-  cursor: inherit;
+.fieldPreview select {
+  color: var(--pdfe-field-fg);
+  background: transparent;
+  border: none;
 }
 
-/* Radio preview */
+/* Checkbox / radio previews */
+.fieldPreview input[type="checkbox"],
 .fieldPreview input[type="radio"] {
   appearance: none;
+  flex-shrink: 0;
   width: 18px;
   height: 18px;
-  background: rgba(255, 255, 255, 0.9);
-  border: 2px solid var(--accent-primary);
-  border-radius: var(--radius-full);
+  background: var(--pdfe-page-bg);
+  border: 2px solid var(--pdfe-field-border-selected);
+  border-radius: 4px;
   cursor: inherit;
+}
+
+.fieldPreview input[type="radio"] {
+  border-radius: 9999px;
+}
+
+.radioLabel {
+  color: var(--pdfe-field-placeholder);
 }
 
 /* Signature placeholder */
 .signaturePlaceholder {
+  width: 100%;
+  height: 100%;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-1);
-  color: var(--accent-primary);
+  gap: 4px;
+  pointer-events: none;
+  background: var(--pdfe-field-bg);
+  border: 2px dashed var(--pdfe-field-border);
+  border-radius: 4px;
+  color: var(--pdfe-signature-prompt-fg);
 }
 
-.signaturePlaceholder svg {
-  opacity: 0.6;
+.buildField[data-selected="true"] .signaturePlaceholder {
+  background: var(--pdfe-field-bg-selected);
+  border-color: var(--pdfe-field-border-selected);
 }
 
 .signaturePlaceholder span {
-  font-size: var(--text-2xs);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   text-transform: uppercase;
-  letter-spacing: var(--tracking-wider);
-  font-weight: var(--font-medium);
+  letter-spacing: 0.02em;
+  font-weight: 500;
 }
 
 /* ==========================================================================
@@ -166,7 +171,7 @@
   position: absolute;
   bottom: 100%;
   margin-bottom: 2px;
-  left: var(--space-1);
+  left: 4px;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -184,14 +189,16 @@
   /* A person's name never truncates (product rule). The row wraps instead;
      fields too small for even one label already collapse to a count. */
   white-space: nowrap;
-  padding: 1px var(--space-1-5);
-  border-radius: var(--radius-full);
-  background: var(--accent-primary);
-  color: var(--doc-bg);
+  padding: 1px 6px;
+  border-radius: 9999px;
+  /* Assigned fields set --pdfe-field-chip-bg to the recipient's -700 ink
+     step so the small white text clears 4.5:1. */
+  background: var(--pdfe-field-chip-bg, var(--pdfe-field-border-selected));
+  color: var(--pdfe-page-bg);
   font-size: 9px;
-  font-weight: var(--font-semibold);
+  font-weight: 600;
   line-height: 1.4;
-  box-shadow: var(--shadow-xs);
+  box-shadow: var(--chakra-shadows-xs);
 }
 
 /* ==========================================================================
@@ -203,9 +210,9 @@
   left: -4px;
   width: 8px;
   height: 8px;
-  border-radius: var(--radius-full);
-  background: var(--color-error-500);
-  border: 2px solid var(--doc-bg);
+  border-radius: 9999px;
+  background: var(--pdfe-required);
+  border: 2px solid var(--pdfe-page-bg);
   pointer-events: none;
   z-index: 11;
 }
@@ -222,15 +229,17 @@
   justify-content: center;
   width: 18px;
   height: 18px;
-  border-radius: var(--radius-full);
-  background: var(--accent-primary);
-  color: #ffffff;
+  border-radius: 9999px;
+  /* Assigned fields set --pdfe-field-chip-bg to the recipient's -700 ink
+     step so the small white text clears 4.5:1. */
+  background: var(--pdfe-field-chip-bg, var(--pdfe-field-border-selected));
+  color: var(--pdfe-page-bg);
   font-size: 8px;
-  font-weight: var(--font-semibold);
+  font-weight: 600;
   line-height: 1;
-  box-shadow: var(--shadow-xs);
+  box-shadow: var(--chakra-shadows-xs);
   opacity: 0;
-  transition: opacity var(--duration-fast) var(--ease-out);
+  transition: opacity 100ms cubic-bezier(0, 0, 0.2, 1);
   pointer-events: none;
   z-index: 11;
 }
@@ -240,21 +249,19 @@
 }
 
 /* ==========================================================================
-   Resize Handles
+   Resize Handles (single selection only): bg.panel fill, border.emphasized
    ========================================================================== */
 .resizeHandle {
   position: absolute;
   width: 10px;
   height: 10px;
-  background: var(--doc-bg);
-  border: 2px solid var(--accent-primary);
+  background: var(--pdfe-handle-bg);
+  border: 2px solid var(--pdfe-handle-border);
   border-radius: 2px;
   z-index: 102;
-  opacity: 0;
-  transition: 
-    opacity var(--duration-fast),
-    transform var(--duration-fast),
-    background var(--duration-fast);
+  transition:
+    transform 100ms,
+    border-color 100ms;
   touch-action: none;
 }
 
@@ -265,17 +272,9 @@
   inset: -8px;
 }
 
-.selected .resizeHandle {
-  opacity: 1;
-}
-
 .resizeHandle:hover {
-  background: var(--accent-primary);
+  border-color: var(--pdfe-selection);
   transform: scale(1.2);
-}
-
-.resizeHandle:active {
-  background: var(--accent-primary-active);
 }
 
 /* Corner positions */
@@ -319,11 +318,10 @@
 /* ==========================================================================
    Mobile Enhancements
    ========================================================================== */
-@media (max-width: 640px) {
-  .buildField {
-    min-width: var(--touch-target-min);
-    min-height: var(--touch-target-min);
-  }
+@media (max-width: 639.98px) {
+  /* No min-width/min-height on .buildField: fields are drawn at their true
+     size. At phone zoom (~55%) a 44px minimum stretched a 24pt field to
+     several times its height and stacked it over its neighbours. */
 
   /* Larger resize handles for touch */
   .resizeHandle {

@@ -1,6 +1,8 @@
 import React, { useCallback, useRef, useState } from "react";
+import { SignatureIcon } from "@phosphor-icons/react";
 import { BuildModeField } from "../PDFEditor";
 import { recipientColorVar } from "../colors";
+import { isFieldMissingOptions } from "./shared/fieldTypeMeta";
 import styles from "./BuildModeFieldRenderer.module.css";
 
 interface FieldParticipant {
@@ -12,8 +14,22 @@ interface FieldParticipant {
 interface BuildModeFieldRendererProps {
   field: BuildModeField;
   scale: number;
+  /**
+   * The PRIMARY selected field: shows resize handles (single selection
+   * only) and owns keyboard nudge/delete/duplicate. Drag, resize and nudge
+   * always act on this one field, even inside a multi-selection (A6).
+   */
   isSelected: boolean;
-  onSelect: (fieldId: string) => void;
+  /**
+   * Part of a multi-selection (2+ fields, A6). Draws the same selection
+   * outline as `isSelected` but never resize handles.
+   */
+  isMultiSelected?: boolean;
+  /**
+   * `additive` is true for a shift-click: toggle this field in or out of
+   * the current selection instead of replacing it (A6).
+   */
+  onSelect: (fieldId: string, options?: { additive?: boolean }) => void;
   onDelete: (fieldId: string) => void;
   onMove: (fieldId: string, x: number, y: number) => void;
   onResize: (fieldId: string, width: number, height: number) => void;
@@ -55,6 +71,7 @@ export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
   field,
   scale,
   isSelected,
+  isMultiSelected = false,
   onSelect,
   onDelete,
   onMove,
@@ -88,8 +105,15 @@ export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
   const tintColor =
     primaryAssigneeId && primaryAssigneeIndex >= 0
       ? primaryAssigneeExcluded
-        ? "var(--recipient-readonly)"
+        ? "var(--pdfe-recipient-readonly)"
         : recipientColorVar(primaryAssigneeIndex)
+      : undefined;
+  // Darker step of the same hue behind the badge/chip's small white text.
+  const inkColor =
+    primaryAssigneeId && primaryAssigneeIndex >= 0
+      ? primaryAssigneeExcluded
+        ? "var(--pdfe-recipient-ink-readonly)"
+        : recipientColorVar(primaryAssigneeIndex, "ink")
       : undefined;
   const primaryAssigneeLabel = primaryAssigneeId
     ? roster?.find((p) => p.id === primaryAssigneeId)?.label
@@ -113,17 +137,25 @@ export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
           // `.fieldPreview` reads these same custom property names, so
           // this recolors just this one field without touching the
           // global tokens every other field still uses.
-          "--field-border-default": tintColor,
-          "--field-border-selected": tintColor,
-          "--field-border-hover": tintColor,
-          "--field-bg-default": `color-mix(in srgb, ${tintColor} 15%, transparent)`,
-          "--field-bg-selected": `color-mix(in srgb, ${tintColor} 25%, transparent)`,
+          "--pdfe-field-border": tintColor,
+          "--pdfe-field-border-selected": tintColor,
+          "--pdfe-field-border-hover": tintColor,
+          "--pdfe-field-bg": `color-mix(in srgb, ${tintColor} 10%, transparent)`,
+          "--pdfe-field-bg-selected": `color-mix(in srgb, ${tintColor} 18%, transparent)`,
+          "--pdfe-field-chip-bg": inkColor,
         } as React.CSSProperties)
       : {}),
   };
 
+  // Shift-click toggles this field in the multi-selection (A6). Selection
+  // only: the mousedown drag above it is untouched, so a shift-drag still
+  // moves just this one field.
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (e.shiftKey) {
+      onSelect(field.id, { additive: true });
+      return;
+    }
     onSelect(field.id);
   };
 
@@ -472,9 +504,9 @@ export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
         );
       case "radio":
         return (
-          <div className={styles.fieldPreview} style={{ display: "flex", alignItems: "center", padding: "4px 8px" }}>
+          <div className={styles.fieldPreview} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px" }}>
             <input type="radio" readOnly />
-            <span style={{ fontSize: scaledFontSize, color: "var(--color-text-tertiary, #78716c)" }}>
+            <span className={styles.radioLabel} style={{ fontSize: scaledFontSize }}>
               {field.name}
             </span>
           </div>
@@ -482,7 +514,10 @@ export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
       case "signature":
         return (
           <div className={styles.signaturePlaceholder}>
-            <span style={{ fontSize: scaledFontSize }}>✍ Signature</span>
+            <span style={{ fontSize: scaledFontSize }}>
+              <SignatureIcon weight="bold" size="1.2em" aria-hidden="true" />
+              Signature
+            </span>
           </div>
         );
       default:
@@ -546,9 +581,18 @@ export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
     );
   };
 
+  const showSelection = isSelected || isMultiSelected;
+  // A7: dropdown/radio with no options can't be answered by a signer.
+  const isInvalid = isFieldMissingOptions(field);
+
   return (
     <div
-      className={`${styles.buildField} ${isSelected ? styles.selected : ""} ${isDragging ? styles.isDragging : ""}`}
+      className={`${styles.buildField} ${isDragging ? styles.isDragging : ""}`}
+      // Not `data-field-id`: that attribute marks fillable PDF overlays, and
+      // renderPages, the gating loop and hosts select on it.
+      data-build-field-id={field.id}
+      data-selected={showSelection ? "true" : undefined}
+      data-invalid={isInvalid ? "true" : undefined}
       style={fieldStyle}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
@@ -560,11 +604,17 @@ export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
       role="button"
       aria-label={`${field.type} field: ${field.name}${
         field.properties.required ? ", required" : ""
-      }`}
-      aria-selected={isSelected}
+      }${isInvalid ? ", no options" : ""}`}
+      aria-selected={showSelection}
     >
       {renderFieldPreview()}
-      {renderAssigneeChips()}
+      {isInvalid ? (
+        <span className={styles.invalidChip} aria-hidden="true">
+          No options
+        </span>
+      ) : (
+        renderAssigneeChips()
+      )}
 
       {field.properties.required && (
         <span
@@ -574,7 +624,7 @@ export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
         />
       )}
 
-      {initials && !isSelected && (
+      {initials && !showSelection && (
         <span
           className={styles.colorBadge}
           style={tintColor ? { background: tintColor } : undefined}
@@ -584,26 +634,30 @@ export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
         </span>
       )}
 
-      {isSelected && !isResizing && (
+      {isSelected && !isMultiSelected && !isResizing && (
         <>
           {/* Corner resize handles */}
           <div
             className={`${styles.resizeHandle} ${styles.bottomRight}`}
+            data-resize-handle="bottomRight"
             onMouseDown={(e) => handleResizeMouseDown(e, "bottomRight")}
             onTouchStart={(e) => handleResizeTouchStart(e, "bottomRight")}
           />
           <div
             className={`${styles.resizeHandle} ${styles.bottomLeft}`}
+            data-resize-handle="bottomLeft"
             onMouseDown={(e) => handleResizeMouseDown(e, "bottomLeft")}
             onTouchStart={(e) => handleResizeTouchStart(e, "bottomLeft")}
           />
           <div
             className={`${styles.resizeHandle} ${styles.topRight}`}
+            data-resize-handle="topRight"
             onMouseDown={(e) => handleResizeMouseDown(e, "topRight")}
             onTouchStart={(e) => handleResizeTouchStart(e, "topRight")}
           />
           <div
             className={`${styles.resizeHandle} ${styles.topLeft}`}
+            data-resize-handle="topLeft"
             onMouseDown={(e) => handleResizeMouseDown(e, "topLeft")}
             onTouchStart={(e) => handleResizeTouchStart(e, "topLeft")}
           />

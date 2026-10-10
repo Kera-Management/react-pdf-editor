@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, waitFor } from "@testing-library/react";
+import { renderWithChakra } from "./testUtils";
 
 import PDFEditor from "./PDFEditor";
 
@@ -112,7 +113,7 @@ describe("PDFEditor initialFieldValues seeding", () => {
   });
 
   it("seeds a value into an unassigned field, which renders readonly (disabled) but visible", async () => {
-    const { container } = render(
+    const { container } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="edit"
@@ -137,7 +138,7 @@ describe("PDFEditor initialFieldValues seeding", () => {
   });
 
   it("seeds a value into an assigned (editable) field", async () => {
-    const { container } = render(
+    const { container } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="edit"
@@ -161,7 +162,7 @@ describe("PDFEditor initialFieldValues seeding", () => {
   });
 
   it("typing after the seed, then a prop update with a new value, does not clobber the live edit", async () => {
-    const { container, rerender } = render(
+    const { container, rerender } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="edit"
@@ -197,7 +198,7 @@ describe("PDFEditor initialFieldValues seeding", () => {
   });
 
   it("reseeds when a new document loads", async () => {
-    const { container, rerender } = render(
+    const { container, rerender } = renderWithChakra(
       <PDFEditor
         src="fake://document-a.pdf"
         mode="edit"

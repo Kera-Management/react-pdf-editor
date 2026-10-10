@@ -1,11 +1,31 @@
 import React from "react";
-import { X } from "@phosphor-icons/react";
+import {
+  Alert,
+  Box,
+  CloseButton,
+  Field,
+  HStack,
+  InputGroup,
+  NumberInput,
+  SegmentGroup,
+  Separator,
+  Stack,
+  Text,
+} from "@chakra-ui/react";
+import {
+  EnvelopeSimpleIcon,
+  InfoIcon,
+  UserCheckIcon,
+  WarningCircleIcon,
+  XIcon,
+} from "@phosphor-icons/react";
 
-import styles from "./PartiesPanel.module.css";
 import { PartiesConfig, PartiesPanelAssignMode, PartyRole } from "./types";
 import { usePartiesState } from "./usePartiesState";
 import { useDragReorder } from "./useDragReorder";
 import { PartyRow } from "./PartyRow";
+import { PanelHeader } from "../PanelHeader";
+import { LeadingIcon } from "../LeadingIcon";
 import { RoleSegmentedControlOption } from "./RoleSegmentedControl";
 import { resolveAssignRows } from "./assignResolution";
 
@@ -40,6 +60,40 @@ const ROLE_OPTIONS: RoleSegmentedControlOption[] = [
   { value: "viewer", label: "Copy" },
   { value: "excluded", label: "None" },
 ];
+
+type OrderMode = "together" | "sequence";
+
+const ORDER_MODE_ITEMS: { value: OrderMode; label: string }[] = [
+  { value: "together", label: "All at once" },
+  { value: "sequence", label: "One after another" },
+];
+
+/** Sub-section title inside the panel, with an optional count badge. */
+const SectionHeading: React.FC<{ children: React.ReactNode; count?: number }> = ({
+  children,
+  count,
+}) => <PanelHeader title={children} count={count} />;
+
+/** Dashed placeholder for an empty role list, sized like a party card. */
+const EmptyState: React.FC<{
+  icon: React.ReactElement;
+  children: React.ReactNode;
+}> = ({ icon, children }) => (
+  <HStack
+    align="flex-start"
+    gap={2}
+    px={3}
+    py={2.5}
+    borderWidth="1px"
+    borderStyle="dashed"
+    borderColor="border.emphasized"
+    rounded="l3"
+    color="fg.muted"
+  >
+    <LeadingIcon>{icon}</LeadingIcon>
+    <Text>{children}</Text>
+  </HStack>
+);
 
 /** "A" / "A and B" / "A, B and C" -- no Oxford comma, no em dash. */
 const joinNames = (names: string[]): string => {
@@ -112,7 +166,9 @@ export const PartiesPanel: React.FC<PartiesPanelProps> = ({
   const handleAssignBannerAnimationEnd = (
     event: React.AnimationEvent<HTMLDivElement>
   ) => {
-    if (assignClosing && event.animationName.includes("assignBannerOut")) {
+    // Only the banner's own exit animation ends it, not one bubbling up
+    // from a child (e.g. the close button's focus ring).
+    if (assignClosing && event.target === event.currentTarget) {
       setVisibleAssign(undefined);
       setAssignClosing(false);
     }
@@ -215,88 +271,112 @@ export const PartiesPanel: React.FC<PartiesPanelProps> = ({
   const expiryDisplay =
     expiryValue === null || expiryValue === undefined ? "" : String(expiryValue);
 
-  const handleExpiryChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = event.target.value;
-    if (raw === "") {
+  const handleExpiryChange = (details: { value: string; valueAsNumber: number }) => {
+    if (details.value === "") {
       setExpiryDays(null);
       return;
     }
-    const parsed = Number(raw);
-    if (!Number.isNaN(parsed)) {
-      setExpiryDays(parsed);
+    if (!Number.isNaN(details.valueAsNumber)) {
+      setExpiryDays(details.valueAsNumber);
     }
   };
 
+  // Which pole of the order the signers sit at, so the SegmentGroup shows
+  // it; null (no segment lit) for a mixed order.
+  const orderMode: OrderMode | null =
+    orderedSigners.length < 2
+      ? null
+      : orderedSigners.every((s) => s.step === 0)
+        ? "together"
+        : orderedSigners.every((s, index) => s.step === index)
+          ? "sequence"
+          : null;
+
+  const handleOrderModeChange = (details: { value: string | null }) => {
+    if (details.value === "together") groupAll();
+    else if (details.value === "sequence") sequenceAll();
+  };
+
   return (
-    <div className={styles.panel}>
+    <Stack gap={4}>
       {/* The panel's host-facing title says WHO ("Recipients"); this section
           is about WHEN, and needs to say so. */}
-      <h3 className={styles.sectionHeading}>Signing order</h3>
-      {summary ? (
-        <p className={styles.summary}>{summary}</p>
-      ) : (
-        <p className={styles.validation}>At least one person needs to sign.</p>
-      )}
+      <Stack gap={2}>
+        <SectionHeading>Signing order</SectionHeading>
+        {summary ? (
+          <Text color="fg.muted">{summary}</Text>
+        ) : (
+          <Alert.Root status="error" size="sm" role="alert">
+            <Alert.Indicator>
+              <WarningCircleIcon weight="bold" />
+            </Alert.Indicator>
+            <Alert.Title>At least one person needs to sign.</Alert.Title>
+          </Alert.Root>
+        )}
 
-      {/* Order is expressed as VISIBLE step groups: everyone in one box signs
-          at the same time; boxes run top to bottom with a "then" between. The
-          previous design encoded groups as a muted number prefix plus a quiet
-          per-row text toggle, and the person it was built for could not tell
-          how to put two people on the same step -- so the structure itself now
-          carries the meaning, with one-click poles for the two common cases. */}
-      {orderedSigners.length > 1 && (
-        <div className={styles.orderActions}>
-          <button
-            type="button"
-            className={styles.orderActionButton}
-            onClick={groupAll}
+        {/* Order is expressed as VISIBLE step groups: everyone in one box
+            signs at the same time; boxes run top to bottom with a "then"
+            between. The two common cases are one-click poles here. */}
+        {orderedSigners.length > 1 && (
+          <SegmentGroup.Root
+            size="sm"
+            value={orderMode}
+            onValueChange={handleOrderModeChange}
+            aria-label="Signing order"
+            alignSelf="flex-start"
           >
-            All at once
-          </button>
-          <button
-            type="button"
-            className={styles.orderActionButton}
-            onClick={sequenceAll}
-          >
-            One after another
-          </button>
-        </div>
-      )}
+            <SegmentGroup.Indicator />
+            <SegmentGroup.Items items={ORDER_MODE_ITEMS} />
+          </SegmentGroup.Root>
+        )}
+      </Stack>
 
       {/* Directly above the ROWS it explains, not above the panel's order
-          chrome (user feedback: at the panel top, the heading/summary sat
-          between the question and the switches it teaches). Animates in;
-          the list below rides the height transition down instead of
-          jumping. */}
+          chrome: at the panel top it sat between the question and the
+          switches it teaches. The label is always the field's display name
+          (A1), never its id. */}
       {visibleAssign && (
-        <div
-          className={`${styles.assignBanner} ${
-            assignClosing ? styles.assignBannerClosing : ""
-          }`}
+        <Alert.Root
+          status="info"
+          size="sm"
           role="status"
+          data-state={assignClosing ? "closed" : "open"}
+          _open={{
+            animationName: "fade-in, slide-from-top",
+            animationDuration: "moderate",
+          }}
+          _closed={{
+            animationName: "fade-out, slide-to-top",
+            animationDuration: "fast",
+            animationFillMode: "forwards",
+          }}
           onAnimationEnd={handleAssignBannerAnimationEnd}
         >
-          <div className={styles.assignBannerBody}>
-            <span className={styles.assignBannerText}>
-              Who fills "{visibleAssign.fieldLabel}"?
-            </span>
-            <span className={styles.assignBannerHint}>
+          <Alert.Indicator>
+            <InfoIcon weight="bold" />
+          </Alert.Indicator>
+          <Alert.Content>
+            <Alert.Title>Who fills "{visibleAssign.fieldLabel}"?</Alert.Title>
+            <Alert.Description>
               Turn on each person who should complete this field.
-            </span>
-          </div>
-          <button
+            </Alert.Description>
+          </Alert.Content>
+          <CloseButton
             type="button"
-            className={styles.assignBannerClose}
-            onClick={visibleAssign.onDeselect}
+            size="xs"
             aria-label="Stop assigning"
+            onClick={visibleAssign.onDeselect}
+            alignSelf="flex-start"
+            mt="-1"
+            me="-1"
           >
-            <X weight="bold" size={14} />
-          </button>
-        </div>
+            <XIcon weight="bold" />
+          </CloseButton>
+        </Alert.Root>
       )}
 
       {orderedSigners.length > 0 && (
-        <div className={styles.list}>
+        <Stack gap={2}>
           {(() => {
             const groups: { step: number; ids: string[] }[] = [];
             orderedSigners.forEach(({ id, step }) => {
@@ -309,84 +389,96 @@ export const PartiesPanel: React.FC<PartiesPanelProps> = ({
               // A drop right now would pull the dragged signer into this box.
               const isJoinTarget =
                 joinTargetId !== null && group.ids.includes(joinTargetId);
+              // Each row is its own card; a muted box only wraps signers who
+              // sign together (or the step a drop would join).
+              const boxed = isJoinTarget || group.ids.length > 1;
               return (
-              <div key={group.step} className={styles.stepGroupWrap}>
-                {groupIndex > 0 && (
-                  <div className={styles.thenConnector} aria-hidden="true">
-                    then
-                  </div>
-                )}
-                <div
-                  className={
-                    isJoinTarget
-                      ? `${styles.stepGroup} ${styles.stepGroupJoinTarget}`
-                      : styles.stepGroup
-                  }
-                  data-testid={"step-group-" + groupIndex}
-                >
-                  {isJoinTarget && (
-                    <span className={styles.joinHint}>Drop to sign together</span>
+                <Box key={group.step}>
+                  {groupIndex > 0 && (
+                    <Text
+                      color="fg.muted"
+                      textAlign="center"
+                      py={1}
+                      aria-hidden="true"
+                    >
+                      then
+                    </Text>
                   )}
-                  {multiStep && (
-                    <div className={styles.stepGroupHeading}>
-                      {stepHeading(groupIndex)}
-                      {group.ids.length > 1 ? " · together" : ""}
-                    </div>
-                  )}
-                  {group.ids.map((id, memberIndex) => {
-                    const index = orderedSigners.findIndex((s) => s.id === id);
-                    // The toggle states its OUTCOME with real names, not the
-                    // step machinery ("Join the step above" meant nothing to
-                    // the people this is for). Grouped rows offer to break
-                    // out below their step-mates; ungrouped rows offer to
-                    // sign alongside the step above.
-                    const toggleLabel =
-                      memberIndex > 0
-                        ? `Sign after ${joinNames(
-                            group.ids
-                              .filter((other) => other !== id)
-                              .map(labelFor)
-                          )}`
-                        : groupIndex > 0
-                          ? `Sign at the same time as ${joinNames(
-                              groups[groupIndex - 1].ids.map(labelFor)
+                  <Stack
+                    gap={2}
+                    borderWidth={boxed ? "1px" : 0}
+                    borderStyle={isJoinTarget ? "dashed" : "solid"}
+                    borderColor={isJoinTarget ? "border.emphasized" : "border"}
+                    bg={boxed ? "bg.muted" : undefined}
+                    rounded="l3"
+                    p={boxed ? 2 : 0}
+                    data-testid={"step-group-" + groupIndex}
+                    data-join-target={isJoinTarget ? "" : undefined}
+                  >
+                    {isJoinTarget && (
+                      <Text color="fg.muted" textAlign="center">
+                        Drop to sign together
+                      </Text>
+                    )}
+                    {multiStep && (
+                      <Text fontWeight="medium" color="fg.muted">
+                        {stepHeading(groupIndex)}
+                        {group.ids.length > 1 ? " · together" : ""}
+                      </Text>
+                    )}
+                    {group.ids.map((id, memberIndex) => {
+                      const index = orderedSigners.findIndex((s) => s.id === id);
+                      // The toggle states its OUTCOME with real names, not the
+                      // step machinery. Grouped rows offer to break out below
+                      // their step-mates; ungrouped rows offer to sign
+                      // alongside the step above.
+                      const toggleLabel =
+                        memberIndex > 0
+                          ? `Sign after ${joinNames(
+                              group.ids
+                                .filter((other) => other !== id)
+                                .map(labelFor)
                             )}`
-                          : undefined;
-                    return (
-                      <PartyRow
-                        key={id}
-                        id={id}
-                        label={labelFor(id)}
-                        colorIndex={colorIndexById.get(id)}
-                        badge={badgeById.get(id)}
-                        role="signer"
-                        roleOptions={ROLE_OPTIONS}
-                        onRoleChange={handleRoleChange(id)}
-                        groupToggleLabel={toggleLabel}
-                        onToggleGrouped={
-                          index > 0
-                            ? () => toggleGroupedWithPrevious(id)
-                            : undefined
-                        }
-                        draggable
-                        isDragging={isDragging(id)}
-                        isDropTarget={dropTargetId === id}
-                        onPointerDown={(e) => onPointerDown(id, e)}
-                        onKeyDown={(e) => onKeyDown(id, e)}
-                        {...assignPropsFor(id)}
-                      />
-                    );
-                  })}
-                </div>
-              </div>
+                          : groupIndex > 0
+                            ? `Sign at the same time as ${joinNames(
+                                groups[groupIndex - 1].ids.map(labelFor)
+                              )}`
+                            : undefined;
+                      return (
+                        <PartyRow
+                          key={id}
+                          id={id}
+                          label={labelFor(id)}
+                          colorIndex={colorIndexById.get(id)}
+                          badge={badgeById.get(id)}
+                          role="signer"
+                          roleOptions={ROLE_OPTIONS}
+                          onRoleChange={handleRoleChange(id)}
+                          groupToggleLabel={toggleLabel}
+                          onToggleGrouped={
+                            index > 0
+                              ? () => toggleGroupedWithPrevious(id)
+                              : undefined
+                          }
+                          draggable
+                          isDragging={isDragging(id)}
+                          isDropTarget={dropTargetId === id}
+                          onPointerDown={(e) => onPointerDown(id, e)}
+                          onKeyDown={(e) => onKeyDown(id, e)}
+                          {...assignPropsFor(id)}
+                        />
+                      );
+                    })}
+                  </Stack>
+                </Box>
               );
             });
           })()}
-        </div>
+        </Stack>
       )}
 
       {undecided.length > 0 && (
-        <div className={styles.section}>
+        <Stack gap={2}>
           {undecided.map((id) => (
             <PartyRow
               key={id}
@@ -401,70 +493,79 @@ export const PartiesPanel: React.FC<PartiesPanelProps> = ({
               {...assignPropsFor(id)}
             />
           ))}
-        </div>
+        </Stack>
       )}
 
-      <div className={styles.section}>
-        <h3 className={styles.sectionHeading}>Also gets a copy</h3>
+      <Separator />
+
+      <Stack gap={2}>
+        <SectionHeading count={viewers.length}>Also gets a copy</SectionHeading>
         {viewers.length === 0 ? (
-          <p className={styles.sectionEmpty}>No one yet.</p>
+          <EmptyState icon={<EnvelopeSimpleIcon />}>
+            Choose Copy on anyone who should get the signed document.
+          </EmptyState>
         ) : (
-          viewers.map((id) => (
-            <PartyRow
-              key={id}
-              id={id}
-              label={labelFor(id)}
-              colorIndex={colorIndexById.get(id)}
-              badge={badgeById.get(id)}
-              role="viewer"
-              roleOptions={ROLE_OPTIONS}
-              onRoleChange={handleRoleChange(id)}
-              {...assignPropsFor(id)}
-            />
-          ))
+          <Stack gap={2}>
+            {viewers.map((id) => (
+              <PartyRow
+                key={id}
+                id={id}
+                label={labelFor(id)}
+                colorIndex={colorIndexById.get(id)}
+                badge={badgeById.get(id)}
+                role="viewer"
+                roleOptions={ROLE_OPTIONS}
+                onRoleChange={handleRoleChange(id)}
+                {...assignPropsFor(id)}
+              />
+            ))}
+          </Stack>
         )}
-      </div>
+      </Stack>
 
-      <div className={styles.section}>
-        <h3 className={styles.sectionHeading}>Not included</h3>
+      <Separator />
+
+      <Stack gap={2}>
+        <SectionHeading count={excluded.length}>Not included</SectionHeading>
         {excluded.length === 0 ? (
-          <p className={styles.sectionEmpty}>No one yet.</p>
+          <EmptyState icon={<UserCheckIcon />}>Everyone is included.</EmptyState>
         ) : (
-          excluded.map((id) => (
-            <PartyRow
-              key={id}
-              id={id}
-              label={labelFor(id)}
-              colorIndex={colorIndexById.get(id)}
-              badge={badgeById.get(id)}
-              role="excluded"
-              roleOptions={ROLE_OPTIONS}
-              onRoleChange={handleRoleChange(id)}
-              {...assignPropsForExcluded(id)}
-            />
-          ))
+          <Stack gap={2}>
+            {excluded.map((id) => (
+              <PartyRow
+                key={id}
+                id={id}
+                label={labelFor(id)}
+                colorIndex={colorIndexById.get(id)}
+                badge={badgeById.get(id)}
+                role="excluded"
+                roleOptions={ROLE_OPTIONS}
+                onRoleChange={handleRoleChange(id)}
+                {...assignPropsForExcluded(id)}
+              />
+            ))}
+          </Stack>
         )}
-      </div>
+      </Stack>
 
+      {config.expiry && <Separator />}
       {config.expiry && (
-        <div className={styles.expiryRow}>
-          <label className={styles.label} htmlFor="parties-panel-expiry">
-            This offer expires in
-          </label>
-          <div className={styles.expiryInputWrap}>
-            <input
-              id="parties-panel-expiry"
-              type="number"
+        <Field.Root>
+          <Field.Label>This offer expires in</Field.Label>
+          <InputGroup endAddon="days">
+            <NumberInput.Root
+              size="sm"
               min={0}
-              className={styles.expiryInput}
+              w="full"
               value={expiryDisplay}
-              onChange={handleExpiryChange}
-            />
-            <span className={styles.expirySuffix}>days</span>
-          </div>
-        </div>
+              onValueChange={handleExpiryChange}
+            >
+              <NumberInput.Input borderEndRadius="0" />
+            </NumberInput.Root>
+          </InputGroup>
+        </Field.Root>
       )}
-    </div>
+    </Stack>
   );
 };
 

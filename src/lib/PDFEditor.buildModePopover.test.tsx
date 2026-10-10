@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderWithChakra } from "./testUtils";
 
 import PDFEditor from "./PDFEditor";
 
@@ -80,7 +81,7 @@ describe("PDFEditor build-mode field popover", () => {
   });
 
   it("selecting a field renders the ContextToolbar but no desktop Properties sidebar section", async () => {
-    render(<PDFEditor src="fake://document.pdf" mode="build" />);
+    renderWithChakra(<PDFEditor src="fake://document.pdf" mode="build" />);
 
     const addText = await waitFor(() =>
       screen.getByRole("button", { name: /add text field/i })
@@ -97,7 +98,7 @@ describe("PDFEditor build-mode field popover", () => {
   });
 
   it("the ContextToolbar's gear button opens a Popover with the field's editable name", async () => {
-    render(<PDFEditor src="fake://document.pdf" mode="build" />);
+    renderWithChakra(<PDFEditor src="fake://document.pdf" mode="build" />);
 
     const addText = await waitFor(() =>
       screen.getByRole("button", { name: /add text field/i })
@@ -110,7 +111,7 @@ describe("PDFEditor build-mode field popover", () => {
     fireEvent.click(gear);
 
     const nameInput = (await waitFor(() =>
-      screen.getByLabelText("Field Name")
+      screen.getByLabelText("Field name")
     )) as HTMLInputElement;
     // Friendly per-type counter name, e.g. "Text Field 1" -- not the old
     // `text_field_<generated-id>` shape.
@@ -127,8 +128,36 @@ describe("PDFEditor build-mode field popover", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("a shift-click closes the popover instead of moving it to another field", async () => {
+    const { container } = renderWithChakra(
+      <PDFEditor src="fake://document.pdf" mode="build" />
+    );
+    const addText = await waitFor(() =>
+      screen.getByRole("button", { name: /add text field/i })
+    );
+    fireEvent.click(addText);
+    fireEvent.click(addText);
+    const boxes = await waitFor(() => {
+      const found = container.querySelectorAll<HTMLElement>(
+        '[role="button"][aria-label^="text field"]'
+      );
+      if (found.length !== 2) throw new Error("fields not added");
+      return Array.from(found);
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Field name")).toBeInTheDocument()
+    );
+
+    fireEvent.click(boxes[0], { shiftKey: true });
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Field name")).not.toBeInTheDocument()
+    );
+  });
+
   it("clicking canvas deselects and closes the popover", async () => {
-    const { container } = render(
+    const { container } = renderWithChakra(
       <PDFEditor src="fake://document.pdf" mode="build" />
     );
 
@@ -143,11 +172,11 @@ describe("PDFEditor build-mode field popover", () => {
     fireEvent.click(gear);
 
     await waitFor(() =>
-      expect(screen.getByLabelText("Field Name")).toBeInTheDocument()
+      expect(screen.getByLabelText("Field name")).toBeInTheDocument()
     );
 
     const canvas = container.querySelector(
-      '[class*="documentContainer"]'
+      '[data-part="document-scroller"]'
     ) as HTMLElement;
     fireEvent.click(canvas);
 
@@ -160,7 +189,7 @@ describe("PDFEditor build-mode field popover", () => {
   });
 
   it("the ContextToolbar's Required toggle updates the field", async () => {
-    render(<PDFEditor src="fake://document.pdf" mode="build" />);
+    renderWithChakra(<PDFEditor src="fake://document.pdf" mode="build" />);
 
     const addText = await waitFor(() =>
       screen.getByRole("button", { name: /add text field/i })
@@ -170,14 +199,14 @@ describe("PDFEditor build-mode field popover", () => {
     const requiredButton = await waitFor(() =>
       screen.getByRole("button", { name: "Required" })
     );
-    expect(requiredButton.className).not.toMatch(/active/);
+    expect(requiredButton).toHaveAttribute("aria-pressed", "false");
 
     fireEvent.click(requiredButton);
-    expect(requiredButton.className).toMatch(/active/);
+    expect(requiredButton).toHaveAttribute("aria-pressed", "true");
   });
 
   it("dropdown fields get an Edit options... trigger that opens a modal with OptionsEditor", async () => {
-    render(<PDFEditor src="fake://document.pdf" mode="build" />);
+    renderWithChakra(<PDFEditor src="fake://document.pdf" mode="build" />);
 
     const addDropdown = await waitFor(() =>
       screen.getByRole("button", { name: /add dropdown field/i })
@@ -195,12 +224,14 @@ describe("PDFEditor build-mode field popover", () => {
     fireEvent.click(editOptions);
 
     expect(
-      screen.getByRole("heading", { name: "Edit options" })
+      await screen.findByRole("heading", { name: "Edit options" })
     ).toBeInTheDocument();
     // The popover steps aside while the options modal is up.
-    expect(screen.queryByLabelText("Field Name")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Field name")).not.toBeInTheDocument()
+    );
 
-    const newOptionInput = screen.getByPlaceholderText("Add option");
+    const newOptionInput = screen.getByRole("textbox", { name: "New option" });
     fireEvent.change(newOptionInput, { target: { value: "Yes" } });
     fireEvent.click(screen.getByRole("button", { name: "Add option" }));
 
@@ -213,7 +244,7 @@ describe("PDFEditor build-mode field popover", () => {
       { id: "p2", label: "Bob" },
     ];
 
-    render(
+    renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="build"

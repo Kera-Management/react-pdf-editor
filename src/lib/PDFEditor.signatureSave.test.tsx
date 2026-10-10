@@ -1,6 +1,7 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, waitFor } from "@testing-library/react";
+import { renderWithChakra } from "./testUtils";
 import { PDFDocument } from "pdf-lib";
 
 import PDFEditor, { PDFEditorRef } from "./PDFEditor";
@@ -144,7 +145,7 @@ describe("PDFEditor signature save (metadata v3 round trip + PNG stamping)", () 
     const ref = React.createRef<PDFEditorRef>();
     const onSave = vi.fn();
 
-    const { container, getByRole } = render(
+    const { container, getByRole } = renderWithChakra(
       <PDFEditor
         ref={ref}
         src="fake://document.pdf"

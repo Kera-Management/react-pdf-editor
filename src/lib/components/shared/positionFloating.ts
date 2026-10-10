@@ -17,15 +17,16 @@ export interface FloatingElementSize {
 }
 
 /**
- * Pure placement math for a floating element (context toolbar, popover, ...)
+ * Pure placement math for a floating element (the context toolbar)
  * anchored to a target rect. Prefers placing the element above the target,
  * flipping below when there isn't room, then clamps the result inside
  * `containerRect` (or the viewport, when no container is given) so the
  * element never renders off-screen.
  *
- * Extracted from ContextToolbar's positioning effect -- behavior-identical,
- * just decoupled from React/refs so it's unit-testable and reusable (Popover
- * consumes it too).
+ * Extracted from ContextToolbar's positioning effect so it's unit-testable.
+ * The toolbar keeps this instead of Chakra positioning because it tracks a
+ * canvas element through scroll and zoom. The field settings popover now
+ * uses Chakra's `positioning.getAnchorRect` instead.
  */
 export function positionFloatingElement(
   targetRect: DOMRect,

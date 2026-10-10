@@ -1,34 +1,29 @@
 import React from "react";
-import styles from "./Switch.module.css";
+import { Switch as ChakraSwitch } from "@chakra-ui/react";
 
 export type SwitchSize = "sm" | "md";
 
 export interface SwitchProps {
   /** Current on/off state. */
   checked: boolean;
-  /** Called with no arguments whenever the user activates the switch --
-   * click, Space, or Enter. The caller owns the resulting state change. */
+  /** Called with no arguments whenever the user activates the switch
+   * (click or Space). The caller owns the resulting state change. */
   onToggle: () => void;
   disabled?: boolean;
   /** "sm" for compact contexts (panel rows); defaults to "md". */
   size?: SwitchSize;
   /** Full accessible name, e.g. "Assign Olive Ono to Move-in date". Always
-   * required -- a switch with no visible text label leans entirely on this. */
+   * required: a switch with no visible text label leans entirely on this. */
   ariaLabel: string;
 }
 
 /**
- * Visible on/off control, styled as a track + thumb rather than a checkbox
- * glyph so its state reads at a glance without hovering: state is always
- * on screen, never revealed only on interaction. `role="switch"` (not a
- * native checkbox) because the on/off semantics -- and the animated
- * track/thumb -- match ARIA's switch pattern, not a form checkbox.
+ * Thin controlled wrapper over Chakra's `Switch` (the settings-row switch
+ * used across the app), keeping this component's small `onToggle` API.
  *
- * A real `<button>` so Enter/Space activation, disabled inertness, and
- * focus handling all come from the platform for free; the explicit
- * `onKeyDown` below additionally calls `preventDefault()`, which cancels
- * the button's own native "activate on Enter/Space" default action so
- * `onToggle` never fires twice for one key press.
+ * The hidden checkbox carries `role="switch"` and the accessible name, so
+ * assistive tech and tests see one switch control; the visible track and
+ * thumb are Chakra's `Switch.Control` / `Switch.Thumb`, themed by the host.
  */
 export const Switch: React.FC<SwitchProps> = ({
   checked,
@@ -36,38 +31,31 @@ export const Switch: React.FC<SwitchProps> = ({
   disabled = false,
   size = "md",
   ariaLabel,
-}) => {
-  const handleClick = () => {
-    if (disabled) return;
-    onToggle();
-  };
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
-    if (disabled) return;
-    if (event.key === " " || event.key === "Spacebar" || event.key === "Enter") {
-      event.preventDefault();
+}) => (
+  <ChakraSwitch.Root
+    size={size}
+    checked={checked}
+    disabled={disabled}
+    onCheckedChange={() => {
+      if (disabled) return;
       onToggle();
-    }
-  };
-
-  const className = [styles.root, styles[size]].join(" ");
-
-  return (
-    <button
-      type="button"
+    }}
+  >
+    <ChakraSwitch.HiddenInput
       role="switch"
-      aria-checked={checked}
       aria-label={ariaLabel}
-      disabled={disabled}
-      className={className}
-      onClick={handleClick}
-      onKeyDown={handleKeyDown}
-    >
-      <span className={styles.track} aria-hidden="true">
-        <span className={styles.thumb} />
-      </span>
-    </button>
-  );
-};
+      // A native checkbox only toggles on Space. The previous button-based
+      // switch also toggled on Enter, so keep that for keyboard users.
+      onKeyDown={(event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        if (!disabled) onToggle();
+      }}
+    />
+    <ChakraSwitch.Control>
+      <ChakraSwitch.Thumb />
+    </ChakraSwitch.Control>
+  </ChakraSwitch.Root>
+);
 
 export default Switch;

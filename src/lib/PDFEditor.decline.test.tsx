@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, waitFor, screen } from "@testing-library/react";
+import { renderWithChakra } from "./testUtils";
 
 import PDFEditor from "./PDFEditor";
 
@@ -91,7 +92,7 @@ describe("PDFEditor decline to sign", () => {
   });
 
   it("renders no decline button when onDecline is not provided", async () => {
-    const { queryByRole, getByRole } = render(
+    const { queryByRole, getByRole } = renderWithChakra(
       <PDFEditor src="fake://document.pdf" mode="edit" />
     );
 
@@ -108,7 +109,7 @@ describe("PDFEditor decline to sign", () => {
 
   it("confirming decline calls the handler exactly once and closes the dialog", async () => {
     const onDecline = vi.fn().mockResolvedValue(undefined);
-    const { getByRole, queryByRole } = render(
+    const { getByRole } = renderWithChakra(
       <PDFEditor src="fake://document.pdf" mode="edit" onDecline={onDecline} />
     );
 
@@ -117,16 +118,17 @@ describe("PDFEditor decline to sign", () => {
     );
     fireEvent.click(declineButton);
 
+    // Confirm dialogs are Chakra Dialogs in a Portal: query the document.
     expect(
-      getByRole("heading", { name: "Decline to sign?" })
+      await screen.findByRole("heading", { name: "Decline to sign?" })
     ).toBeInTheDocument();
 
-    fireEvent.click(getByRole("button", { name: "Decline" }));
+    fireEvent.click(screen.getByRole("button", { name: "Decline" }));
 
     await waitFor(() => expect(onDecline).toHaveBeenCalledTimes(1));
     await waitFor(() =>
       expect(
-        queryByRole("heading", { name: "Decline to sign?" })
+        screen.queryByRole("heading", { name: "Decline to sign?" })
       ).not.toBeInTheDocument()
     );
 
@@ -136,7 +138,7 @@ describe("PDFEditor decline to sign", () => {
 
   it("cancel closes the dialog without calling the handler", async () => {
     const onDecline = vi.fn().mockResolvedValue(undefined);
-    const { getByRole, queryByRole } = render(
+    const { getByRole } = renderWithChakra(
       <PDFEditor src="fake://document.pdf" mode="edit" onDecline={onDecline} />
     );
 
@@ -144,16 +146,18 @@ describe("PDFEditor decline to sign", () => {
       getByRole("button", { name: "I can't sign this" })
     );
     fireEvent.click(declineButton);
-    fireEvent.click(getByRole("button", { name: "Cancel" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
 
-    expect(
-      queryByRole("heading", { name: "Decline to sign?" })
-    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: "Decline to sign?" })
+      ).not.toBeInTheDocument()
+    );
     expect(onDecline).not.toHaveBeenCalled();
   });
 
   it("renders a custom declineLabel", async () => {
-    const { getByRole } = render(
+    const { getByRole } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="edit"
@@ -174,7 +178,7 @@ describe("PDFEditor decline to sign", () => {
     const consoleErrorSpy = vi
       .spyOn(console, "error")
       .mockImplementation(() => {});
-    const { getByRole, queryByRole } = render(
+    const { getByRole } = renderWithChakra(
       <PDFEditor src="fake://document.pdf" mode="edit" onDecline={onDecline} />
     );
 
@@ -182,12 +186,12 @@ describe("PDFEditor decline to sign", () => {
       getByRole("button", { name: "I can't sign this" })
     );
     fireEvent.click(declineButton);
-    fireEvent.click(getByRole("button", { name: "Decline" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Decline" }));
 
     await waitFor(() => expect(onDecline).toHaveBeenCalledTimes(1));
     await waitFor(() =>
       expect(
-        queryByRole("heading", { name: "Decline to sign?" })
+        screen.queryByRole("heading", { name: "Decline to sign?" })
       ).not.toBeInTheDocument()
     );
     consoleErrorSpy.mockRestore();
@@ -223,7 +227,7 @@ describe("PDFEditor decline button visibility", () => {
   });
 
   it("hides the decline button outside edit mode, even with a handler", async () => {
-    const { queryByRole, getByRole } = render(
+    const { queryByRole, getByRole } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="view"

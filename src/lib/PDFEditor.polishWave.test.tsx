@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderWithChakra } from "./testUtils";
 import { PDFDocument } from "pdf-lib";
 
 import PDFEditor from "./PDFEditor";
@@ -97,19 +98,20 @@ describe("PDFEditor allowedModes default", () => {
       promise: Promise.resolve(fakeDocRef.current),
     }));
 
-    const { getByRole, queryByRole } = render(
+    const { getByRole, queryByRole } = renderWithChakra(
       <PDFEditor src="fake://document.pdf" mode="build" />
     );
 
     // Save always renders regardless of mode -- a stable readiness signal.
     await waitFor(() => getByRole("button", { name: "Save" }));
 
-    // Single allowed mode -> a plain badge, no dropdown button/listbox.
+    // Single allowed mode -> no mode switcher at all (4.0.0: the static
+    // mode label is gone too; the signer doesn't need a mode name).
     expect(
       queryByRole("button", { name: /prepare/i })
     ).not.toBeInTheDocument();
-    expect(queryByRole("listbox")).not.toBeInTheDocument();
-    expect(screen.getByText("Prepare")).toBeInTheDocument();
+    expect(queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.queryByText("Prepare")).not.toBeInTheDocument();
   });
 
   it("still shows the mode selector when the host passes allowedModes explicitly", async () => {
@@ -119,7 +121,7 @@ describe("PDFEditor allowedModes default", () => {
       promise: Promise.resolve(fakeDocRef.current),
     }));
 
-    const { getByRole } = render(
+    const { getByRole } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="edit"
@@ -186,7 +188,7 @@ describe("PDFEditor signer completion save gate", () => {
     }));
 
     const onSave = vi.fn();
-    const utils = render(
+    const utils = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="edit"
@@ -212,8 +214,11 @@ describe("PDFEditor signer completion save gate", () => {
 
     fireEvent.click(getByRole("button", { name: "Save" }));
 
+    // Confirm dialogs are Chakra Dialogs in a Portal: query the document.
     expect(
-      getByRole("heading", { name: "You still have 1 field to complete" })
+      await screen.findByRole("heading", {
+        name: "You still have 1 field to complete",
+      })
     ).toBeInTheDocument();
     expect(onSave).not.toHaveBeenCalled();
   });
@@ -222,11 +227,16 @@ describe("PDFEditor signer completion save gate", () => {
     const { getByRole, queryByRole, onSave } = await mountWithRequiredField();
 
     fireEvent.click(getByRole("button", { name: "Save" }));
-    fireEvent.click(getByRole("button", { name: "Keep signing" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Keep signing" }));
 
-    expect(
-      queryByRole("heading", { name: "You still have 1 field to complete" })
-    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", {
+          name: "You still have 1 field to complete",
+        })
+      ).not.toBeInTheDocument()
+    );
+    expect(queryByRole("button", { name: "Keep signing" })).toBeNull();
     expect(onSave).not.toHaveBeenCalled();
   });
 
@@ -234,7 +244,7 @@ describe("PDFEditor signer completion save gate", () => {
     const { getByRole, onSave } = await mountWithRequiredField();
 
     fireEvent.click(getByRole("button", { name: "Save" }));
-    fireEvent.click(getByRole("button", { name: "Save anyway" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save anyway" }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
   });
@@ -249,8 +259,9 @@ describe("PDFEditor signer completion save gate", () => {
     fireEvent.click(getByRole("button", { name: /^save/i }));
 
     expect(
-      queryByRole("heading", { name: /still have/i })
+      screen.queryByRole("heading", { name: /still have/i })
     ).not.toBeInTheDocument();
+    expect(queryByRole("heading", { name: /still have/i })).toBeNull();
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
   });
 });
@@ -334,7 +345,7 @@ describe("PDFEditor signature session cache", () => {
       promise: Promise.resolve(fakeDocRef.current),
     }));
 
-    const { container, getByRole } = render(
+    const { container } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="edit"
@@ -357,9 +368,9 @@ describe("PDFEditor signature session cache", () => {
       screen.queryByRole("button", { name: /use this signature/i })
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("tab", { name: "Type" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Type" }));
     const adoptButton = await waitFor(() =>
-      getByRole("button", { name: "Adopt" })
+      screen.getByRole("button", { name: "Adopt" })
     );
     expect(adoptButton).toBeEnabled(); // pre-filled from signerName
     fireEvent.click(adoptButton);
