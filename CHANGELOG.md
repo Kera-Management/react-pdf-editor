@@ -105,8 +105,7 @@ its colours and the audit fixes below change. Spec:
 - **Mobile fields are drawn at their true size** (a 44px minimum stacked
   fields over each other at phone zoom).
 - **Avatars match the app's `UserAvatar`**: squircle, name-hashed hue, same
-  palette (green included, so a person keeps one colour app-wide). Each
-  recipient card has a 4px left edge in that party's canvas field colour.
+  palette (green included, so a person keeps one colour app-wide).
 - **Rail polish:** banded section headers (Fields, Pages, Recipients, host
   panel) instead of dividers; field palette cards with an icon tile and a
   permanent grip; the current page tile is filled and outlined; empty

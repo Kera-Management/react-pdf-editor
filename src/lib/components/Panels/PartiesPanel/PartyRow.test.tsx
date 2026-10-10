@@ -225,20 +225,12 @@ describe("PartyRow layout and drag affordances", () => {
     expect(row).not.toHaveAttribute("data-dragging");
   });
 
-  it("with a colorIndex: shows the avatar and keys the card to the party's field colour", () => {
+  it("shows the avatar only when a colorIndex is given", () => {
     const { rerender } = render(<PartyRow {...baseProps} colorIndex={1} />);
     expect(screen.getByText("OO")).toBeInTheDocument();
-    // Same token the canvas tints this party's fields with.
-    expect(screen.getByRole("group", { name: baseProps.label })).toHaveAttribute(
-      "data-recipient-color",
-      "var(--pdfe-recipient-2)"
-    );
 
     rerender(<PartyRow {...baseProps} />);
     expect(screen.queryByText("OO")).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("group", { name: baseProps.label })
-    ).not.toHaveAttribute("data-recipient-color");
   });
 
   it("renders the host badge and the undecided hint", () => {

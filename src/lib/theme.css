@@ -15,8 +15,7 @@
    - Keyframes are prefixed `pdfe-*`.
    - `.pdfe-portal-root` carries the same variables for chrome the editor
      portals to <body> (the mobile and tablet drawers), which sits outside
-     `.pdf-editor-root`. The parties cards there read the recipient colours
-     (their coloured edge is the key to the field colours on the page).
+     `.pdf-editor-root`.
    ========================================================================== */
 
 .pdf-editor-root,

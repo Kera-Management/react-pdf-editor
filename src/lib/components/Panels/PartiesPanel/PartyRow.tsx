@@ -11,7 +11,6 @@ import {
 } from "@chakra-ui/react";
 import { ArrowsDownUpIcon, DotsSixVerticalIcon } from "@phosphor-icons/react";
 
-import { recipientColorVar } from "../../../colors";
 import { UserAvatar } from "../UserAvatar";
 import { LeadingIcon } from "../LeadingIcon";
 import { Switch } from "../../Switch";
@@ -112,16 +111,6 @@ export const PartyRow: React.FC<PartyRowProps> = ({
       onKeyDown={draggable ? onKeyDown : undefined}
       borderWidth="1px"
       borderColor={showDropTarget ? "border.emphasized" : "border"}
-      // The colour key for the canvas: this party's fields are drawn in
-      // the same recipient colour (BuildModeFieldRenderer). The avatar
-      // follows the app's name-hashed colours instead, so it can't be.
-      borderStartWidth={colorIndex !== undefined ? "4px" : undefined}
-      borderStartColor={
-        colorIndex !== undefined ? recipientColorVar(colorIndex) : undefined
-      }
-      data-recipient-color={
-        colorIndex !== undefined ? recipientColorVar(colorIndex) : undefined
-      }
       bg={isDragging ? "bg.muted" : showDropTarget ? "bg.subtle" : "bg.panel"}
       opacity={isDragging ? 0.6 : 1}
       rounded="l3"
