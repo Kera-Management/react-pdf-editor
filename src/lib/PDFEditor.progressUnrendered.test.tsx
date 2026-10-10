@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, waitFor } from "@testing-library/react";
+import { renderWithChakra } from "./testUtils";
 
 import PDFEditor from "./PDFEditor";
 
@@ -135,7 +136,7 @@ describe("PDFEditor: assigned-but-unrendered field never blocks a signer", () =>
   });
 
   it("excludes the locked field from the count, warns about it, and unblocks Finish once the visible field is done", async () => {
-    const { container } = render(
+    const { container } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="edit"
@@ -161,7 +162,7 @@ describe("PDFEditor: assigned-but-unrendered field never blocks a signer", () =>
     // The counter agrees with the gate: only the one renderable field
     // counts, so filling it alone completes progress.
     await waitFor(() => {
-      expect(container.textContent).toContain("0 / 1");
+      expect(container.textContent).toContain("0 of 1");
     });
 
     // The anomaly is surfaced, not silently dropped.
@@ -175,7 +176,7 @@ describe("PDFEditor: assigned-but-unrendered field never blocks a signer", () =>
     // Completing the one RENDERED field is enough to unlock Finish, despite
     // the still-unrenderable tenant_signature.
     await waitFor(() => {
-      expect(container.textContent).toContain("1 / 1");
+      expect(container.textContent).toContain("1 of 1");
       expect(
         container.querySelector("button[aria-label], button")
       ).not.toBeNull();

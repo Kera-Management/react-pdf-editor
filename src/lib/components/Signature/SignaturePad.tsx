@@ -1,6 +1,6 @@
 import React from "react";
+import { Tabs } from "@chakra-ui/react";
 
-import styles from "./SignaturePad.module.css";
 import { DrawSignatureCanvas } from "./DrawSignatureCanvas";
 import { TypeSignature } from "./TypeSignature";
 
@@ -24,16 +24,11 @@ export interface SignaturePadProps {
   onChange: (dataUrl: string | null) => void;
 }
 
-const TABS: { id: SignatureTab; label: string }[] = [
-  { id: "draw", label: "Draw" },
-  { id: "type", label: "Type" },
-];
-
 /**
- * Draw + Type signature capture, tab-switched. Only the active tab is
- * mounted at a time, so switching tabs naturally resets the other one's
- * in-progress content -- each tab reports its own current state via
- * `onChange` as soon as it mounts.
+ * Draw + Type signature capture in Chakra `Tabs` (line variant). Only the
+ * active tab is mounted (`lazyMount` + `unmountOnExit`), so switching tabs
+ * resets the other one's in-progress content, and each tab reports its own
+ * current state via `onChange` as soon as it mounts.
  */
 export const SignaturePad: React.FC<SignaturePadProps> = ({
   activeTab,
@@ -42,39 +37,28 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
   onChange,
 }) => {
   return (
-    <div className={styles.pad}>
-      <div className={styles.tabList} role="tablist" aria-label="Signature style">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            id={`signature-tab-${tab.id}`}
-            aria-selected={activeTab === tab.id}
-            aria-controls={`signature-tabpanel-${tab.id}`}
-            className={
-              activeTab === tab.id
-                ? `${styles.tab} ${styles.tabActive}`
-                : styles.tab
-            }
-            onClick={() => onTabChange(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-      <div
-        role="tabpanel"
-        id={`signature-tabpanel-${activeTab}`}
-        aria-labelledby={`signature-tab-${activeTab}`}
-        className={styles.tabPanel}
-      >
-        {activeTab === "draw" ? (
-          <DrawSignatureCanvas onChange={onChange} />
-        ) : (
-          <TypeSignature signerName={signerName} onChange={onChange} />
-        )}
-      </div>
-    </div>
+    <Tabs.Root
+      value={activeTab}
+      onValueChange={(details) => onTabChange(details.value as SignatureTab)}
+      variant="line"
+      size="sm"
+      lazyMount
+      unmountOnExit
+    >
+      <Tabs.List aria-label="Signature style">
+        <Tabs.Trigger value="draw" type="button">
+          Draw
+        </Tabs.Trigger>
+        <Tabs.Trigger value="type" type="button">
+          Type
+        </Tabs.Trigger>
+      </Tabs.List>
+      <Tabs.Content value="draw">
+        <DrawSignatureCanvas onChange={onChange} />
+      </Tabs.Content>
+      <Tabs.Content value="type">
+        <TypeSignature signerName={signerName} onChange={onChange} />
+      </Tabs.Content>
+    </Tabs.Root>
   );
 };

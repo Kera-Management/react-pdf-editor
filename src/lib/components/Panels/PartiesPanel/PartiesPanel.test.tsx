@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
+import { renderWithChakra as render } from "../../../testUtils";
 
 import { PartiesPanel, PartiesPanelParticipant } from "./PartiesPanel";
 import { PartiesConfig, PartiesPanelAssignMode, PartiesSelection } from "./types";
@@ -104,10 +105,14 @@ describe("PartiesPanel", () => {
     render(<PartiesPanel config={config} participants={PARTICIPANTS} />);
 
     const input = screen.getByLabelText("This offer expires in");
-    expect(input).toHaveValue(7);
+    // Chakra NumberInput is a text input with inputMode="decimal".
+    expect(input).toHaveValue("7");
 
     await user.clear(input);
-    await user.type(input, "14");
+    // Paste, not type: NumberInput re-syncs its value after each keystroke,
+    // and under a loaded test run the caret could land back at 0 between
+    // the two keys ("41"). Pasting enters the value in one event.
+    await user.paste("14");
     expect(lastSelection(onSelectionChange).expiryDays).toBe(14);
 
     await user.clear(input);
@@ -129,9 +134,9 @@ describe("PartiesPanel", () => {
     });
     render(<PartiesPanel config={config} participants={PARTICIPANTS} />);
 
-    expect(
-      screen.getByText("At least one person needs to sign.")
-    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "At least one person needs to sign."
+    );
     expect(
       screen.queryByText("Everyone signs at the same time.")
     ).not.toBeInTheDocument();
@@ -145,7 +150,6 @@ describe("PartiesPanel", () => {
     const nameNode = screen.getByText(LONG_NAME);
     expect(nameNode).toBeInTheDocument();
     expect(nameNode.textContent).toBe(LONG_NAME);
-    expect(nameNode.className).not.toMatch(/\btruncate\b/);
   });
 
   it("renders same-step signers inside ONE visible group box, sequential steps in separate boxes", () => {
@@ -167,14 +171,15 @@ describe("PartiesPanel", () => {
     expect(screen.getByText("then")).toBeInTheDocument();
   });
 
-  it("'All at once' collapses every signer into a single step", () => {
+  it("'All at once' collapses every signer into a single step", async () => {
+    const user = userEvent.setup();
     const { config, onSelectionChange } = buildConfig();
     render(<PartiesPanel config={config} participants={PARTICIPANTS} />);
     fireEvent.click(
       screen.getByRole("button", { name: "Sign after Olive Ono" })
     );
     expect(screen.getByTestId("step-group-1")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "All at once" }));
+    await user.click(screen.getByRole("radio", { name: "All at once" }));
     const steps = lastSelection(onSelectionChange)
       .parties.filter((p) => p.role === "signer")
       .map((p) => p.step);
@@ -182,14 +187,74 @@ describe("PartiesPanel", () => {
     expect(screen.queryByTestId("step-group-1")).not.toBeInTheDocument();
   });
 
-  it("'One after another' gives every signer their own step", () => {
+  it("'One after another' gives every signer their own step", async () => {
+    const user = userEvent.setup();
     const { config, onSelectionChange } = buildConfig();
     render(<PartiesPanel config={config} participants={PARTICIPANTS} />);
-    fireEvent.click(screen.getByRole("button", { name: "One after another" }));
+    await user.click(screen.getByRole("radio", { name: "One after another" }));
     const steps = lastSelection(onSelectionChange)
       .parties.filter((p) => p.role === "signer")
       .map((p) => p.step);
     expect(new Set(steps).size).toBe(steps.length);
+  });
+});
+
+describe("PartiesPanel signing order segment group", () => {
+  it("is a labelled radiogroup that lights the pole the signers sit at", async () => {
+    const user = userEvent.setup();
+    const { config, onSelectionChange } = buildConfig();
+    render(<PartiesPanel config={config} participants={PARTICIPANTS} />);
+
+    const order = screen.getByRole("radiogroup", { name: "Signing order" });
+    // Fixture: both signers grouped into one step.
+    expect(within(order).getByRole("radio", { name: "All at once" })).toBeChecked();
+    expect(
+      within(order).getByRole("radio", { name: "One after another" })
+    ).not.toBeChecked();
+
+    await user.click(within(order).getByRole("radio", { name: "One after another" }));
+    const steps = lastSelection(onSelectionChange)
+      .parties.filter((p) => p.role === "signer")
+      .map((p) => p.step);
+    expect(steps).toEqual([0, 1]);
+    expect(
+      within(order).getByRole("radio", { name: "One after another" })
+    ).toBeChecked();
+    expect(within(order).getByRole("radio", { name: "All at once" })).not.toBeChecked();
+  });
+
+  it("is hidden with fewer than two signers", () => {
+    const { config } = buildConfig({
+      initial: {
+        roles: { [P1]: "signer", [P2]: "viewer", [P3]: "viewer", [P4]: "excluded" },
+        order: [P1],
+        groupedWithPrevious: {},
+      },
+    });
+    render(<PartiesPanel config={config} participants={PARTICIPANTS} />);
+
+    expect(
+      screen.queryByRole("radiogroup", { name: "Signing order" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows section counts as badges next to the section titles", () => {
+    const { config } = buildConfig();
+    render(<PartiesPanel config={config} participants={PARTICIPANTS} />);
+
+    const copyHeading = screen.getByRole("heading", { name: /Also gets a copy/ });
+    expect(copyHeading.parentElement).toHaveTextContent("Also gets a copy1");
+    const excludedHeading = screen.getByRole("heading", { name: /Not included/ });
+    expect(excludedHeading.parentElement).toHaveTextContent("Not included0");
+  });
+
+  it("marks the expiry input's buttons and toggles as type=button so a host form never submits", () => {
+    const { config } = buildConfig();
+    render(<PartiesPanel config={config} participants={PARTICIPANTS} />);
+
+    for (const button of screen.getAllByRole("button")) {
+      expect(button).toHaveAttribute("type", "button");
+    }
   });
 });
 
@@ -327,6 +392,59 @@ describe("PartiesPanel assign mode", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       `Who fills "${FIELD_LABEL}"?`
     );
+  });
+
+  it("A1: the banner names the field by its display label, never its id", () => {
+    const { config } = buildConfig();
+    const { assignMode } = buildAssignMode({
+      fieldId: "field-7f3a9c",
+      fieldLabel: "Tenant signature",
+    });
+    render(
+      <PartiesPanel
+        config={config}
+        participants={PARTICIPANTS}
+        assignMode={assignMode}
+      />
+    );
+
+    const banner = screen.getByRole("status");
+    expect(banner).toHaveTextContent('Who fills "Tenant signature"?');
+    expect(banner).toHaveTextContent(
+      "Turn on each person who should complete this field."
+    );
+    expect(banner).not.toHaveTextContent("field-7f3a9c");
+    // The switches name the field the same way.
+    expect(
+      screen.getByRole("switch", { name: "Assign Olive Ono to Tenant signature" })
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/field-7f3a9c/)).not.toBeInTheDocument();
+  });
+
+  it("the banner closes (data-state=closed) then unmounts after assignMode clears", () => {
+    vi.useFakeTimers();
+    try {
+      const { config } = buildConfig();
+      const { assignMode } = buildAssignMode();
+      const { rerender } = render(
+        <PartiesPanel
+          config={config}
+          participants={PARTICIPANTS}
+          assignMode={assignMode}
+        />
+      );
+      expect(screen.getByRole("status")).toHaveAttribute("data-state", "open");
+
+      rerender(<PartiesPanel config={config} participants={PARTICIPANTS} />);
+      expect(screen.getByRole("status")).toHaveAttribute("data-state", "closed");
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("the banner's X button calls onDeselect", async () => {

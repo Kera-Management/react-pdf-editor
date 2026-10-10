@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
+
+import { renderWithChakra } from "../../testUtils";
 
 import { SignatureAdoptionModal } from "./SignatureAdoptionModal";
 import { drawAGesture, inkedImageData, stubCanvas } from "./testUtils";
@@ -17,7 +19,7 @@ describe("SignatureAdoptionModal - capture flow", () => {
     const onAdopt = vi.fn();
     const onClose = vi.fn();
 
-    render(
+    renderWithChakra(
       <SignatureAdoptionModal
         isOpen
         onClose={onClose}
@@ -46,7 +48,7 @@ describe("SignatureAdoptionModal - capture flow", () => {
     const onClose = vi.fn();
     const user = userEvent.setup();
 
-    render(
+    renderWithChakra(
       <SignatureAdoptionModal
         isOpen
         onClose={onClose}
@@ -75,7 +77,7 @@ describe("SignatureAdoptionModal - saved signature", () => {
     const onAdopt = vi.fn();
     const onClose = vi.fn();
 
-    render(
+    renderWithChakra(
       <SignatureAdoptionModal
         isOpen
         onClose={onClose}
@@ -96,7 +98,7 @@ describe("SignatureAdoptionModal - saved signature", () => {
 
   it("falls through to capture when the signer chooses to draw a new one", async () => {
     stubCanvas();
-    render(
+    renderWithChakra(
       <SignatureAdoptionModal
         isOpen
         onClose={vi.fn()}
@@ -141,7 +143,7 @@ describe("SignatureAdoptionModal - tab memory across reopen", () => {
     const { ctx } = stubCanvas(SAVED);
     const user = userEvent.setup();
 
-    render(<Harness />);
+    renderWithChakra(<Harness />);
 
     // First open: no saved signature yet, capture defaults to Draw.
     expect(screen.getByRole("tab", { name: "Draw" })).toHaveAttribute(
@@ -170,7 +172,7 @@ describe("SignatureAdoptionModal - tab memory across reopen", () => {
     stubCanvas(SAVED);
     const user = userEvent.setup();
 
-    render(<Harness />);
+    renderWithChakra(<Harness />);
 
     await user.click(screen.getByRole("tab", { name: "Type" }));
     await user.type(screen.getByLabelText(/signature text/i), "Jane Doe");
@@ -183,5 +185,59 @@ describe("SignatureAdoptionModal - tab memory across reopen", () => {
       "aria-selected",
       "true"
     );
+  });
+});
+
+describe("SignatureAdoptionModal - shell", () => {
+  it("is a dialog titled 'Add your signature' with Cancel that closes without adopting", async () => {
+    stubCanvas();
+    const onAdopt = vi.fn();
+    const onClose = vi.fn();
+
+    renderWithChakra(
+      <SignatureAdoptionModal isOpen onClose={onClose} onAdopt={onAdopt} />
+    );
+
+    expect(screen.getByRole("dialog")).toHaveAccessibleName("Add your signature");
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onAdopt).not.toHaveBeenCalled();
+  });
+
+  it("never submits the host form the editor is mounted in", async () => {
+    stubCanvas();
+    const onSubmit = vi.fn((e: React.FormEvent) => e.preventDefault());
+
+    renderWithChakra(
+      <form onSubmit={onSubmit}>
+        <SignatureAdoptionModal
+          isOpen
+          onClose={vi.fn()}
+          savedSignature="data:image/png;base64,SAVED"
+          onAdopt={vi.fn()}
+        />
+      </form>
+    );
+
+    for (const button of screen.getAllByRole("button")) {
+      expect(button).toHaveAttribute("type", "button");
+    }
+    await userEvent.click(screen.getByRole("button", { name: /use this signature/i }));
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("renders in dark mode with the same capture flow", () => {
+    stubCanvas();
+    renderWithChakra(
+      <SignatureAdoptionModal isOpen onClose={vi.fn()} onAdopt={vi.fn()} />,
+      { colorMode: "dark" }
+    );
+
+    expect(screen.getByRole("dialog")).toHaveAccessibleName("Add your signature");
+    expect(
+      screen.getByRole("img", { name: /signature drawing area/i })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Adopt" })).toBeDisabled();
   });
 });

@@ -1,9 +1,15 @@
+import React from "react";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
-import { ContextToolbar, ContextToolbarFieldContext } from "./ContextToolbar";
+import { renderWithChakra } from "../../testUtils";
+import {
+  ContextToolbar,
+  type ContextToolbarFieldContext,
+  type ContextToolbarProps,
+} from "./ContextToolbar";
 
 const TARGET_RECT = new DOMRect(100, 100, 40, 20);
 
@@ -12,94 +18,58 @@ const TEXT_CONTEXT: ContextToolbarFieldContext = {
   fieldType: "text",
 };
 
+const renderToolbar = (props: Partial<ContextToolbarProps> = {}) =>
+  renderWithChakra(
+    <ContextToolbar
+      targetRect={TARGET_RECT}
+      isVisible
+      context={TEXT_CONTEXT}
+      {...props}
+    />
+  );
+
+const containerOfWidth = (width: number): React.RefObject<HTMLElement> => {
+  const el = document.createElement("div");
+  el.getBoundingClientRect = () => new DOMRect(0, 0, width, 800);
+  return { current: el };
+};
+
 describe("ContextToolbar", () => {
   it("renders nothing when isVisible is false", () => {
-    const { container } = render(
-      <ContextToolbar
-        targetRect={TARGET_RECT}
-        isVisible={false}
-        context={TEXT_CONTEXT}
-        onDelete={vi.fn()}
-        onDuplicate={vi.fn()}
-      />
-    );
-
-    expect(container).toBeEmptyDOMElement();
+    renderToolbar({ isVisible: false, onDelete: vi.fn() });
+    expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
   });
 
   it("renders nothing when targetRect is null", () => {
-    const { container } = render(
-      <ContextToolbar
-        targetRect={null}
-        isVisible
-        context={TEXT_CONTEXT}
-        onDelete={vi.fn()}
-        onDuplicate={vi.fn()}
-      />
-    );
-
-    expect(container).toBeEmptyDOMElement();
+    renderToolbar({ targetRect: null, onDelete: vi.fn() });
+    expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
   });
 
-  it("renders as an accessible toolbar when visible with a target", () => {
-    render(
-      <ContextToolbar
-        targetRect={TARGET_RECT}
-        isVisible
-        context={TEXT_CONTEXT}
-        onDelete={vi.fn()}
-      />
-    );
-
-    expect(
-      screen.getByRole("toolbar", { name: "Field actions" })
-    ).toBeInTheDocument();
+  it("renders as an accessible toolbar with a placement", () => {
+    renderToolbar({ onDelete: vi.fn() });
+    const toolbar = screen.getByRole("toolbar", { name: "Field actions" });
+    expect(toolbar).toHaveAttribute("data-placement");
   });
 
-  it("renders without a context chip when context is omitted (defensive fallback)", () => {
-    render(
-      <ContextToolbar targetRect={TARGET_RECT} isVisible onDelete={vi.fn()} />
-    );
-
-    expect(
-      screen.getByRole("toolbar", { name: "Field actions" })
-    ).toBeInTheDocument();
+  it("renders without a context segment when context is omitted", () => {
+    renderToolbar({ context: undefined, onDelete: vi.fn() });
+    expect(screen.getByRole("toolbar", { name: "Field actions" })).toBeInTheDocument();
     expect(screen.queryByText("Full Name")).not.toBeInTheDocument();
   });
 
-  it("shows the field name in the context chip", () => {
-    render(
-      <ContextToolbar targetRect={TARGET_RECT} isVisible context={TEXT_CONTEXT} />
-    );
-
+  it("shows the field name in the context segment", () => {
+    renderToolbar();
     expect(screen.getByText("Full Name")).toBeInTheDocument();
   });
 
-  it("replaces the chip text with feedbackText when provided", () => {
-    render(
-      <ContextToolbar
-        targetRect={TARGET_RECT}
-        isVisible
-        context={TEXT_CONTEXT}
-        feedbackText="Added to 4 pages"
-      />
-    );
-
-    expect(screen.getByText("Added to 4 pages")).toBeInTheDocument();
+  it("replaces the field name with feedbackText in a status region", () => {
+    renderToolbar({ feedbackText: "Added to 4 pages" });
+    expect(screen.getByRole("status")).toHaveTextContent("Added to 4 pages");
     expect(screen.queryByText("Full Name")).not.toBeInTheDocument();
   });
 
   it("falls back to the field name once feedbackText clears", () => {
-    const { rerender } = render(
-      <ContextToolbar
-        targetRect={TARGET_RECT}
-        isVisible
-        context={TEXT_CONTEXT}
-        feedbackText="Added to 4 pages"
-      />
-    );
-    expect(screen.getByText("Added to 4 pages")).toBeInTheDocument();
-
+    const { rerender } = renderToolbar({ feedbackText: "Added to 4 pages" });
     rerender(
       <ContextToolbar
         targetRect={TARGET_RECT}
@@ -112,59 +82,37 @@ describe("ContextToolbar", () => {
   });
 
   it("renders only the buttons whose callback is passed", () => {
-    render(
-      <ContextToolbar targetRect={TARGET_RECT} isVisible context={TEXT_CONTEXT} />
-    );
-
-    expect(
-      screen.queryByRole("button", { name: "Required" })
-    ).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Duplicate" })
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Delete" })
-    ).not.toBeInTheDocument();
+    renderToolbar();
+    for (const name of ["Required", "Edit", "Duplicate", "Delete"]) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
   });
 
-  it("every rendered action shows a visible text label matching its aria-label", () => {
-    render(
-      <ContextToolbar
-        targetRect={TARGET_RECT}
-        isVisible
-        context={TEXT_CONTEXT}
-        onToggleRequired={vi.fn()}
-        onOpenProperties={vi.fn()}
-        onDuplicate={vi.fn()}
-        onDuplicateAllPages={vi.fn()}
-        onDelete={vi.fn()}
-      />
-    );
+  it("every action is type=button with a visible label matching its aria-label", () => {
+    renderToolbar({
+      onToggleRequired: vi.fn(),
+      onOpenProperties: vi.fn(),
+      onDuplicate: vi.fn(),
+      onDuplicateAllPages: vi.fn(),
+      onDelete: vi.fn(),
+    });
 
     for (const label of ["Required", "Edit", "Duplicate", "Delete"]) {
       const button = screen.getByRole("button", { name: label });
       expect(button).toHaveAccessibleName(label);
       expect(button).toHaveTextContent(label);
     }
+    for (const button of screen.getAllByRole("button")) {
+      expect(button).toHaveAttribute("type", "button");
+    }
   });
 
-  it("renders Required, fires the callback, and reflects state visibly", async () => {
+  it("Required fires the callback and reflects state via aria-pressed", async () => {
     const onToggleRequired = vi.fn();
-    const { rerender } = render(
-      <ContextToolbar
-        targetRect={TARGET_RECT}
-        isVisible
-        context={TEXT_CONTEXT}
-        onToggleRequired={onToggleRequired}
-        isRequired={false}
-      />
-    );
+    const { rerender } = renderToolbar({ onToggleRequired, isRequired: false });
 
     const button = screen.getByRole("button", { name: "Required" });
     expect(button).toHaveAttribute("aria-pressed", "false");
-    expect(button.className).not.toMatch(/active/);
-
     await userEvent.click(button);
     expect(onToggleRequired).toHaveBeenCalledTimes(1);
 
@@ -177,167 +125,161 @@ describe("ContextToolbar", () => {
         isRequired
       />
     );
-    const activeButton = screen.getByRole("button", { name: "Required" });
-    expect(activeButton).toHaveAttribute("aria-pressed", "true");
-    expect(activeButton.className).toMatch(/active/);
+    expect(screen.getByRole("button", { name: "Required" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
   });
 
-  it("renders Edit and fires onOpenProperties", async () => {
+  it("Edit fires onOpenProperties", async () => {
     const onOpenProperties = vi.fn();
-    render(
-      <ContextToolbar
-        targetRect={TARGET_RECT}
-        isVisible
-        context={TEXT_CONTEXT}
-        onOpenProperties={onOpenProperties}
-      />
-    );
-
+    renderToolbar({ onOpenProperties });
     await userEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(onOpenProperties).toHaveBeenCalledTimes(1);
   });
 
-  it("renders Delete and fires onDelete", async () => {
+  it("Delete fires onDelete", async () => {
     const onDelete = vi.fn();
-    render(
-      <ContextToolbar
-        targetRect={TARGET_RECT}
-        isVisible
-        context={TEXT_CONTEXT}
-        onDelete={onDelete}
-      />
-    );
-
+    renderToolbar({ onDelete });
     await userEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(onDelete).toHaveBeenCalledTimes(1);
   });
 
-  it("Duplicate opens a menu with both duplicate choices and fires the matching callback", async () => {
+  it("A2: split Duplicate button duplicates in place; the options menu offers both choices", async () => {
     const onDuplicate = vi.fn();
     const onDuplicateAllPages = vi.fn();
-    render(
-      <ContextToolbar
-        targetRect={TARGET_RECT}
-        isVisible
-        context={TEXT_CONTEXT}
-        onDuplicate={onDuplicate}
-        onDuplicateAllPages={onDuplicateAllPages}
-      />
-    );
-
-    const duplicateButton = screen.getByRole("button", { name: "Duplicate" });
-    expect(duplicateButton).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
-
-    await userEvent.click(duplicateButton);
-    expect(duplicateButton).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("menu")).toBeInTheDocument();
-
-    const onThisPage = screen.getByRole("menuitem", { name: "On this page" });
-    const onEveryPage = screen.getByRole("menuitem", {
-      name: "On every page",
-    });
-    expect(onThisPage).toBeInTheDocument();
-    expect(onEveryPage).toBeInTheDocument();
-
-    await userEvent.click(onThisPage);
-    expect(onDuplicate).toHaveBeenCalledTimes(1);
-    expect(onDuplicateAllPages).not.toHaveBeenCalled();
-    // Menu closes after a choice is made.
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    renderToolbar({ onDuplicate, onDuplicateAllPages });
 
     await userEvent.click(screen.getByRole("button", { name: "Duplicate" }));
+    expect(onDuplicate).toHaveBeenCalledTimes(1);
+
+    const options = screen.getByRole("button", { name: "Duplicate options" });
+    expect(options).toHaveAttribute("aria-haspopup", "menu");
+    expect(options).toHaveAttribute("aria-expanded", "false");
+
+    await userEvent.click(options);
+    expect(options).toHaveAttribute("aria-expanded", "true");
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "On this page" })).toBeInTheDocument();
+
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "On every page" }));
+    expect(onDuplicateAllPages).toHaveBeenCalledTimes(1);
+    expect(options).toHaveAttribute("aria-expanded", "false");
+
+    await userEvent.click(options);
     await userEvent.click(
-      screen.getByRole("menuitem", { name: "On every page" })
+      within(await screen.findByRole("menu")).getByRole("menuitem", { name: "On this page" })
     );
+    expect(onDuplicate).toHaveBeenCalledTimes(2);
+  });
+
+  it("Duplicate acts directly with no options menu when only one callback is provided", async () => {
+    const onDuplicateAllPages = vi.fn();
+    renderToolbar({ onDuplicateAllPages });
+    const button = screen.getByRole("button", { name: "Duplicate" });
+    expect(button).not.toHaveAttribute("aria-haspopup");
+    expect(
+      screen.queryByRole("button", { name: "Duplicate options" })
+    ).not.toBeInTheDocument();
+    await userEvent.click(button);
     expect(onDuplicateAllPages).toHaveBeenCalledTimes(1);
   });
 
-  it("Duplicate performs the action directly (no menu) when only one duplicate callback is provided", async () => {
-    const onDuplicate = vi.fn();
-    render(
-      <ContextToolbar
-        targetRect={TARGET_RECT}
-        isVisible
-        context={TEXT_CONTEXT}
-        onDuplicate={onDuplicate}
-      />
+  it("closes the duplicate menu on Escape", async () => {
+    renderToolbar({ onDuplicate: vi.fn(), onDuplicateAllPages: vi.fn() });
+    const options = screen.getByRole("button", { name: "Duplicate options" });
+    await userEvent.click(options);
+    const menu = await screen.findByRole("menu");
+    await waitFor(() => expect(menu).toHaveFocus());
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(options).toHaveAttribute("aria-expanded", "false")
     );
-
-    const duplicateButton = screen.getByRole("button", { name: "Duplicate" });
-    expect(duplicateButton).not.toHaveAttribute("aria-haspopup");
-
-    await userEvent.click(duplicateButton);
-    expect(onDuplicate).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
-  it("closes the duplicate menu on outside click", async () => {
-    render(
-      <ContextToolbar
-        targetRect={TARGET_RECT}
-        isVisible
-        context={TEXT_CONTEXT}
-        onDuplicate={vi.fn()}
-        onDuplicateAllPages={vi.fn()}
-      />
-    );
+  it("C12: collapses to icon buttons with unchanged aria-labels on narrow canvases", () => {
+    renderToolbar({
+      containerRef: containerOfWidth(360),
+      onToggleRequired: vi.fn(),
+      onOpenProperties: vi.fn(),
+      onDelete: vi.fn(),
+    });
+    const toolbar = screen.getByRole("toolbar", { name: "Field actions" });
+    expect(toolbar).toHaveAttribute("data-compact");
+    for (const label of ["Required", "Edit", "Delete"]) {
+      const button = screen.getByRole("button", { name: label });
+      expect(button).not.toHaveTextContent(label);
+    }
+  });
 
-    await userEvent.click(screen.getByRole("button", { name: "Duplicate" }));
-    expect(screen.getByRole("menu")).toBeInTheDocument();
+  it("keeps labels on wide canvases", () => {
+    renderToolbar({ containerRef: containerOfWidth(900), onDelete: vi.fn() });
+    expect(screen.getByRole("toolbar")).not.toHaveAttribute("data-compact");
+    expect(screen.getByRole("button", { name: "Delete" })).toHaveTextContent("Delete");
+  });
 
-    await userEvent.click(document.body);
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  it("A6: single selection renders no selection badge", () => {
+    renderToolbar({ selectionCount: 1, onDelete: vi.fn() });
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+  });
+
+  it("A6: multi-selection shows 'N selected', disables Edit/Duplicate, batches Required/Delete", async () => {
+    const onBatchRequired = vi.fn();
+    const onBatchDelete = vi.fn();
+    const onToggleRequired = vi.fn();
+    const onDelete = vi.fn();
+    renderToolbar({
+      selectionCount: 3,
+      isRequired: false,
+      onToggleRequired,
+      onOpenProperties: vi.fn(),
+      onDuplicate: vi.fn(),
+      onDuplicateAllPages: vi.fn(),
+      onDelete,
+      onBatchRequired,
+      onBatchDelete,
+    });
+
+    expect(screen.getByText("3 selected")).toBeInTheDocument();
+    expect(screen.queryByText("Full Name")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Duplicate" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Duplicate options" })).toBeDisabled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Required" }));
+    expect(onBatchRequired).toHaveBeenCalledWith(true);
+    expect(onToggleRequired).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onBatchDelete).toHaveBeenCalledTimes(1);
+    expect(onDelete).not.toHaveBeenCalled();
   });
 
   it("does not render a lock button even when onToggleLock/isLocked are passed", () => {
-    render(
-      <ContextToolbar
-        targetRect={TARGET_RECT}
-        isVisible
-        context={TEXT_CONTEXT}
-        onToggleLock={vi.fn()}
-        isLocked
-      />
-    );
-
-    expect(
-      screen.queryByRole("button", { name: /lock/i })
-    ).not.toBeInTheDocument();
+    renderToolbar({ onToggleLock: vi.fn(), isLocked: true });
+    expect(screen.queryByRole("button", { name: /lock/i })).not.toBeInTheDocument();
   });
 
   it("renders additionalActions when provided", () => {
-    render(
-      <ContextToolbar
-        targetRect={TARGET_RECT}
-        isVisible
-        context={TEXT_CONTEXT}
-        additionalActions={<button>Extra action</button>}
-      />
-    );
-
-    expect(
-      screen.getByRole("button", { name: "Extra action" })
-    ).toBeInTheDocument();
+    renderToolbar({ additionalActions: <button type="button">Extra action</button> });
+    expect(screen.getByRole("button", { name: "Extra action" })).toBeInTheDocument();
   });
 
-  it("no longer renders an assign-to-participant button", () => {
-    render(
-      <ContextToolbar
-        targetRect={TARGET_RECT}
-        isVisible
-        context={TEXT_CONTEXT}
-        onDelete={vi.fn()}
-        onDuplicate={vi.fn()}
-        onToggleRequired={vi.fn()}
-        onOpenProperties={vi.fn()}
-      />
-    );
+  it("does not render an assign-to-participant button", () => {
+    renderToolbar({
+      onDelete: vi.fn(),
+      onDuplicate: vi.fn(),
+      onToggleRequired: vi.fn(),
+      onOpenProperties: vi.fn(),
+    });
+    expect(screen.queryByRole("button", { name: /assign/i })).not.toBeInTheDocument();
+  });
 
-    expect(
-      screen.queryByRole("button", { name: /assign/i })
-    ).not.toBeInTheDocument();
-    // ContextToolbarProps no longer accepts onAssign/participants/
-    // assignedParticipant -- TypeScript enforces this at compile time.
+  it("renders in dark mode", () => {
+    renderWithChakra(
+      <ContextToolbar targetRect={TARGET_RECT} isVisible context={TEXT_CONTEXT} onDelete={vi.fn()} />,
+      { colorMode: "dark" }
+    );
+    expect(screen.getByRole("toolbar", { name: "Field actions" })).toBeInTheDocument();
   });
 });

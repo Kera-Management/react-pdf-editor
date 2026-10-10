@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
+import { renderWithChakra as render } from "../../../testUtils";
+
 import {
   RoleSegmentedControl,
   RoleSegmentedControlOption,
@@ -158,10 +160,6 @@ describe("RoleSegmentedControl", () => {
     const signs = screen.getByRole("radio", { name: "Signs" });
     const copy = screen.getByRole("radio", { name: "Copy" });
 
-    // Only the first segment is a tab stop while undecided.
-    expect(signs).toHaveAttribute("tabindex", "0");
-    expect(copy).toHaveAttribute("tabindex", "-1");
-
     signs.focus();
     await user.keyboard("{ArrowRight}");
 
@@ -169,20 +167,14 @@ describe("RoleSegmentedControl", () => {
     expect(copy).toHaveFocus();
   });
 
-  it("exposes only the selected segment (or the first, when undecided) as a tab stop", () => {
+  it("groups the segments as native radios sharing one name (browser roving tab stop)", () => {
     render(<ControlledControl initial="viewer" />);
 
-    expect(screen.getByRole("radio", { name: "Signs" })).toHaveAttribute(
-      "tabindex",
-      "-1"
-    );
-    expect(screen.getByRole("radio", { name: "Copy" })).toHaveAttribute(
-      "tabindex",
-      "0"
-    );
-    expect(screen.getByRole("radio", { name: "None" })).toHaveAttribute(
-      "tabindex",
-      "-1"
-    );
+    const radios = screen.getAllByRole("radio") as HTMLInputElement[];
+    expect(radios).toHaveLength(3);
+    const names = new Set(radios.map((radio) => radio.name));
+    expect(names.size).toBe(1);
+    expect([...names][0]).not.toBe("");
+    expect(screen.getByRole("radio", { name: "Copy" })).toBeChecked();
   });
 });

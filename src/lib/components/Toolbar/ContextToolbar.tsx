@@ -1,14 +1,32 @@
-import React, { useEffect, useRef, useState } from "react";
-import styles from "./ContextToolbar.module.css";
-import { Trash, Copy, Asterisk, PencilSimple, CaretDown } from "@phosphor-icons/react";
+import React, { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import {
+  Badge,
+  Box,
+  Button,
+  ButtonGroup,
+  HStack,
+  Icon,
+  IconButton,
+  Menu,
+  StackSeparator,
+  Text,
+} from "@chakra-ui/react";
+import {
+  AsteriskIcon,
+  CaretDownIcon,
+  CopyIcon,
+  PencilSimpleIcon,
+  TrashIcon,
+} from "@phosphor-icons/react";
 import { positionFloatingElement } from "../shared/positionFloating";
 import { fieldTypeIcons } from "../shared/fieldTypeMeta";
 import { BuildModeFieldType } from "../../PDFEditor";
+import { Tooltip } from "./Tooltip";
 
 /**
- * Identifies the selected field in the toolbar's context chip -- the icon
- * comes from the shared fieldTypeMeta map, the name is whatever the field is
- * currently called.
+ * Identifies the selected field in the toolbar's leading context segment:
+ * the icon comes from the shared fieldTypeMeta map, the name is whatever the
+ * field is currently called.
  */
 export interface ContextToolbarFieldContext {
   fieldName: string;
@@ -23,24 +41,21 @@ export interface ContextToolbarProps {
   /** Whether the toolbar is visible */
   isVisible: boolean;
   /**
-   * The selected field's name + type, shown in the leading context chip.
-   * The chip (and its trailing divider) simply doesn't render without it,
-   * so a host mid-migration to the new contract still gets a working
-   * toolbar -- but every host should pass it: it's how a non-tech-savvy
-   * user tells which field they're editing.
+   * The selected field's name + type, shown in the leading context segment.
+   * The segment simply doesn't render without it.
    */
   context?: ContextToolbarFieldContext;
   /**
    * Transient confirmation text (e.g. "Added to 4 pages") that temporarily
-   * replaces the context chip's field name after an action completes. Pass
-   * null/undefined (or omit) to show the field name.
+   * replaces the field name in the context segment. Pass null/undefined (or
+   * omit) to show the field name.
    */
   feedbackText?: string | null;
-  /** Whether the field is required */
+  /** Whether the field is required (for a multi-selection: all of them). */
   isRequired?: boolean;
   /** Callback for required toggle */
   onToggleRequired?: () => void;
-  /** Callback to open the field's properties (opens the field Popover) */
+  /** Callback to open the field's settings popover */
   onOpenProperties?: () => void;
   /** Duplicate this field in place, on the current page. */
   onDuplicate?: () => void;
@@ -50,19 +65,86 @@ export interface ContextToolbarProps {
   onDelete?: () => void;
   /**
    * Callback for lock/unlock toggle. Accepted for API stability but not
-   * wired to any control yet -- no lock button renders.
+   * wired to any control yet; no lock button renders.
    */
   onToggleLock?: () => void;
-  /** Whether the field is locked. Same status as onToggleLock -- unwired. */
+  /** Whether the field is locked. Same status as onToggleLock: unwired. */
   isLocked?: boolean;
   /** Additional actions, rendered after Duplicate and before Delete. */
   additionalActions?: React.ReactNode;
+  /**
+   * A6: number of selected fields. Above 1 the leading segment becomes an
+   * "N selected" badge, Edit and Duplicate are disabled (not hidden), and
+   * Required/Delete act on the whole selection via the batch callbacks.
+   */
+  selectionCount?: number;
+  /** A6: set Required on every selected field. Falls back to onToggleRequired. */
+  onBatchRequired?: (required: boolean) => void;
+  /** A6: delete every selected field. Falls back to onDelete. */
+  onBatchDelete?: () => void;
 }
 
 type Position = "top" | "bottom";
 
 // Gap between the target element and the toolbar, in px.
 const GAP = 8;
+
+// Below this much horizontal room the labels collapse to icon buttons.
+const COMPACT_WIDTH = 480;
+
+interface ActionProps {
+  label: string;
+  icon: React.ReactNode;
+  compact: boolean;
+  onClick?: () => void;
+  disabled?: boolean;
+  pressed?: boolean;
+  danger?: boolean;
+}
+
+/**
+ * One toolbar action. Labelled `Button` normally; an `IconButton` with a
+ * tooltip when the toolbar is compact. The aria-label is the same either way.
+ */
+const Action = React.forwardRef<HTMLButtonElement, ActionProps>(
+  function Action(
+    { label, icon, compact, onClick, disabled, pressed, danger, ...rest },
+    ref
+  ) {
+    const toggleProps =
+      pressed === undefined
+        ? { variant: "ghost" as const }
+        : pressed
+          ? { variant: "subtle" as const, colorPalette: "gray" }
+          : { variant: "ghost" as const };
+    const shared = {
+      ref,
+      type: "button" as const,
+      size: "xs" as const,
+      "aria-label": label,
+      "aria-pressed": pressed,
+      onClick,
+      disabled,
+      color: danger ? "fg.error" : undefined,
+      ...toggleProps,
+      ...rest,
+    };
+
+    if (compact) {
+      return (
+        <Tooltip content={label}>
+          <IconButton {...shared}>{icon}</IconButton>
+        </Tooltip>
+      );
+    }
+    return (
+      <Button {...shared}>
+        {icon}
+        {label}
+      </Button>
+    );
+  }
+);
 
 export const ContextToolbar: React.FC<ContextToolbarProps> = ({
   targetRect,
@@ -77,15 +159,27 @@ export const ContextToolbar: React.FC<ContextToolbarProps> = ({
   onDuplicateAllPages,
   onDelete,
   additionalActions,
+  selectionCount = 1,
+  onBatchRequired,
+  onBatchDelete,
 }) => {
   const toolbarRef = useRef<HTMLDivElement>(null);
-  const duplicateGroupRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<Position>("top");
   const [coords, setCoords] = useState({ x: 0, y: 0 });
-  const [isDuplicateMenuOpen, setIsDuplicateMenuOpen] = useState(false);
+  const [duplicateMenuOpen, setDuplicateMenuOpen] = useState(false);
+  const [compact, setCompact] = useState(false);
+  const menuTriggerId = useId();
 
-  // Calculate position based on target element
-  useEffect(() => {
+  // Narrow canvases collapse labels to icons (§3.2).
+  useLayoutEffect(() => {
+    if (!isVisible) return;
+    const width = containerRef?.current?.getBoundingClientRect().width;
+    setCompact(width !== undefined && width > 0 && width < COMPACT_WIDTH);
+  }, [isVisible, targetRect, containerRef]);
+
+  // Anchor math stays the shared positionFloating helper (not Chakra
+  // positioning): it tracks a canvas element through scroll and zoom.
+  useLayoutEffect(() => {
     if (!isVisible || !targetRect || !toolbarRef.current) return;
 
     const toolbarRect = toolbarRef.current.getBoundingClientRect();
@@ -100,179 +194,166 @@ export const ContextToolbar: React.FC<ContextToolbarProps> = ({
 
     setCoords({ x: result.x, y: result.y });
     setPosition(result.placement);
-  }, [isVisible, targetRect, containerRef]);
+  }, [isVisible, targetRect, containerRef, compact, selectionCount]);
 
-  // The duplicate menu belongs to whichever field is currently selected --
-  // close it whenever the toolbar hides or re-anchors to a different field,
-  // so it never lingers open over the wrong selection.
+  // The duplicate menu belongs to whichever field is selected: close it when
+  // the toolbar hides or re-anchors so it never lingers over the wrong field.
   useEffect(() => {
-    setIsDuplicateMenuOpen(false);
+    setDuplicateMenuOpen(false);
   }, [isVisible, targetRect]);
-
-  // Click-outside and Escape close the duplicate menu.
-  useEffect(() => {
-    if (!isDuplicateMenuOpen) return undefined;
-
-    const handlePointerDown = (e: MouseEvent) => {
-      if (duplicateGroupRef.current?.contains(e.target as Node)) return;
-      setIsDuplicateMenuOpen(false);
-    };
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setIsDuplicateMenuOpen(false);
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isDuplicateMenuOpen]);
 
   if (!isVisible || !targetRect) return null;
 
-  // Two distinct duplicate actions only need a menu when BOTH are wired --
-  // with just one, the button performs it directly, same as any other
-  // single-purpose action in the bar.
+  const isMulti = selectionCount > 1;
   const hasBothDuplicateActions = !!onDuplicate && !!onDuplicateAllPages;
   const showDuplicate = !!(onDuplicate || onDuplicateAllPages);
-  const chipText = feedbackText ?? context?.fieldName;
+  const segmentText = feedbackText ?? context?.fieldName;
+
+  const handleRequired = () => {
+    if (isMulti && onBatchRequired) onBatchRequired(!isRequired);
+    else onToggleRequired?.();
+  };
+  const handleDelete = isMulti && onBatchDelete ? onBatchDelete : onDelete;
+  const showRequired = !!(onToggleRequired || (isMulti && onBatchRequired));
+  const showDelete = !!(onDelete || (isMulti && onBatchDelete));
+
+  const leading = isMulti ? (
+    <Box px={1} display="flex" alignItems="center">
+      <Badge size="sm" variant="solid" colorPalette="gray" role="status">
+        {selectionCount} selected
+      </Badge>
+    </Box>
+  ) : context ? (
+    <HStack
+      gap={1.5}
+      px={2}
+      minW={0}
+      maxW={compact ? "28" : "48"}
+      color="fg.muted"
+      role="status"
+      aria-live="polite"
+    >
+      <Icon boxSize="4" flexShrink={0} aria-hidden="true">
+        {fieldTypeIcons[context.fieldType]}
+      </Icon>
+      <Text truncate>{segmentText}</Text>
+    </HStack>
+  ) : feedbackText ? (
+    <Text color="fg.muted" px={2} role="status" aria-live="polite">
+      {feedbackText}
+    </Text>
+  ) : null;
+
+  const duplicateControl = !showDuplicate ? null : hasBothDuplicateActions ? (
+    <ButtonGroup attached size="xs" variant="ghost">
+      <Action
+        label="Duplicate"
+        icon={<CopyIcon />}
+        compact={compact}
+        disabled={isMulti}
+        onClick={onDuplicate}
+      />
+      <Menu.Root
+        ids={{ trigger: menuTriggerId }}
+        open={duplicateMenuOpen}
+        onOpenChange={(e) => setDuplicateMenuOpen(e.open)}
+        positioning={{ strategy: "fixed", placement: "bottom-end" }}
+      >
+        <Tooltip content="Duplicate options" ids={{ trigger: menuTriggerId }}>
+          <Menu.Trigger asChild>
+            <IconButton
+              type="button"
+              size="xs"
+              variant="ghost"
+              aria-label="Duplicate options"
+              disabled={isMulti}
+            >
+              <CaretDownIcon weight="bold" />
+            </IconButton>
+          </Menu.Trigger>
+        </Tooltip>
+        <Menu.Positioner>
+          <Menu.Content minW="40" rounded="xl">
+            <Menu.Item value="this-page" rounded="lg" onSelect={() => onDuplicate?.()}>
+              On this page
+            </Menu.Item>
+            <Menu.Item
+              value="every-page"
+              rounded="lg"
+              onSelect={() => onDuplicateAllPages?.()}
+            >
+              On every page
+            </Menu.Item>
+          </Menu.Content>
+        </Menu.Positioner>
+      </Menu.Root>
+    </ButtonGroup>
+  ) : (
+    <Action
+      label="Duplicate"
+      icon={<CopyIcon />}
+      compact={compact}
+      disabled={isMulti}
+      onClick={() => (onDuplicate ?? onDuplicateAllPages)?.()}
+    />
+  );
 
   return (
-    <div
+    <HStack
       ref={toolbarRef}
-      className={`${styles.toolbar} ${styles[position]}`}
-      style={{
-        left: coords.x,
-        top: coords.y,
-      }}
       role="toolbar"
       aria-label="Field actions"
+      data-placement={position}
+      data-compact={compact ? "" : undefined}
+      position="fixed"
+      left={`${coords.x}px`}
+      top={`${coords.y}px`}
+      zIndex="popover"
+      gap={1}
+      bg="bg.panel"
+      shadow="md"
+      rounded="xl"
+      p="1.5"
+      whiteSpace="nowrap"
+      separator={<StackSeparator h="5" alignSelf="center" />}
     >
-      {/* Context chip: type icon + field name (or transient feedback) */}
-      {context && (
-        <>
-          <div className={styles.chip} aria-live="polite">
-            <span className={styles.chipIcon} aria-hidden="true">
-              {fieldTypeIcons[context.fieldType]}
-            </span>
-            <span className={styles.chipText}>{chipText}</span>
-          </div>
+      {leading}
 
-          <div className={styles.divider} aria-hidden="true" />
-        </>
-      )}
-
-      {/* Required */}
-      {onToggleRequired && (
-        <button
-          type="button"
-          className={`${styles.button} ${isRequired ? styles.active : ""}`}
-          onClick={onToggleRequired}
-          aria-label="Required"
-          aria-pressed={isRequired}
-        >
-          <span className={styles.requiredDot} aria-hidden="true" />
-          <Asterisk weight="bold" size={14} aria-hidden="true" />
-          <span className={styles.buttonLabel}>Required</span>
-        </button>
-      )}
-
-      {/* Field properties */}
-      {onOpenProperties && (
-        <button
-          type="button"
-          className={styles.button}
-          onClick={onOpenProperties}
-          aria-label="Edit"
-        >
-          <PencilSimple weight="bold" size={14} aria-hidden="true" />
-          <span className={styles.buttonLabel}>Edit</span>
-        </button>
-      )}
-
-      {/* Duplicate -- opens a small labeled menu when BOTH duplicate
-          actions are wired (the normal, fully-wired case); with just one
-          available, the button performs it directly. */}
-      {showDuplicate && hasBothDuplicateActions && (
-        <div className={styles.duplicateGroup} ref={duplicateGroupRef}>
-          <button
-            type="button"
-            className={styles.button}
-            onClick={() => setIsDuplicateMenuOpen((open) => !open)}
-            aria-label="Duplicate"
-            aria-haspopup="menu"
-            aria-expanded={isDuplicateMenuOpen}
-          >
-            <Copy weight="bold" size={14} aria-hidden="true" />
-            <span className={styles.buttonLabel}>Duplicate</span>
-            <CaretDown weight="bold" size={10} aria-hidden="true" />
-          </button>
-
-          {isDuplicateMenuOpen && (
-            <div
-              className={styles.menu}
-              role="menu"
-              aria-label="Duplicate options"
-            >
-              <button
-                type="button"
-                role="menuitem"
-                className={styles.menuItem}
-                onClick={() => {
-                  setIsDuplicateMenuOpen(false);
-                  onDuplicate?.();
-                }}
-              >
-                On this page
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className={styles.menuItem}
-                onClick={() => {
-                  setIsDuplicateMenuOpen(false);
-                  onDuplicateAllPages?.();
-                }}
-              >
-                On every page
-              </button>
-            </div>
+      {(showRequired || onOpenProperties || showDuplicate || additionalActions) && (
+        <HStack gap={1}>
+          {showRequired && (
+            <Action
+              label="Required"
+              icon={<AsteriskIcon weight="bold" />}
+              compact={compact}
+              pressed={isRequired}
+              onClick={handleRequired}
+            />
           )}
-        </div>
+          {onOpenProperties && (
+            <Action
+              label="Edit"
+              icon={<PencilSimpleIcon />}
+              compact={compact}
+              disabled={isMulti}
+              onClick={onOpenProperties}
+            />
+          )}
+          {duplicateControl}
+          {additionalActions}
+        </HStack>
       )}
 
-      {showDuplicate && !hasBothDuplicateActions && (
-        <button
-          type="button"
-          className={styles.button}
-          onClick={() => (onDuplicate ?? onDuplicateAllPages)?.()}
-          aria-label="Duplicate"
-        >
-          <Copy weight="bold" size={14} aria-hidden="true" />
-          <span className={styles.buttonLabel}>Duplicate</span>
-        </button>
+      {showDelete && (
+        <Action
+          label="Delete"
+          icon={<TrashIcon />}
+          compact={compact}
+          danger
+          onClick={handleDelete}
+        />
       )}
-
-      {/* Additional actions */}
-      {additionalActions}
-
-      {/* Delete */}
-      {onDelete && (
-        <>
-          <div className={styles.divider} aria-hidden="true" />
-          <button
-            type="button"
-            className={`${styles.button} ${styles.danger}`}
-            onClick={onDelete}
-            aria-label="Delete"
-          >
-            <Trash weight="bold" size={14} aria-hidden="true" />
-            <span className={styles.buttonLabel}>Delete</span>
-          </button>
-        </>
-      )}
-    </div>
+    </HStack>
   );
 };
 

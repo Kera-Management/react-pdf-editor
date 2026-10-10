@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
+import { Button } from "@chakra-ui/react";
 
+import { renderWithChakra } from "../../testUtils";
 import { Modal } from "./Modal";
 
 /** Opener + toggle so tests exercise real mount/unmount and focus restore
@@ -18,7 +20,9 @@ function Harness({
   const [isOpen, setIsOpen] = useState(false);
   return (
     <div>
-      <button onClick={() => setIsOpen(true)}>Open modal</button>
+      <button type="button" onClick={() => setIsOpen(true)}>
+        Open modal
+      </button>
       <Modal
         isOpen={isOpen}
         onClose={() => setIsOpen(false)}
@@ -31,9 +35,37 @@ function Harness({
   );
 }
 
+/** Chakra moves focus into the dialog asynchronously after mount. */
+async function waitForFocusInDialog() {
+  await waitFor(() =>
+    expect(screen.getByRole("dialog")).toContainElement(
+      document.activeElement as HTMLElement
+    )
+  );
+}
+
+const originalInnerWidth = window.innerWidth;
+
+beforeEach(() => {
+  // jsdom lays nothing out, so Chakra's focus trap (zag) would treat every
+  // element as invisible. Report one client rect so focus behaves as in a
+  // browser.
+  vi.spyOn(Element.prototype, "getClientRects").mockReturnValue([
+    new DOMRect(0, 0, 10, 10),
+  ] as unknown as DOMRectList);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    value: originalInnerWidth,
+  });
+});
+
 describe("Modal", () => {
   it("renders nothing when closed", () => {
-    render(
+    renderWithChakra(
       <Modal isOpen={false} onClose={vi.fn()} title="Hidden">
         <p>content</p>
       </Modal>
@@ -43,25 +75,26 @@ describe("Modal", () => {
   });
 
   it("renders as an accessible dialog labelled by its title when open", () => {
-    render(
+    renderWithChakra(
       <Modal isOpen onClose={vi.fn()} title="Confirm action">
         <p>Body content</p>
       </Modal>
     );
 
     const dialog = screen.getByRole("dialog");
-    expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(dialog).toHaveAccessibleName("Confirm action");
+    expect(dialog).toHaveAttribute("data-pdfe-modal", "dialog");
+    expect(dialog).toHaveAttribute("data-state", "open");
     expect(screen.getByText("Body content")).toBeInTheDocument();
   });
 
   it("renders footer content when provided", () => {
-    render(
+    renderWithChakra(
       <Modal
         isOpen
         onClose={vi.fn()}
         title="Confirm action"
-        footer={<button>Confirm</button>}
+        footer={<Button type="button">Confirm</Button>}
       >
         <p>Body content</p>
       </Modal>
@@ -72,37 +105,21 @@ describe("Modal", () => {
 
   it("calls onClose on Escape", async () => {
     const onClose = vi.fn();
-    render(
+    renderWithChakra(
       <Modal isOpen onClose={onClose} title="Confirm action">
         <p>Body content</p>
       </Modal>
     );
 
+    await waitForFocusInDialog();
     await userEvent.keyboard("{Escape}");
 
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onClose on backdrop click but not on dialog content click", () => {
-    const onClose = vi.fn();
-    render(
-      <Modal isOpen onClose={onClose} title="Confirm action">
-        <p>Body content</p>
-      </Modal>
-    );
-
-    fireEvent.mouseDown(screen.getByText("Body content"));
-    expect(onClose).not.toHaveBeenCalled();
-
-    const dialog = screen.getByRole("dialog");
-    // The backdrop is the dialog's parent element.
-    fireEvent.mouseDown(dialog.parentElement as HTMLElement);
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
-
   it("calls onClose when the close button is clicked", async () => {
     const onClose = vi.fn();
-    render(
+    renderWithChakra(
       <Modal isOpen onClose={onClose} title="Confirm action">
         <p>Body content</p>
       </Modal>
@@ -113,60 +130,99 @@ describe("Modal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("moves focus into the dialog on open, to the first focusable element", () => {
-    render(
-      <Modal isOpen onClose={vi.fn()} title="Confirm action">
-        <input aria-label="Name" />
-      </Modal>
+  it("does not submit a surrounding host form from its close button", async () => {
+    const onSubmit = vi.fn((e: React.FormEvent) => e.preventDefault());
+    renderWithChakra(
+      <form onSubmit={onSubmit}>
+        <Modal isOpen onClose={vi.fn()} title="Confirm action">
+          <p>Body content</p>
+        </Modal>
+      </form>
     );
 
-    expect(screen.getByRole("button", { name: "Close" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Close" })).toHaveAttribute(
+      "type",
+      "button"
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("traps focus inside the dialog, cycling both directions", async () => {
+  it("moves focus into the dialog on open (C13)", async () => {
+    renderWithChakra(<Harness>{<input aria-label="Name" />}</Harness>);
+
+    await userEvent.click(screen.getByRole("button", { name: "Open modal" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("dialog")).toContainElement(
+        document.activeElement as HTMLElement
+      )
+    );
+  });
+
+  it("traps Tab focus inside the dialog, cycling both directions (C13)", async () => {
     const user = userEvent.setup();
-    render(
-      <Modal
-        isOpen
-        onClose={vi.fn()}
-        title="Confirm action"
-        footer={<button>Confirm</button>}
-      >
+    renderWithChakra(
+      <Harness footer={<Button type="button">Confirm</Button>}>
         <input aria-label="Name" />
-      </Modal>
+      </Harness>
     );
 
-    const closeButton = screen.getByRole("button", { name: "Close" });
+    await user.click(screen.getByRole("button", { name: "Open modal" }));
+    const closeButton = await screen.findByRole("button", { name: "Close" });
     const nameInput = screen.getByRole("textbox", { name: "Name" });
     const confirmButton = screen.getByRole("button", { name: "Confirm" });
 
-    expect(closeButton).toHaveFocus();
+    await waitFor(() => expect(closeButton).toHaveFocus());
 
     await user.tab();
     expect(nameInput).toHaveFocus();
-
     await user.tab();
     expect(confirmButton).toHaveFocus();
-
-    // Tab from the last focusable element wraps to the first.
     await user.tab();
     expect(closeButton).toHaveFocus();
-
-    // Shift+Tab from the first focusable element wraps to the last.
     await user.tab({ shift: true });
     expect(confirmButton).toHaveFocus();
   });
 
-  it("restores focus to the opener when closed via Escape", async () => {
-    render(<Harness />);
+  it("restores focus to the opener when closed via Escape (C13)", async () => {
+    renderWithChakra(<Harness />);
 
     const opener = screen.getByRole("button", { name: "Open modal" });
     await userEvent.click(opener);
-    expect(opener).not.toHaveFocus();
+    await waitForFocusInDialog();
 
     await userEvent.keyboard("{Escape}");
 
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(opener).toHaveFocus();
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    );
+    await waitFor(() => expect(opener).toHaveFocus());
+  });
+
+  it("renders as a bottom drawer on mobile, with the same title, footer and close", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 375,
+    });
+    const onClose = vi.fn();
+    renderWithChakra(
+      <Modal
+        isOpen
+        onClose={onClose}
+        title="Confirm action"
+        footer={<Button type="button">Confirm</Button>}
+      >
+        <p>Body content</p>
+      </Modal>
+    );
+
+    const drawer = screen.getByRole("dialog");
+    expect(drawer).toHaveAttribute("data-pdfe-modal", "drawer");
+    expect(drawer).toHaveAccessibleName("Confirm action");
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

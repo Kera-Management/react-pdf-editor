@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, waitFor, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { renderWithChakra } from "./testUtils";
 
 import { PDFDocument } from "pdf-lib";
 
@@ -64,6 +66,16 @@ function makeFakeDoc(page: ReturnType<typeof makeFakePage>) {
   };
 }
 
+/**
+ * Switches modes through the header's mode Menu (a Chakra Menu rendered
+ * inline): open the trigger, pick the radio item.
+ */
+async function switchMode(from: RegExp, to: RegExp) {
+  await userEvent.click(screen.getByRole("button", { name: from }));
+  const menu = await screen.findByRole("menu");
+  await userEvent.click(within(menu).getByRole("menuitemradio", { name: to }));
+}
+
 describe("PDFEditor unsaved-changes guard", () => {
   beforeEach(() => {
     Element.prototype.scrollIntoView = vi.fn();
@@ -96,7 +108,7 @@ describe("PDFEditor unsaved-changes guard", () => {
 
   it("prompts instead of closing immediately once a value has changed, and Keep editing does not close", async () => {
     const onClose = vi.fn();
-    const { container, getByRole, queryByRole } = render(
+    const { container, getByRole, queryByRole } = renderWithChakra(
       <PDFEditor src="fake://document.pdf" mode="edit" onClose={onClose} />
     );
 
@@ -112,22 +124,26 @@ describe("PDFEditor unsaved-changes guard", () => {
 
     fireEvent.click(getByRole("button", { name: "Close" }));
 
+    // Confirm dialogs are Chakra Dialogs in a Portal: query the document.
     expect(
-      getByRole("heading", { name: "Save your changes?" })
+      await screen.findByRole("heading", { name: "Save your changes?" })
     ).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
 
-    fireEvent.click(getByRole("button", { name: "Keep editing" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
     expect(onClose).not.toHaveBeenCalled();
-    expect(
-      queryByRole("heading", { name: "Save your changes?" })
-    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: "Save your changes?" })
+      ).not.toBeInTheDocument()
+    );
+    expect(queryByRole("button", { name: "Keep editing" })).toBeNull();
   });
 
   it("Discard closes without saving", async () => {
     const onClose = vi.fn();
     const onSave = vi.fn();
-    const { container, getByRole } = render(
+    const { container, getByRole } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="edit"
@@ -146,7 +162,7 @@ describe("PDFEditor unsaved-changes guard", () => {
     fireEvent.change(input, { target: { value: "Jane Doe" } });
 
     fireEvent.click(getByRole("button", { name: "Close" }));
-    fireEvent.click(getByRole("button", { name: "Discard" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
 
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onSave).not.toHaveBeenCalled();
@@ -154,7 +170,7 @@ describe("PDFEditor unsaved-changes guard", () => {
 
   it("closes immediately, with no prompt, when there are no unsaved changes", async () => {
     const onClose = vi.fn();
-    const { container, getByRole, queryByRole } = render(
+    const { container, getByRole } = renderWithChakra(
       <PDFEditor src="fake://document.pdf" mode="edit" onClose={onClose} />
     );
 
@@ -166,14 +182,14 @@ describe("PDFEditor unsaved-changes guard", () => {
 
     fireEvent.click(getByRole("button", { name: "Close" }));
     expect(
-      queryByRole("heading", { name: "Save your changes?" })
+      screen.queryByRole("heading", { name: "Save your changes?" })
     ).not.toBeInTheDocument();
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("switching modes never prompts, even while dirty", async () => {
     const onClose = vi.fn();
-    const { container, getByRole, queryByRole } = render(
+    const { container } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="edit"
@@ -193,11 +209,10 @@ describe("PDFEditor unsaved-changes guard", () => {
 
     // Mode dropdown -- current label reads "Fill & Sign" (renamed from
     // "Edit"), open it and switch to "Prepare" (renamed from "Build").
-    fireEvent.click(getByRole("button", { name: /fill & sign/i }));
-    fireEvent.click(getByRole("option", { name: /prepare/i }));
+    await switchMode(/fill & sign/i, /prepare/i);
 
     expect(
-      queryByRole("heading", { name: "Save your changes?" })
+      screen.queryByRole("heading", { name: "Save your changes?" })
     ).not.toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
   });
@@ -232,7 +247,7 @@ describe("PDFEditor Prepare -> Fill & Sign unsaved-fields guard", () => {
   });
 
   const addFieldViaPalette = async (
-    getByRole: ReturnType<typeof render>["getByRole"]
+    getByRole: ReturnType<typeof renderWithChakra>["getByRole"]
   ) => {
     const addText = await waitFor(() => getByRole("button", {
       name: /add text field/i,
@@ -241,7 +256,7 @@ describe("PDFEditor Prepare -> Fill & Sign unsaved-fields guard", () => {
   };
 
   it("blocks the switch with a dialog while prepared fields are unsaved", async () => {
-    const { getByRole, queryByRole, getByText } = render(
+    const { getByRole, getByText } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="build"
@@ -251,34 +266,38 @@ describe("PDFEditor Prepare -> Fill & Sign unsaved-fields guard", () => {
 
     await addFieldViaPalette(getByRole);
 
-    fireEvent.click(getByRole("button", { name: /prepare/i }));
-    fireEvent.click(getByRole("option", { name: /fill & sign/i }));
+    await switchMode(/prepare/i, /fill & sign/i);
 
     // The switch did NOT happen; the dialog is up instead.
     expect(
-      getByRole("heading", { name: "Save your fields first?" })
+      await screen.findByRole("heading", { name: "Save your fields first?" })
     ).toBeInTheDocument();
 
     // Stay in Prepare: dialog closes, mode unchanged.
-    fireEvent.click(getByRole("button", { name: "Stay in Prepare" }));
-    expect(
-      queryByRole("heading", { name: "Save your fields first?" })
-    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Stay in Prepare" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: "Save your fields first?" })
+      ).not.toBeInTheDocument()
+    );
     expect(getByRole("button", { name: /prepare/i })).toBeInTheDocument();
 
     // Try again and continue without saving: mode switches and the
     // persistent in-canvas notice takes over as the reminder.
-    fireEvent.click(getByRole("button", { name: /prepare/i }));
-    fireEvent.click(getByRole("option", { name: /fill & sign/i }));
-    fireEvent.click(getByRole("button", { name: "Continue without saving" }));
-    expect(getByRole("button", { name: /fill & sign/i })).toBeInTheDocument();
+    await switchMode(/prepare/i, /fill & sign/i);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue without saving" })
+    );
+    await waitFor(() =>
+      expect(getByRole("button", { name: /fill & sign/i })).toBeInTheDocument()
+    );
     expect(
       getByText(/Fields added in Prepare are not saved yet/)
     ).toBeInTheDocument();
   });
 
   it("switches without any dialog when nothing was changed in Prepare", async () => {
-    const { getByRole, queryByRole } = render(
+    const { getByRole } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="build"
@@ -289,13 +308,14 @@ describe("PDFEditor Prepare -> Fill & Sign unsaved-fields guard", () => {
     // Wait for the document (and its seeded fields) to be ready.
     await waitFor(() => getByRole("button", { name: /add text field/i }));
 
-    fireEvent.click(getByRole("button", { name: /prepare/i }));
-    fireEvent.click(getByRole("option", { name: /fill & sign/i }));
+    await switchMode(/prepare/i, /fill & sign/i);
 
     expect(
-      queryByRole("heading", { name: "Save your fields first?" })
+      screen.queryByRole("heading", { name: "Save your fields first?" })
     ).not.toBeInTheDocument();
-    expect(getByRole("button", { name: /fill & sign/i })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(getByRole("button", { name: /fill & sign/i })).toBeInTheDocument()
+    );
   });
 });
 
@@ -341,7 +361,7 @@ describe("PDFEditor Save and continue actually saves", () => {
     }));
 
     const onBuildSave = vi.fn();
-    const { getByRole } = render(
+    const { getByRole } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="build"
@@ -355,9 +375,10 @@ describe("PDFEditor Save and continue actually saves", () => {
     );
     fireEvent.click(addText);
 
-    fireEvent.click(getByRole("button", { name: /prepare/i }));
-    fireEvent.click(getByRole("option", { name: /fill & sign/i }));
-    fireEvent.click(getByRole("button", { name: "Save and continue" }));
+    await switchMode(/prepare/i, /fill & sign/i);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Save and continue" })
+    );
 
     // The regression this pins: a stale first-render onSaveAs closed over
     // pdfDoc === undefined, silently saved NOTHING, and switched anyway.
@@ -388,7 +409,7 @@ describe("PDFEditor Save and continue actually saves", () => {
     }));
 
     const onBuildSave = vi.fn(() => Promise.reject(new Error("upload failed")));
-    const { getByRole, queryByRole } = render(
+    const { getByRole, queryByRole } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="build"
@@ -402,14 +423,17 @@ describe("PDFEditor Save and continue actually saves", () => {
     );
     fireEvent.click(addText);
 
-    fireEvent.click(getByRole("button", { name: /prepare/i }));
-    fireEvent.click(getByRole("option", { name: /fill & sign/i }));
-    fireEvent.click(getByRole("button", { name: "Save and continue" }));
+    await switchMode(/prepare/i, /fill & sign/i);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Save and continue" })
+    );
 
     await waitFor(() => expect(onBuildSave).toHaveBeenCalledTimes(1));
     // Dialog survives, mode never switched.
     await waitFor(() =>
-      expect(getByRole("button", { name: "Save and continue" })).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: "Save and continue" })
+      ).toBeInTheDocument()
     );
     expect(queryByRole("button", { name: /^fill & sign$/i })).toBeNull();
   });

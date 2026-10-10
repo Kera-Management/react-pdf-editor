@@ -42,3 +42,20 @@ if (
 ) {
   Element.prototype.scrollTo = function scrollTo() {};
 }
+
+// jsdom has no ResizeObserver. Chakra's floating parts (Popover, Menu,
+// Tooltip) start floating-ui's autoUpdate, SegmentGroup measures its
+// indicator, and PDFEditor's fit-to-width re-fit (B7/C4) observes the
+// scroller; all construct one. Without this the run ends with unhandled
+// "ResizeObserver is not defined" errors. Inert: it never reports a resize
+// (tests drive layout changes through window "resize" events instead).
+class InertResizeObserver implements ResizeObserver {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver =
+    InertResizeObserver as unknown as typeof ResizeObserver;
+}

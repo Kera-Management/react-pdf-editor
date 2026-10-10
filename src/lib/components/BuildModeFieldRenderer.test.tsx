@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
+import { renderWithChakra as render } from "../testUtils";
 
 import { BuildModeFieldRenderer } from "./BuildModeFieldRenderer";
 import { BuildModeField } from "../PDFEditor";
@@ -224,5 +225,158 @@ describe("BuildModeFieldRenderer", () => {
       />
     );
     expect(container.querySelector('[title="Required"]')).toBeFalsy();
+  });
+
+  const baseProps = {
+    scale: 1,
+    onDelete: vi.fn(),
+    onMove: vi.fn(),
+    onResize: vi.fn(),
+  };
+
+  it("A6: shift-click asks for an additive (toggle) selection, plain click does not", () => {
+    const onSelect = vi.fn();
+    render(
+      <BuildModeFieldRenderer
+        {...baseProps}
+        field={makeField()}
+        isSelected={false}
+        onSelect={onSelect}
+      />
+    );
+    const box = screen.getByRole("button", { name: /text field: field_1/i });
+
+    fireEvent.click(box, { shiftKey: true });
+    expect(onSelect).toHaveBeenLastCalledWith("field_1", { additive: true });
+
+    fireEvent.click(box);
+    expect(onSelect).toHaveBeenLastCalledWith("field_1");
+  });
+
+  it("A6: a multi-selected field shows the selection outline but no resize handles", () => {
+    const { container, rerender } = render(
+      <BuildModeFieldRenderer
+        {...baseProps}
+        field={makeField()}
+        isSelected
+        onSelect={vi.fn()}
+      />
+    );
+    const box = screen.getByRole("button", { name: /text field: field_1/i });
+    expect(box).toHaveAttribute("data-selected", "true");
+    expect(container.querySelectorAll("[data-resize-handle]")).toHaveLength(4);
+
+    rerender(
+      <BuildModeFieldRenderer
+        {...baseProps}
+        field={makeField()}
+        isSelected
+        isMultiSelected
+        onSelect={vi.fn()}
+      />
+    );
+    expect(box).toHaveAttribute("data-selected", "true");
+    expect(container.querySelectorAll("[data-resize-handle]")).toHaveLength(0);
+
+    rerender(
+      <BuildModeFieldRenderer
+        {...baseProps}
+        field={makeField()}
+        isSelected={false}
+        onSelect={vi.fn()}
+      />
+    );
+    expect(box).not.toHaveAttribute("data-selected");
+  });
+
+  it("A6: a shift-drag still moves only this field (drag math unchanged)", () => {
+    const onMove = vi.fn();
+    render(
+      <BuildModeFieldRenderer
+        {...baseProps}
+        onMove={onMove}
+        scale={2}
+        field={makeField({ x: 10, y: 10 })}
+        isSelected
+        isMultiSelected
+        onSelect={vi.fn()}
+      />
+    );
+    const box = screen.getByRole("button", { name: /text field: field_1/i });
+    fireEvent.mouseDown(box, { clientX: 100, clientY: 100, shiftKey: true });
+    fireEvent.mouseMove(document, { clientX: 120, clientY: 140 });
+    fireEvent.mouseUp(document);
+    expect(onMove).toHaveBeenCalledTimes(1);
+    expect(onMove).toHaveBeenCalledWith("field_1", 20, 30);
+  });
+
+  it("A7: a dropdown with no options is flagged invalid with a 'No options' chip", () => {
+    const { rerender } = render(
+      <BuildModeFieldRenderer
+        {...baseProps}
+        field={makeField({ type: "dropdown", properties: { options: [] } })}
+        isSelected={false}
+        onSelect={vi.fn()}
+      />
+    );
+    const box = screen.getByRole("button", { name: /dropdown field: field_1/i });
+    expect(box).toHaveAttribute("data-invalid", "true");
+    expect(box).toHaveAccessibleName(/no options/i);
+    expect(screen.getByText("No options")).toBeInTheDocument();
+
+    rerender(
+      <BuildModeFieldRenderer
+        {...baseProps}
+        field={makeField({
+          type: "dropdown",
+          properties: { options: [{ exportValue: "yes", displayValue: "Yes" }] },
+        })}
+        isSelected={false}
+        onSelect={vi.fn()}
+      />
+    );
+    expect(box).not.toHaveAttribute("data-invalid");
+    expect(screen.queryByText("No options")).toBeNull();
+  });
+
+  it("A7: radios imported from the PDF (no options list) are not flagged", () => {
+    render(
+      <BuildModeFieldRenderer
+        {...baseProps}
+        field={makeField({ type: "radio", origin: "existing", properties: {} })}
+        isSelected={false}
+        onSelect={vi.fn()}
+      />
+    );
+    expect(
+      screen.getByRole("button", { name: /radio field: field_1/i })
+    ).not.toHaveAttribute("data-invalid");
+  });
+
+  it("renders the signature placeholder with an icon, not an emoji", () => {
+    const { container } = render(
+      <BuildModeFieldRenderer
+        {...baseProps}
+        field={makeField({ type: "signature" })}
+        isSelected={false}
+        onSelect={vi.fn()}
+      />
+    );
+    expect(screen.getByText("Signature")).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/\u270D/);
+    expect(container.querySelector("svg")).toBeTruthy();
+  });
+
+  it("carries data-build-field-id (not the PDF overlays' data-field-id)", () => {
+    const { container } = render(
+      <BuildModeFieldRenderer
+        {...baseProps}
+        field={makeField()}
+        isSelected={false}
+        onSelect={vi.fn()}
+      />
+    );
+    expect(container.querySelector('[data-build-field-id="field_1"]')).toBeTruthy();
+    expect(container.querySelector("[data-field-id]")).toBeNull();
   });
 });
