@@ -3908,10 +3908,11 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     useEffect(() => {
       if (!editorTour.active) setTourModeMenuOpen(false);
     }, [editorTour.active]);
-    // The sign tour may still start (or is running): it covers what the
-    // hint says, so the hint waits.
+    // The sign tour may still start here (or is running): it covers what
+    // the hint says, so the hint waits. Only in Fill & Sign, the one mode
+    // the sign tour starts in; View has no tour, so its hint shows as in 4.1.
     const signTourHoldsHint =
-      editorTour.isPending("pdf_sign") ||
+      (mode === "edit" && editorTour.isPending("pdf_sign")) ||
       editorTour.active?.tourId === "pdf_sign";
 
     // Load failed, or still loading the document or its pages.

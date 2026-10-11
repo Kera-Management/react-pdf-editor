@@ -37,7 +37,11 @@
   place of the view's first-run hint and marks it seen when it ends.
   "Show tour" in More actions replays the current mode's tour (on desktop
   the menu appears for it). Built on Ark UI's tour, styled with Chakra
-  tokens. Omitting `tours` leaves existing hosts unchanged. Spec:
+  tokens. The tour renders inside the editor (not portaled to `<body>`),
+  so it stays clickable inside a host's modal Chakra Dialog; Esc and a
+  click on its dimmed background end the tour, never the host dialog. In
+  View (no tour) the first-run hint shows as in 4.1. Omitting `tours`
+  leaves existing hosts unchanged. Spec:
   `agent-docs/specs/PDF_EDITOR_GUIDED_TOUR_SPEC.md` §3.2, §3.3, §5.
 - **Guided Prepare tour** (`build` -> `pdf_prepare`, `tours.prepare`).
   Up to 5 steps: the three modes (the real mode menu opens for this step

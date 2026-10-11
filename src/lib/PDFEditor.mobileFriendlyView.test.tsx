@@ -897,6 +897,28 @@ describe("guided sign tour on a phone (guided tour spec §3.2)", () => {
     expect(hint()).not.toBeNull();
   });
 
+  it("still shows the hint in View, where the sign tour never runs", async () => {
+    const utils = await mount({ mobileFriendlyView: true, mode: "view", tours: { sign: true } });
+    await waitFor(() => {
+      if (!reflowRoot(utils.container)?.querySelector("[data-mf-field]")) throw new Error("no reflow");
+    });
+    await settle();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(hint()).not.toBeNull();
+  });
+
+  it("marks the hint seen when the editor closes mid-tour", async () => {
+    const onTourEnd = vi.fn();
+    const { unmount } = await mountReflow({ tours: { sign: true }, onTourEnd });
+    await waitForStep("An easier-to-read version");
+    unmount();
+    expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", {
+      replay: false,
+      lastStep: 1,
+    });
+    expect(window.localStorage.getItem("rpe.mobileFriendlyHintSeen")).toBe("1");
+  });
+
   it("waits for the conversion to settle", async () => {
     let finishExtract: () => void = () => undefined;
     const held = new Promise<void>((resolve) => {

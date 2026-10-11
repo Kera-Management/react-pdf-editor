@@ -135,8 +135,9 @@ export const useEditorTour = ({
     if (active && (active.mode !== mode || blocked)) end("dismissed");
   }, [active, mode, blocked, end]);
 
-  // The editor closing mid-tour still reports the end, so the host can
-  // record it as seen.
+  // The editor closing mid-tour still ends the run like any other end: the
+  // host hears about it (and records it as seen), and the editor's own
+  // end-of-run work (the mobile friendly hint hand-off) still happens.
   useEffect(
     () => () => {
       const run = latest.current.active;
@@ -146,6 +147,7 @@ export const useEditorTour = ({
         replay: run.replay,
         lastStep: lastStepRef.current,
       });
+      latest.current.onEnded?.(run);
     },
     []
   );
