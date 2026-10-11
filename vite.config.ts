@@ -4,13 +4,15 @@ import react from "@vitejs/plugin-react-swc";
 
 // Peer dependencies (and their subpaths) stay out of the bundle; the host
 // provides them. Chakra and Emotion must be singletons so the editor reads
-// the host's ChakraProvider context and theme.
+// the host's ChakraProvider context and theme. Ark UI (the tour) is the one
+// Chakra itself depends on.
 const EXTERNAL_PACKAGES = [
   "react",
   "react-dom",
   "react-to-print",
   "pdfjs-dist",
   "pdf-lib",
+  "@ark-ui/react",
   "@chakra-ui/react",
   "@emotion/react",
   "@phosphor-icons/react",

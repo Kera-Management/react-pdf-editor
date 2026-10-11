@@ -76,6 +76,22 @@ async function switchMode(from: RegExp, to: RegExp) {
   await userEvent.click(within(menu).getByRole("menuitemradio", { name: to }));
 }
 
+/**
+ * Gives the fake document real PDF bytes: the Prepare save loads them with
+ * pdf-lib, which rejects the harness's default empty Uint8Array. Call after
+ * the suite's beforeEach has set up fakeDocRef.
+ */
+async function giveRealPdfBytes() {
+  const srcDoc = await PDFDocument.create();
+  srcDoc.addPage([200, 300]);
+  const realBytes = await srcDoc.save();
+  const doc = fakeDocRef.current as ReturnType<typeof makeFakeDoc>;
+  doc.getData = vi.fn(
+    async (): Promise<Uint8Array<ArrayBuffer>> =>
+      realBytes as Uint8Array<ArrayBuffer>
+  );
+}
+
 describe("PDFEditor unsaved-changes guard", () => {
   beforeEach(() => {
     Element.prototype.scrollIntoView = vi.fn();
@@ -436,5 +452,306 @@ describe("PDFEditor Save and continue actually saves", () => {
       ).toBeInTheDocument()
     );
     expect(queryByRole("button", { name: /^fill & sign$/i })).toBeNull();
+  });
+});
+
+describe("PDFEditor Prepare -> View unsaved-fields guard", () => {
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
+      function (this: HTMLCanvasElement) {
+        return {
+          ownerCanvasId: this.id,
+          scale: vi.fn(),
+        } as unknown as CanvasRenderingContext2D;
+      }
+    );
+    pageRenderMock.mockReset();
+    pageRenderMock.mockImplementation(() => ({
+      promise: Promise.resolve(),
+      cancel: vi.fn(),
+    }));
+    const page = makeFakePage();
+    fakeDocRef.current = makeFakeDoc(page);
+    getDocumentMock.mockReset();
+    getDocumentMock.mockImplementation(() => ({
+      promise: Promise.resolve(fakeDocRef.current),
+    }));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // Fillable overlays carry data-field-id; Prepare's placed fields carry
+  // data-build-field-id instead.
+  const idsOf = (container: HTMLElement, attr: string) =>
+    Array.from(container.querySelectorAll<HTMLElement>(`[${attr}]`)).map(
+      (el) => el.getAttribute(attr)
+    );
+
+  it("blocks Prepare -> View while prepared fields are unsaved, then lands in View with the notice", async () => {
+    const { container, getByRole, getByText } = renderWithChakra(
+      <PDFEditor
+        src="fake://document.pdf"
+        mode="build"
+        allowedModes={["build", "edit", "view"]}
+      />
+    );
+
+    const addText = await waitFor(() =>
+      getByRole("button", { name: /add text field/i })
+    );
+    const before = idsOf(container, "data-build-field-id").length;
+    fireEvent.click(addText);
+    // The new field is on the page in Prepare.
+    await waitFor(() =>
+      expect(idsOf(container, "data-build-field-id")).toHaveLength(before + 1)
+    );
+
+    await switchMode(/prepare/i, /^view/i);
+
+    // Before the fix this switch went straight to View: the new field was
+    // simply missing there, with neither a dialog nor a notice.
+    expect(
+      await screen.findByRole("heading", { name: "Save your fields first?" })
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue without saving" })
+    );
+    // Lands on the mode the user picked (View), not Fill & Sign.
+    await waitFor(() =>
+      expect(getByRole("button", { name: /^view$/i })).toBeInTheDocument()
+    );
+    // The unsaved field is still missing in View (fields render from the
+    // PDF), but now the in-canvas notice says why.
+    await waitFor(() =>
+      expect(idsOf(container, "data-field-id")).toEqual(["field_1"])
+    );
+    expect(
+      getByText(/Fields added in Prepare are not saved yet, so they cannot be shown here/)
+    ).toBeInTheDocument();
+  });
+
+  it("Save and continue saves, then lands in View (the mode picked), not Fill & Sign", async () => {
+    await giveRealPdfBytes();
+    const onBuildSave = vi.fn();
+    const { getByRole, queryByText } = renderWithChakra(
+      <PDFEditor
+        src="fake://document.pdf"
+        mode="build"
+        allowedModes={["build", "edit", "view"]}
+        onBuildSave={onBuildSave}
+      />
+    );
+
+    fireEvent.click(
+      await waitFor(() => getByRole("button", { name: /add text field/i }))
+    );
+    await switchMode(/prepare/i, /^view/i);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Save and continue" })
+    );
+
+    await waitFor(() => expect(onBuildSave).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(getByRole("button", { name: /^view$/i })).toBeInTheDocument()
+    );
+    // Saved: nothing is pending, so no notice.
+    expect(queryByText(/Fields added in Prepare are not saved yet/)).toBeNull();
+  });
+
+  it("Fill & Sign keeps the 'filled' wording; View says 'shown'", async () => {
+    const { getByRole, getByText } = renderWithChakra(
+      <PDFEditor
+        src="fake://document.pdf"
+        mode="build"
+        allowedModes={["build", "edit", "view"]}
+      />
+    );
+
+    fireEvent.click(
+      await waitFor(() => getByRole("button", { name: /add text field/i }))
+    );
+    await switchMode(/prepare/i, /fill & sign/i);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue without saving" })
+    );
+    await waitFor(() =>
+      expect(getByRole("button", { name: /fill & sign/i })).toBeInTheDocument()
+    );
+    expect(
+      getByText(/not saved yet, so they cannot be filled here/)
+    ).toBeInTheDocument();
+
+    // Fill & Sign -> View is not guarded (only leaving Prepare is); the
+    // notice follows along with View's wording.
+    await switchMode(/fill & sign/i, /^view/i);
+    expect(screen.queryByRole("heading", { name: "Save your fields first?" }))
+      .toBeNull();
+    await waitFor(() =>
+      expect(
+        getByText(/not saved yet, so they cannot be shown here/)
+      ).toBeInTheDocument()
+    );
+  });
+});
+
+describe("PDFEditor mode-menu unsaved-fields note", () => {
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
+      function (this: HTMLCanvasElement) {
+        return {
+          ownerCanvasId: this.id,
+          scale: vi.fn(),
+        } as unknown as CanvasRenderingContext2D;
+      }
+    );
+    pageRenderMock.mockReset();
+    pageRenderMock.mockImplementation(() => ({
+      promise: Promise.resolve(),
+      cancel: vi.fn(),
+    }));
+    const page = makeFakePage();
+    fakeDocRef.current = makeFakeDoc(page);
+    getDocumentMock.mockReset();
+    getDocumentMock.mockImplementation(() => ({
+      promise: Promise.resolve(fakeDocRef.current),
+    }));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const NOTE = /Your new fields aren't saved yet/;
+
+  const openModeMenu = async (current: RegExp) => {
+    await userEvent.click(screen.getByRole("button", { name: current }));
+    return screen.findByRole("menu");
+  };
+
+  it("is absent while nothing is unsaved", async () => {
+    const { getByRole } = renderWithChakra(
+      <PDFEditor
+        src="fake://document.pdf"
+        mode="build"
+        allowedModes={["build", "edit", "view"]}
+      />
+    );
+    await waitFor(() => getByRole("button", { name: /add text field/i }));
+
+    const menu = await openModeMenu(/prepare/i);
+    expect(within(menu).queryByText(NOTE)).toBeNull();
+    expect(
+      within(menu).queryByRole("menuitem", { name: /save/i })
+    ).toBeNull();
+  });
+
+  it("shows while fields are unsaved; its Save runs the Prepare save, keeps the menu open and clears the note", async () => {
+    await giveRealPdfBytes();
+    const onBuildSave = vi.fn();
+    const { getByRole } = renderWithChakra(
+      <PDFEditor
+        src="fake://document.pdf"
+        mode="build"
+        allowedModes={["build", "edit", "view"]}
+        onBuildSave={onBuildSave}
+      />
+    );
+    fireEvent.click(
+      await waitFor(() => getByRole("button", { name: /add text field/i }))
+    );
+
+    const menu = await openModeMenu(/prepare/i);
+    expect(within(menu).getByText(NOTE)).toBeInTheDocument();
+    await userEvent.click(
+      within(menu).getByRole("menuitem", { name: /save/i })
+    );
+
+    await waitFor(() => expect(onBuildSave).toHaveBeenCalledTimes(1));
+    // Menu still open, note gone, so the user can pick a mode right away.
+    await waitFor(() =>
+      expect(screen.queryByText(NOTE)).not.toBeInTheDocument()
+    );
+    const stillOpen = screen.getByRole("menu");
+    await userEvent.click(
+      within(stillOpen).getByRole("menuitemradio", { name: /^view/i })
+    );
+    // Saved, so no dialog: straight to View.
+    expect(
+      screen.queryByRole("heading", { name: "Save your fields first?" })
+    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(getByRole("button", { name: /^view$/i })).toBeInTheDocument()
+    );
+  });
+
+  it.each([
+    ["Fill & Sign", /fill & sign/i],
+    ["View", /^view/i],
+  ])(
+    "the guard dialog still fires for Prepare -> %s after the note was shown and ignored",
+    async (_label, target) => {
+      const { getByRole } = renderWithChakra(
+        <PDFEditor
+          src="fake://document.pdf"
+          mode="build"
+          allowedModes={["build", "edit", "view"]}
+        />
+      );
+      fireEvent.click(
+        await waitFor(() => getByRole("button", { name: /add text field/i }))
+      );
+
+      // The note was shown...
+      const menu = await openModeMenu(/prepare/i);
+      expect(within(menu).getByText(NOTE)).toBeInTheDocument();
+      // ...and ignored: the user picks a mode anyway.
+      await userEvent.click(
+        within(menu).getByRole("menuitemradio", { name: target })
+      );
+      expect(
+        await screen.findByRole("heading", { name: "Save your fields first?" })
+      ).toBeInTheDocument();
+
+      // And again on a second attempt: seeing the note (or the dialog)
+      // once never switches the guard off.
+      fireEvent.click(screen.getByRole("button", { name: "Stay in Prepare" }));
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("heading", { name: "Save your fields first?" })
+        ).not.toBeInTheDocument()
+      );
+      await switchMode(/prepare/i, target);
+      expect(
+        await screen.findByRole("heading", { name: "Save your fields first?" })
+      ).toBeInTheDocument();
+    }
+  );
+
+  it("is not shown outside Prepare, where the header Save isn't the Prepare save", async () => {
+    const { getByRole } = renderWithChakra(
+      <PDFEditor
+        src="fake://document.pdf"
+        mode="build"
+        allowedModes={["build", "edit", "view"]}
+      />
+    );
+    fireEvent.click(
+      await waitFor(() => getByRole("button", { name: /add text field/i }))
+    );
+    await switchMode(/prepare/i, /fill & sign/i);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue without saving" })
+    );
+    await waitFor(() =>
+      expect(getByRole("button", { name: /fill & sign/i })).toBeInTheDocument()
+    );
+
+    const menu = await openModeMenu(/fill & sign/i);
+    expect(within(menu).queryByText(NOTE)).toBeNull();
   });
 });

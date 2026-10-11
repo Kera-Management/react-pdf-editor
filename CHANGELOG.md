@@ -1,5 +1,84 @@
 # Changelog
 
+## 4.2.0
+
+### Fixed
+
+- **Prepare -> View with unsaved fields is now guarded.** The "Save your
+  fields first?" dialog guarded only Prepare -> Fill & Sign; switching to
+  View left newly placed fields missing with no explanation. Any switch out
+  of Prepare while prepared fields are unsaved now opens the dialog, and
+  "Save and continue" / "Continue without saving" land on the mode the user
+  picked. The dialog copy is generic ("...so they won't appear in Fill &
+  Sign or View..."). The dialog stays the permanent guard: it fires every
+  time, whatever the user has seen before. Spec:
+  `agent-docs/specs/PDF_EDITOR_GUIDED_TOUR_SPEC.md` §6.
+- The in-canvas "Fields added in Prepare are not saved yet" notice now also
+  shows in View ("...cannot be shown here"), still first in the banner
+  stack, above the Mobile friendly / Original toggle.
+
+### Added
+
+- **Unsaved-fields note in the mode menu** (Prepare only). While prepared
+  fields are unsaved, the mode menu opens with a warning, "Your new fields
+  aren't saved yet. They won't appear in Fill & Sign or View until you
+  save.", and a Save action that runs the Prepare save and keeps the menu
+  open. It warns before a mode is picked; the dialog above still guards the
+  switch itself. Spec §5.4. `HeaderBar`: `hasUnsavedBuildChanges` prop
+  (internal).
+- **Guided sign tour** (minor: new props only). `tours?: { prepare?;
+  sign? }` says which tours the person hasn't seen; `onTourEnd(tourId,
+  reason, { replay, lastStep })` reports each end so the host can record
+  it. The library picks the tour from the mode alone (`edit` -> `pdf_sign`)
+  and decides when it runs: once per mounted editor, after the document
+  has rendered and the mobile friendly conversion has settled, never over
+  the review, a dialog or a drawer. Two variants: the original layout (4
+  steps) and phones in the mobile friendly view (3 steps), which takes the
+  place of the view's first-run hint and marks it seen when it ends.
+  "Show tour" in More actions replays the current mode's tour (on desktop
+  the menu appears for it). Built on Ark UI's tour, styled with Chakra
+  tokens. The tour renders inside the editor (not portaled to `<body>`),
+  so it stays clickable inside a host's modal Chakra Dialog; Esc and a
+  click on its dimmed background end the tour, never the host dialog. In
+  View (no tour) the first-run hint shows as in 4.1. Omitting `tours`
+  leaves existing hosts unchanged. Spec:
+  `agent-docs/specs/PDF_EDITOR_GUIDED_TOUR_SPEC.md` §3.2, §3.3, §5.
+- **Guided Prepare tour** (`build` -> `pdf_prepare`, `tours.prepare`).
+  Up to 5 steps: the three modes (the real mode menu opens for this step
+  and closes when it ends; the copy names the current mode and only the
+  modes offered), adding fields (Fields panel on desktop, Add field pill
+  on phones), choosing who fills each field, saving before switching, then
+  Fill & Sign. The mode steps appear only with more than one mode, the
+  last only when Fill & Sign is offered, and the parties step only when
+  the parties panel is showing. Same start and end rules as the sign
+  tour; "Show tour" replays it in Prepare. It never bypasses the "Save
+  your fields first?" dialog, completed or skipped. Spec §3.1.
+  `HeaderBar`: `modeMenuOpen` prop (internal) holds the mode menu open.
+- `data-pdfe-tour` anchors on the mode menu (button and open menu), Save, Decline, Progress
+  (rail section and header button), field palette, mobile Add field,
+  parties (rail section and mobile drawer), the document area and the
+  guided bar's Finish. Spec §5.2.
+- New peer dependency `@ark-ui/react` `^5.37.2` (the version Chakra
+  3.36 depends on; hosts on Chakra already have it).
+- **Tour intro card.** Every tour opens on a centred card ("Quick tour",
+  a title, one line on what it covers, Start tour / Skip) before anything
+  is highlighted. "1 of N" counts only the steps after it, step 1 has no
+  Back, and `meta.lastStep` is 0 when a run ends on the intro.
+- **The editor is blocked while a tour runs.** Presses on the highlighted
+  control do nothing (elsewhere they end the tour, as on the backdrop),
+  and mode switches are ignored, so a mid-tour switch can no longer start
+  the other mode's tour.
+- **No second automatic tour after a skip.** Once a tour ends as
+  dismissed, no other tour starts on its own in that mounted editor;
+  "Show tour" still replays. Finishing a tour (Done) still lets the next
+  mode's tour start.
+
+### Fixed (tour)
+
+- The tour popover could render under the dimmed backdrop (Ark copies the
+  content's z-index onto the positioner, and the content had none).
+- Spotlight corners are rounded (16px) to follow the cards they frame.
+
 ## 4.1.0
 
 ### Added

@@ -13,3 +13,9 @@ export type {
   PartiesSelection,
   PartiesConfig,
 } from "./lib/components/Panels/PartiesPanel/types";
+export type {
+  EditorTourEndMeta,
+  EditorTourEndReason,
+  EditorTourId,
+  PDFEditorTours,
+} from "./lib/tour/types";

@@ -103,6 +103,10 @@ describe("ConfirmDialogs", () => {
 
     const dialog = screen.getByRole("alertdialog");
     expect(dialog).toHaveAccessibleName("Save your fields first?");
+    // Generic copy: the guard covers Prepare -> Fill & Sign AND -> View.
+    expect(dialog).toHaveTextContent(
+      "The fields you added in Prepare aren't saved yet, so they won't appear in Fill & Sign or View."
+    );
     expect(footerButtonNames(dialog)).toEqual([
       "Stay in Prepare",
       "Continue without saving",

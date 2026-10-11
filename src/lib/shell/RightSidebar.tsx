@@ -99,7 +99,13 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
           {/* Progress (edit mode). ProgressPanel renders its own
               "Progress" header with the count badge. */}
           {progress && (
-            <Stack as="section" aria-label="Progress" gap={4} p={4}>
+            <Stack
+              as="section"
+              aria-label="Progress"
+              gap={4}
+              p={4}
+              data-pdfe-tour="progress"
+            >
               <ProgressPanel {...progress} />
             </Stack>
           )}
@@ -123,6 +129,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
           as="section"
           aria-labelledby={partiesTitleId}
           data-pdfe-scroll="parties"
+          data-pdfe-tour="parties"
           gap={0}
           flex="1"
           minH={0}

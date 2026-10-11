@@ -15,7 +15,10 @@ export interface ConfirmDialogsProps {
     onDiscard: () => void;
     onSave: () => void;
   };
-  /** Prepare -> Fill & Sign guard while prepared fields are unsaved. */
+  /**
+   * Leaving Prepare (for Fill & Sign or View) while prepared fields are
+   * unsaved.
+   */
   prepare: {
     open: boolean;
     isSaving: boolean;
@@ -155,13 +158,13 @@ export const ConfirmDialogs: React.FC<ConfirmDialogsProps> = ({
       )}
     </ConfirmDialog>
 
-    {/* Prepare -> Fill & Sign guard: blocking, because the passive
-        in-canvas notice alone is missable, and unsaved prepared fields
-        being invisible in Fill & Sign reads as data loss. */}
+    {/* Leaving-Prepare guard (to Fill & Sign or View): blocking, because
+        the passive in-canvas notice alone is missable, and unsaved
+        prepared fields being invisible there reads as data loss. */}
     <ConfirmDialog
       open={prepare.open}
       title="Save your fields first?"
-      description="The fields you added in Prepare are not saved yet, so they cannot be filled. Save them now, or continue without saving and they will stay hidden until you save in Prepare."
+      description="The fields you added in Prepare aren't saved yet, so they won't appear in Fill & Sign or View. Save them now, or continue without saving and they'll stay hidden until you save in Prepare."
       busy={prepare.isSaving}
       onCancel={prepare.onStay}
       // sm, not xs: three full-word actions.

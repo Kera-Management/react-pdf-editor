@@ -306,6 +306,59 @@ describe("opt-in, layouts and modes (S4, S5)", () => {
   });
 });
 
+describe("unsaved Prepare fields notice (mobile friendly view spec §8.1)", () => {
+  it.each([
+    ["Fill & Sign", /fill & sign/i, "filled"],
+    ["View", /^view/i, "shown"],
+  ])(
+    "in %s it stays at the top of the banner stack, above the toggle",
+    async (_label, target, verb) => {
+      // Fields are placed on desktop (the palette), then the window
+      // narrows to a phone, where the mode opens mobile friendly.
+      setWidth(1280);
+      const user = userEvent.setup();
+      const { container, getByRole } = renderWithChakra(
+        <PDFEditor
+          src="fake://document.pdf"
+          mode="build"
+          allowedModes={["build", "edit", "view"]}
+          mobileFriendlyView
+        />
+      );
+      await user.click(
+        await waitFor(() => getByRole("button", { name: /add text field/i }))
+      );
+      await user.click(screen.getByRole("button", { name: /prepare/i }));
+      await user.click(
+        within(await screen.findByRole("menu")).getByRole("menuitemradio", {
+          name: target,
+        })
+      );
+      await user.click(
+        await screen.findByRole("button", { name: "Continue without saving" })
+      );
+
+      act(() => {
+        setWidth(390);
+        window.dispatchEvent(new Event("resize"));
+      });
+      await waitFor(() => {
+        if (!reflowRoot(container)?.querySelector("[data-mf-field]")) {
+          throw new Error("no reflow yet");
+        }
+      });
+
+      const notice = screen.getByText(
+        new RegExp(`not saved yet, so they cannot be ${verb} here`)
+      );
+      expect(
+        notice.compareDocumentPosition(toggle()) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+    }
+  );
+});
+
 describe("fallback (S2)", () => {
   it("keeps the original with the notice and a disabled segment", async () => {
     convertDocumentMock.mockImplementation(() => fallbackResult());
@@ -760,5 +813,208 @@ describe("review fixes", () => {
       segment("Mobile friendly").closest("label")!.click();
     });
     expect(await screen.findByText(notice)).toBeInTheDocument();
+  });
+});
+
+describe("guided sign tour on a phone (guided tour spec §3.2)", () => {
+  const tourDialog = () => screen.findByRole("alertdialog");
+  const stepTitle = async () =>
+    within(await tourDialog()).getByRole("heading").textContent;
+  const waitForStep = (title: string) =>
+    waitFor(async () => expect(await stepTitle()).toBe(title));
+  const clickTour = async (
+    user: ReturnType<typeof userEvent.setup>,
+    name: string
+  ) => user.click(within(await tourDialog()).getByRole("button", { name }));
+  const popoverText = () =>
+    document.querySelector('[data-part="tour-popover"]')?.textContent ?? "";
+  const highlighted = () =>
+    document.querySelector<HTMLElement>("[data-tour-highlighted]");
+  const hint = () => screen.queryByText(/Showing a mobile friendly version/);
+  const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+  // Every run opens on the intro card; Start tour (found by its text: Ark
+  // labels every "next" action Next) moves on to the first step.
+  const startButton = async () =>
+    within(await tourDialog()).getByText("Start tour").closest("button")!;
+  const startTour = async (firstStep: string) => {
+    await waitForStep("Quick tour: signing");
+    await act(() => new Promise((resolve) => setTimeout(resolve, 150)));
+    await userEvent.setup().click(await startButton());
+    await waitForStep(firstStep);
+  };
+
+  it("uses Variant B in the mobile friendly view, in place of the first-run hint", async () => {
+    const user = userEvent.setup();
+    const onTourEnd = vi.fn();
+    await mountReflow({ tours: { sign: true }, onTourEnd, saveLabel: "Submit signature" });
+    await waitForStep("Quick tour: signing");
+    expect(popoverText()).toContain(
+      "Three quick tips on finding your fields, signing and submitting."
+    );
+    // The intro takes the hint's place too.
+    expect(hint()).toBeNull();
+    await startTour("An easier-to-read version");
+    expect(popoverText()).toContain("1 of 3");
+    expect(popoverText()).toContain(
+      "This is your document reformatted for your phone. Tap Original anytime to see the exact layout."
+    );
+    expect(highlighted()).toHaveAttribute("data-part", "mobile-view-toggle");
+    expect(hint()).toBeNull();
+
+    await clickTour(user, "Next");
+    await waitForStep("Go field by field");
+    expect(popoverText()).toContain(
+      "Next takes you to each field you still need to fill. Signature fields open a pad to sign."
+    );
+    expect(highlighted()).toHaveAttribute("data-part", "mobile-guided-bar");
+
+    await clickTour(user, "Next");
+    await waitForStep("Review, then submit");
+    expect(popoverText()).toContain(
+      "Finish shows the original with your entries so you can check them, then select Submit signature."
+    );
+    expect(highlighted()).toHaveAttribute("data-pdfe-tour", "finish");
+    expect(hint()).toBeNull();
+
+    await clickTour(user, "Done");
+    await waitFor(() => expect(onTourEnd).toHaveBeenCalledTimes(1));
+    expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "completed", {
+      replay: false,
+      lastStep: 3,
+    });
+    // The hint never follows the tour, on this device or the next mount.
+    expect(window.localStorage.getItem("rpe.mobileFriendlyHintSeen")).toBe("1");
+    await settle();
+    expect(hint()).toBeNull();
+  });
+
+  it("marks the hint seen when the tour is skipped too", async () => {
+    const user = userEvent.setup();
+    await mountReflow({ tours: { sign: true } });
+    await startTour("An easier-to-read version");
+    await clickTour(user, "Skip");
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(window.localStorage.getItem("rpe.mobileFriendlyHintSeen")).toBe("1");
+    expect(hint()).toBeNull();
+  });
+
+  it("leaves the hint as it was when the tour isn't eligible", async () => {
+    await mountReflow({ tours: { sign: false } });
+    await settle();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(hint()).not.toBeNull();
+    expect(window.localStorage.getItem("rpe.mobileFriendlyHintSeen")).toBeNull();
+  });
+
+  it("leaves the hint as it was when `tours` is omitted", async () => {
+    await mountReflow();
+    await settle();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(hint()).not.toBeNull();
+  });
+
+  it("still shows the hint in View, where the sign tour never runs", async () => {
+    const utils = await mount({ mobileFriendlyView: true, mode: "view", tours: { sign: true } });
+    await waitFor(() => {
+      if (!reflowRoot(utils.container)?.querySelector("[data-mf-field]")) throw new Error("no reflow");
+    });
+    await settle();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(hint()).not.toBeNull();
+  });
+
+  it("marks the hint seen when the editor closes mid-tour", async () => {
+    const onTourEnd = vi.fn();
+    const { unmount } = await mountReflow({ tours: { sign: true }, onTourEnd });
+    await startTour("An easier-to-read version");
+    unmount();
+    expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", {
+      replay: false,
+      lastStep: 1,
+    });
+    expect(window.localStorage.getItem("rpe.mobileFriendlyHintSeen")).toBe("1");
+  });
+
+  it("waits for the conversion to settle", async () => {
+    let finishExtract: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      finishExtract = resolve;
+    });
+    extractPageMock.mockImplementation(
+      async (_page: unknown, pageIndex: number, widgets: unknown[]) => {
+        await held;
+        return { pageIndex, width: 600, height: 800, rotation: 0, items: [], widgets, structure: null };
+      }
+    );
+    const { container } = await mount({ mobileFriendlyView: true, tours: { sign: true } });
+    await settle();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    finishExtract();
+    await waitFor(() => expect(reflowControl(container, "f_phone")).not.toBeNull());
+    await startTour("An easier-to-read version");
+  });
+
+  it("uses Variant A on a phone whose document fell back to the original", async () => {
+    convertDocumentMock.mockImplementation(() => fallbackResult());
+    vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    await mount({ mobileFriendlyView: true, tours: { sign: true } });
+    await screen.findByText("This document can't be shown in mobile-friendly view.");
+    await startTour("Your fields are highlighted");
+    // The fallback notice stays as it is.
+    expect(
+      screen.getByText("This document can't be shown in mobile-friendly view.")
+    ).toBeInTheDocument();
+  });
+
+  it("never starts during the review, and starts once back in the view", async () => {
+    const user = userEvent.setup();
+    const { rerender } = await mountReflow();
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+    const review = screen.getByRole("region", { name: "Review the original document" });
+    rerender(
+      <PDFEditor src="fake://document.pdf" mode="edit" mobileFriendlyView tours={{ sign: true }} />
+    );
+    await settle();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await user.click(within(review).getByRole("button", { name: /Back to edit/ }));
+    await startTour("An easier-to-read version");
+  });
+
+  it("ends as dismissed when the view is toggled mid-tour", async () => {
+    const user = userEvent.setup();
+    const onTourEnd = vi.fn();
+    const { container } = await mountReflow({ tours: { sign: true }, onTourEnd });
+    await startTour("An easier-to-read version");
+    await user.click(segment("Original"));
+    await waitFor(() => expect(onTourEnd).toHaveBeenCalledTimes(1));
+    expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", {
+      replay: false,
+      lastStep: 1,
+    });
+    expect(reflowRoot(container)).toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("ends as dismissed when Finish is tapped mid-tour", async () => {
+    const user = userEvent.setup();
+    const onTourEnd = vi.fn();
+    await mountReflow({ tours: { sign: true }, onTourEnd });
+    await startTour("An easier-to-read version");
+    await clickTour(user, "Next");
+    await clickTour(user, "Next");
+    await waitForStep("Review, then submit");
+    await user.click(
+      within(screen.getByRole("region", { name: "Guided signing" })).getByRole("button", {
+        name: "Finish",
+      })
+    );
+    await waitFor(() => expect(onTourEnd).toHaveBeenCalledTimes(1));
+    expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", {
+      replay: false,
+      lastStep: 3,
+    });
+    expect(
+      screen.getByRole("region", { name: "Review the original document" })
+    ).toBeInTheDocument();
   });
 });

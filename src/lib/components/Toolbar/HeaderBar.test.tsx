@@ -184,6 +184,95 @@ describe("HeaderBar: desktop", () => {
     expect(onModeChange).toHaveBeenCalledWith("build");
   });
 
+  it("mode menu: no unsaved-fields note unless hasUnsavedBuildChanges", async () => {
+    renderHeader({
+      layout: "desktop",
+      mode: "build",
+      allowedModes: ["build", "edit", "view"],
+    });
+    await userEvent.click(screen.getByRole("button", { name: /prepare/i }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).queryByText(/aren't saved yet/)).toBeNull();
+    expect(within(menu).queryByRole("menuitem")).toBeNull();
+  });
+
+  it.each(["desktop", "mobile"] as const)(
+    "mode menu (%s): the unsaved-fields note's Save calls onSave and keeps the menu open",
+    async (layout) => {
+      const onSave = vi.fn();
+      const onModeChange = vi.fn();
+      renderHeader({
+        layout,
+        mode: "build",
+        allowedModes: ["build", "edit", "view"],
+        hasUnsavedBuildChanges: true,
+        onSave,
+        onModeChange,
+      });
+      await userEvent.click(screen.getByRole("button", { name: /prepare/i }));
+      const menu = await screen.findByRole("menu");
+      expect(
+        within(menu).getByText(
+          "Your new fields aren't saved yet. They won't appear in Fill & Sign or View until you save."
+        )
+      ).toBeInTheDocument();
+
+      // The note sits above the mode cards.
+      const save = within(menu).getByRole("menuitem", { name: "Save" });
+      const firstMode = within(menu).getAllByRole("menuitemradio")[0];
+      expect(
+        save.compareDocumentPosition(firstMode) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+
+      await userEvent.click(save);
+      expect(onSave).toHaveBeenCalledTimes(1);
+      expect(onModeChange).not.toHaveBeenCalled();
+      expect(screen.getByRole("menu")).toBeVisible();
+    }
+  );
+
+  it("mode menu: Enter on the note's Save saves rather than picking a mode", async () => {
+    const onSave = vi.fn();
+    const onModeChange = vi.fn();
+    renderHeader({
+      layout: "desktop",
+      mode: "build",
+      allowedModes: ["build", "edit", "view"],
+      hasUnsavedBuildChanges: true,
+      onSave,
+      onModeChange,
+    });
+    const trigger = screen.getByRole("button", { name: /prepare/i });
+    trigger.focus();
+    // Keyboard open highlights the first item: the note's Save.
+    await userEvent.keyboard("{ArrowDown}");
+    const menu = await screen.findByRole("menu");
+    await waitFor(() =>
+      expect(
+        within(menu).getByRole("menuitem", { name: "Save" })
+      ).toHaveAttribute("data-highlighted")
+    );
+    await userEvent.keyboard("{Enter}");
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onModeChange).not.toHaveBeenCalled();
+  });
+
+  it("mode menu: the note's Save is disabled while saving", async () => {
+    renderHeader({
+      layout: "desktop",
+      mode: "build",
+      allowedModes: ["build", "edit"],
+      hasUnsavedBuildChanges: true,
+      isSaving: true,
+    });
+    await userEvent.click(screen.getByRole("button", { name: /prepare/i }));
+    const menu = await screen.findByRole("menu");
+    expect(
+      within(menu).getByRole("menuitem", { name: "Saving" })
+    ).toHaveAttribute("aria-disabled", "true");
+  });
+
   it("Save: dirty dot, aria-label, live region and loading state", () => {
     const { rerender } = renderHeader({ layout: "desktop", isDirty: true });
     expect(
@@ -466,4 +555,63 @@ describe("HeaderBar: tablet", () => {
       within(menu).queryByRole("menuitem", { name: "Fit to width" })
     ).toBeNull();
   });
+});
+
+describe("HeaderBar: Show tour (guided tour spec §3.3)", () => {
+  it.each(["desktop", "tablet", "mobile"] as const)(
+    "%s: offers Show tour in More actions when given onShowTour",
+    async (layout) => {
+      const user = userEvent.setup();
+      const onShowTour = vi.fn();
+      renderHeader({ layout, onShowTour });
+      await user.click(screen.getByRole("button", { name: "More actions" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Show tour" }));
+      expect(onShowTour).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("desktop keeps no More actions menu without it", () => {
+    renderHeader({ layout: "desktop" });
+    expect(screen.queryByRole("button", { name: "More actions" })).toBeNull();
+  });
+
+  it("marks the tour anchors", () => {
+    renderHeader({
+      layout: "tablet",
+      allowedModes: ["edit", "view"],
+      onDecline: vi.fn(),
+      progressSummary: { completed: 0, total: 2 },
+      onOpenProgress: vi.fn(),
+    });
+    const anchor = (name: string) =>
+      document.querySelector(`[data-pdfe-tour="${name}"]`);
+    expect(anchor("mode-menu")).toHaveAccessibleName(/fill & sign/i);
+    expect(anchor("save")).toHaveAccessibleName("Save");
+    expect(anchor("decline")).toHaveAccessibleName("I can't sign this");
+    expect(anchor("progress")).toHaveTextContent("Progress");
+  });
+
+  it.each(["desktop", "mobile"] as const)(
+    "%s: modeMenuOpen holds the mode menu open, then hands it back closed",
+    async (layout) => {
+      const user = userEvent.setup();
+      const props: Partial<HeaderBarProps> = {
+        layout,
+        mode: "build",
+        allowedModes: ["build", "edit", "view"],
+      };
+      const { rerender } = renderHeader({ ...props, modeMenuOpen: true });
+      const menu = await screen.findByRole("menu");
+      expect(menu).toHaveAttribute("data-pdfe-tour", "mode-menu-content");
+      expect(within(menu).getAllByRole("menuitemradio")).toHaveLength(3);
+      // A click elsewhere doesn't close it while it is held.
+      await user.click(document.body);
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+      rerender(<HeaderBar {...baseProps} {...props} modeMenuOpen={false} />);
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+      // The user's own open/close still works afterwards.
+      await user.click(screen.getByRole("button", { name: /prepare/i }));
+      expect(await screen.findByRole("menu")).toBeInTheDocument();
+    }
+  );
 });
