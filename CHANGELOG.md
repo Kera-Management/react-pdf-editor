@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (planned 4.1.0)
+## 4.1.0
 
 ### Added
 
