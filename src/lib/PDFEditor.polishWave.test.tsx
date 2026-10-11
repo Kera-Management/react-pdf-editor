@@ -369,10 +369,13 @@ describe("PDFEditor signature session cache", () => {
     ).not.toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("tab", { name: "Type" }));
-    const adoptButton = await waitFor(() =>
-      screen.getByRole("button", { name: "Adopt" })
-    );
-    expect(adoptButton).toBeEnabled(); // pre-filled from signerName
+    // Pre-filled from signerName. The typed signature is drawn after the
+    // font loads (async), so Adopt turns on a moment after the tab opens.
+    const adoptButton = await waitFor(() => {
+      const button = screen.getByRole("button", { name: "Adopt" });
+      expect(button).toBeEnabled();
+      return button;
+    });
     fireEvent.click(adoptButton);
 
     await waitFor(() =>
