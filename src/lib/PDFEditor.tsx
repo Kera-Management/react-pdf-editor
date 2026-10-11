@@ -2935,9 +2935,17 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // thinking their fields vanished (user feedback). The dialog can also
     // just do the save. It fires every time, whatever the user has seen
     // before (tour, mode-menu note): it is the permanent guard.
+    // Set once the tour hook below has run (it needs state declared later).
+    const tourActiveRef = useRef(false);
     const handleModeChange = useCallback(
       (newMode: PDFEditorMode) => {
         if (!allowedModes.includes(newMode)) {
+          return;
+        }
+        // No mode switch while a tour runs (a keyboard pick in the mode
+        // menu the Prepare tour holds open): it would end this tour and
+        // start the other mode's. The tour's layer blocks pointer picks.
+        if (tourActiveRef.current) {
           return;
         }
         if (mode === "build" && newMode !== "build" && hasUnsavedBuildChanges) {
@@ -3903,6 +3911,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         }
       },
     });
+    tourActiveRef.current = editorTour.active !== null;
     // However a run ends, the mode menu goes back to the user. (Ark closes
     // it through the step's cleanup; this covers the tour unmounting.)
     useEffect(() => {

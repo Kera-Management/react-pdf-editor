@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Dialog, Portal } from "@chakra-ui/react";
 import { renderWithChakra } from "./testUtils";
@@ -56,9 +62,20 @@ const base = {
   type: "text",
 };
 const FIELDS = {
-  landlord_name: [{ ...base, id: "f_landlord", name: "landlord_name", rect: [10, 750, 200, 770] }],
-  tenant_name: [{ ...base, id: "f_name", name: "tenant_name", rect: [10, 700, 200, 720] }],
-  tenant_sig: [{ ...base, id: "f_sig", name: "tenant_sig", rect: [10, 100, 200, 140] }],
+  landlord_name: [
+    {
+      ...base,
+      id: "f_landlord",
+      name: "landlord_name",
+      rect: [10, 750, 200, 770],
+    },
+  ],
+  tenant_name: [
+    { ...base, id: "f_name", name: "tenant_name", rect: [10, 700, 200, 720] },
+  ],
+  tenant_sig: [
+    { ...base, id: "f_sig", name: "tenant_sig", rect: [10, 100, 200, 140] },
+  ],
 };
 
 function makeFakePage() {
@@ -76,7 +93,10 @@ function makeFakePage() {
 }
 
 const setWidth = (width: number) =>
-  Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    value: width,
+  });
 const originalWidth = window.innerWidth;
 
 beforeEach(() => {
@@ -84,12 +104,13 @@ beforeEach(() => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
     () =>
       new Proxy({} as Record<string, unknown>, {
-        get: (target, key: string) => (key in target ? target[key] : (target[key] = vi.fn())),
+        get: (target, key: string) =>
+          key in target ? target[key] : (target[key] = vi.fn()),
         set: (target, key: string, value) => {
           target[key] = value;
           return true;
         },
-      }) as unknown as CanvasRenderingContext2D
+      }) as unknown as CanvasRenderingContext2D,
   );
   const page = makeFakePage();
   fakeDocRef.current = {
@@ -101,7 +122,9 @@ beforeEach(() => {
     destroy: vi.fn(),
   };
   getDocumentMock.mockReset();
-  getDocumentMock.mockImplementation(() => ({ promise: Promise.resolve(fakeDocRef.current) }));
+  getDocumentMock.mockImplementation(() => ({
+    promise: Promise.resolve(fakeDocRef.current),
+  }));
   metadataRef.current = {
     version: 3,
     fieldAssignments: {},
@@ -137,7 +160,12 @@ const preparer: Partial<PDFEditorProps> = {
 
 async function mount(props: Partial<PDFEditorProps> = {}) {
   const utils = renderWithChakra(
-    <PDFEditor src="fake://document.pdf" mode="build" {...preparer} {...props} />
+    <PDFEditor
+      src="fake://document.pdf"
+      mode="build"
+      {...preparer}
+      {...props}
+    />,
   );
   // Prepare is ready once the page is up (it renders no fill overlays).
   await waitFor(() => {
@@ -162,10 +190,24 @@ const waitForStep = (title: string) =>
   waitFor(async () => expect(await stepTitle()).toBe(title));
 // The tour attaches its outside-click and step-action handling a moment
 // after a step shows; wait for that before clicking around it.
-const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 150)));
+const settle = () =>
+  act(() => new Promise((resolve) => setTimeout(resolve, 150)));
 const waitForTourEnd = () =>
   waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
 const modeMenu = () => screen.queryByRole("menu");
+// The intro's Start tour button. Found by its text: Ark labels every
+// "next" action with the Next translation.
+const startButton = async () =>
+  within(await tourDialog())
+    .getByText("Start tour")
+    .closest("button")!;
+// Every run opens on the intro card; Start tour moves on to the first step.
+const startTour = async (firstStep: string) => {
+  await waitForStep("Quick tour: preparing a document");
+  await settle();
+  await userEvent.setup().click(await startButton());
+  await waitForStep(firstStep);
+};
 
 /** Switches modes through the header's mode menu. */
 async function switchMode(user: User, from: RegExp, to: RegExp) {
@@ -176,19 +218,53 @@ async function switchMode(user: User, from: RegExp, to: RegExp) {
 
 /** Places a field from the palette: the Prepare fields are now unsaved. */
 const addField = async () =>
-  fireEvent.click(await screen.findByRole("button", { name: /add text field/i }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /add text field/i }),
+  );
 
 const GUARD = "Save your fields first?";
 
 describe("Prepare tour: when it starts", () => {
-  it("starts in Prepare once the document has rendered, with the mode menu open", async () => {
+  it("opens on the intro card with the mode menu closed", async () => {
+    const user = userEvent.setup();
+    const onTourEnd = vi.fn();
+    await mount({ tours: { prepare: true }, onTourEnd });
+    await waitForStep("Quick tour: preparing a document");
+    const card = popover()!;
+    expect(within(card).getByText("Quick tour")).toBeInTheDocument();
+    expect(card).toHaveTextContent(
+      "Under a minute: what each mode does, adding fields, choosing who fills them, and saving before you switch modes.",
+    );
+    expect(await startButton()).toBeInTheDocument();
+    expect(card.textContent).not.toMatch(/\d of \d/);
+    expect(highlighted()).toBeNull();
+    // The menu waits for step 1.
+    expect(modeMenu()).toBeNull();
+    await settle();
+    await clickTour(user, "Skip");
+    await waitForTourEnd();
+    expect(modeMenu()).toBeNull();
+    expect(onTourEnd).toHaveBeenCalledWith("pdf_prepare", "dismissed", {
+      replay: false,
+      lastStep: 0,
+    });
+  });
+
+  it("starts in Prepare once the document has rendered, with the mode menu open on step 1", async () => {
     await mount({ tours: { prepare: true } });
-    await waitForStep("Three modes");
+    await startTour("Three modes");
     expect(within(popover()!).getByText("1 of 5")).toBeInTheDocument();
     // The real menu, with its mode cards, is what step 1 spotlights.
     const menu = await screen.findByRole("menu");
     expect(within(menu).getAllByRole("menuitemradio")).toHaveLength(3);
-    expect(highlighted()).toHaveAttribute("data-pdfe-tour", "mode-menu-content");
+    expect(highlighted()).toHaveAttribute(
+      "data-pdfe-tour",
+      "mode-menu-content",
+    );
+    // Back from step 1 would only return to the intro.
+    expect(
+      within(popover()!).queryByRole("button", { name: "Back" }),
+    ).toBeNull();
   });
 
   it("does not start when the host says it was seen, or passes only `sign`", async () => {
@@ -199,7 +275,12 @@ describe("Prepare tour: when it starts", () => {
 
   it("does not start in Fill & Sign: `prepare` belongs to Prepare", async () => {
     renderWithChakra(
-      <PDFEditor src="fake://document.pdf" mode="edit" {...preparer} tours={{ prepare: true }} />
+      <PDFEditor
+        src="fake://document.pdf"
+        mode="edit"
+        {...preparer}
+        tours={{ prepare: true }}
+      />,
     );
     await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
     expect(screen.queryByRole("alertdialog")).toBeNull();
@@ -212,9 +293,9 @@ describe("Prepare tour: steps and copy", () => {
     const onTourEnd = vi.fn();
     await mount({ tours: { prepare: true }, onTourEnd });
 
-    await waitForStep("Three modes");
+    await startTour("Three modes");
     expect(popover()).toHaveTextContent(
-      "You're in Prepare. Prepare places fields and picks signers. Fill & Sign completes your own fields. View is read-only. Switch here."
+      "You're in Prepare. Prepare places fields and picks signers. Fill & Sign completes your own fields. View is read-only. Switch here.",
     );
     expect(modeMenu()).not.toBeNull();
 
@@ -223,28 +304,28 @@ describe("Prepare tour: steps and copy", () => {
     // The menu closes when its step ends.
     await waitFor(() => expect(modeMenu()).toBeNull());
     expect(popover()).toHaveTextContent(
-      "Drag a field onto the page. Click a placed field to change its settings."
+      "Drag a field onto the page. Click a placed field to change its settings.",
     );
     expect(highlighted()).toHaveAttribute("data-pdfe-tour", "field-palette");
 
     await clickTour(user, "Next");
     await waitForStep("Choose who fills each field");
     expect(popover()).toHaveTextContent(
-      "Select a field, then pick the party who completes it."
+      "Select a field, then pick the party who completes it.",
     );
     expect(highlighted()).toHaveAttribute("data-pdfe-tour", "parties");
 
     await clickTour(user, "Next");
     await waitForStep("Save before switching");
     expect(popover()).toHaveTextContent(
-      "New fields only appear in Fill & Sign and View after you save. Watch the status here."
+      "New fields only appear in Fill & Sign and View after you save. Watch the status here.",
     );
     expect(highlighted()).toHaveAttribute("data-pdfe-tour", "save");
 
     await clickTour(user, "Next");
     await waitForStep("Then fill and sign");
     expect(popover()).toHaveTextContent(
-      "Once saved, switch to Fill & Sign to complete your own fields."
+      "Once saved, switch to Fill & Sign to complete your own fields.",
     );
     // The closed mode button this time.
     expect(highlighted()).toHaveAttribute("data-pdfe-tour", "mode-menu");
@@ -262,7 +343,7 @@ describe("Prepare tour: steps and copy", () => {
   it("Back to step 1 opens the menu again", async () => {
     const user = userEvent.setup();
     await mount({ tours: { prepare: true } });
-    await waitForStep("Three modes");
+    await startTour("Three modes");
     await clickTour(user, "Next");
     await waitForStep("Add fields");
     await waitFor(() => expect(modeMenu()).toBeNull());
@@ -275,7 +356,7 @@ describe("Prepare tour: steps and copy", () => {
     const user = userEvent.setup();
     const onTourEnd = vi.fn();
     await mount({ tours: { prepare: true }, onTourEnd });
-    await waitForStep("Three modes");
+    await startTour("Three modes");
     await user.keyboard("{Escape}");
     await waitForTourEnd();
     await waitFor(() => expect(modeMenu()).toBeNull());
@@ -288,12 +369,14 @@ describe("Prepare tour: steps and copy", () => {
   it("drops the mode steps with a single mode: steps 2 to 4", async () => {
     const user = userEvent.setup();
     await mount({ tours: { prepare: true }, allowedModes: ["build"] });
-    await waitForStep("Add fields");
+    await startTour("Add fields");
     expect(within(popover()!).getByText("1 of 3")).toBeInTheDocument();
     await clickTour(user, "Next");
     await clickTour(user, "Next");
     await waitForStep("Save before switching");
-    expect(within(popover()!).queryByRole("button", { name: "Next" })).toBeNull();
+    expect(
+      within(popover()!).queryByRole("button", { name: "Next" }),
+    ).toBeNull();
   });
 
   it("names only the modes offered, and skips the parties step without a parties panel", async () => {
@@ -302,9 +385,9 @@ describe("Prepare tour: steps and copy", () => {
       allowedModes: ["build", "view"],
       parties: undefined,
     });
-    await waitForStep("Two modes");
+    await startTour("Two modes");
     expect(popover()).toHaveTextContent(
-      "You're in Prepare. Prepare places fields and picks signers. View is read-only. Switch here."
+      "You're in Prepare. Prepare places fields and picks signers. View is read-only. Switch here.",
     );
     // Modes, fields, save; no parties, and no Fill & Sign step.
     expect(within(popover()!).getByText("1 of 3")).toBeInTheDocument();
@@ -314,7 +397,7 @@ describe("Prepare tour: steps and copy", () => {
     setWidth(375);
     const user = userEvent.setup();
     await mount({ tours: { prepare: true } });
-    await waitForStep("Three modes");
+    await startTour("Three modes");
     await clickTour(user, "Next");
     await waitForStep("Add fields");
     expect(highlighted()).toHaveAttribute("data-pdfe-tour", "add-field");
@@ -330,8 +413,10 @@ describe("Prepare tour: Show tour", () => {
     const onTourEnd = vi.fn();
     await mount({ tours: { prepare: false }, onTourEnd });
     await user.click(screen.getByRole("button", { name: "More actions" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Show tour" }));
-    await waitForStep("Three modes");
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Show tour" }),
+    );
+    await startTour("Three modes");
     await settle();
     await clickTour(user, "Skip");
     await waitForTourEnd();
@@ -344,7 +429,7 @@ describe("Prepare tour: Show tour", () => {
 
 describe("Prepare tour never weakens the unsaved-fields guard (spec §6)", () => {
   const finishTour = async (user: User, how: "completed" | "skipped") => {
-    await waitForStep("Three modes");
+    await startTour("Three modes");
     await settle();
     if (how === "skipped") {
       await clickTour(user, "Skip");
@@ -371,39 +456,57 @@ describe("Prepare tour never weakens the unsaved-fields guard (spec §6)", () =>
       expect(onTourEnd).toHaveBeenCalledWith(
         "pdf_prepare",
         how === "completed" ? "completed" : "dismissed",
-        expect.anything()
+        expect.anything(),
       );
 
       await addField();
       await switchMode(user, /prepare/i, target);
-      expect(await screen.findByRole("heading", { name: GUARD })).toBeInTheDocument();
+      expect(
+        await screen.findByRole("heading", { name: GUARD }),
+      ).toBeInTheDocument();
       // Still in Prepare until the user decides.
-      expect(screen.getByRole("button", { name: /prepare/i })).toBeInTheDocument();
-    }
+      expect(
+        screen.getByRole("button", { name: /prepare/i }),
+      ).toBeInTheDocument();
+    },
   );
 
-  it("picking a mode in the tour's open menu still hits the dialog", async () => {
+  it("picking a mode in the tour's open menu does nothing while the tour runs", async () => {
     const user = userEvent.setup();
     const onTourEnd = vi.fn();
     await mount({ tours: { prepare: false }, onTourEnd });
     await addField();
     await user.click(screen.getByRole("button", { name: "More actions" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Show tour" }));
-    await waitForStep("Three modes");
-    await settle();
     await user.click(
-      within(screen.getByRole("menu")).getByRole("menuitemradio", { name: /^view/i })
+      await screen.findByRole("menuitem", { name: "Show tour" }),
     );
-    expect(await screen.findByRole("heading", { name: GUARD })).toBeInTheDocument();
-    // The dialog took over: the tour ended as dismissed and let go of the menu.
+    await startTour("Three modes");
+    await settle();
+    // A keyboard pick (no pointer: the tour's layer takes pointer presses).
+    fireEvent.click(
+      within(screen.getByRole("menu")).getByRole("menuitemradio", {
+        name: /^view/i,
+      }),
+    );
+    await settle();
+    // No switch, no guard dialog, and the tour carries on.
+    expect(screen.queryByRole("heading", { name: GUARD })).toBeNull();
+    expect(onTourEnd).not.toHaveBeenCalled();
+    expect(within(popover()!).getByText("Three modes")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /prepare/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("blocks the editor while the tour runs", async () => {
+    await mount({ tours: { prepare: true } });
     await waitFor(() =>
-      expect(onTourEnd).toHaveBeenCalledWith("pdf_prepare", "dismissed", {
-        replay: true,
-        lastStep: 1,
-      })
+      expect(document.querySelector('[data-part="tour-layer"]')).not.toBeNull(),
     );
-    await waitFor(() => expect(modeMenu()).toBeNull());
-    expect(screen.getByRole("button", { name: /prepare/i })).toBeInTheDocument();
+    const layer = document.querySelector<HTMLElement>(
+      '[data-part="tour-layer"]',
+    )!;
+    expect(getComputedStyle(layer).pointerEvents).toBe("auto");
   });
 });
 
@@ -417,11 +520,16 @@ describe("Prepare tour inside a host's modal Dialog", () => {
           <Dialog.Backdrop />
           <Dialog.Positioner>
             <Dialog.Content>
-              <PDFEditor src="fake://document.pdf" mode="build" {...preparer} {...props} />
+              <PDFEditor
+                src="fake://document.pdf"
+                mode="build"
+                {...preparer}
+                {...props}
+              />
             </Dialog.Content>
           </Dialog.Positioner>
         </Portal>
-      </Dialog.Root>
+      </Dialog.Root>,
     );
     await waitFor(() => {
       if (!document.querySelector('[id^="page_div_container_"] canvas'))
@@ -433,8 +541,11 @@ describe("Prepare tour inside a host's modal Dialog", () => {
   it("takes clicks, and Esc on step 1 closes the tour and the menu but not the dialog", async () => {
     const user = userEvent.setup();
     const onTourEnd = vi.fn();
-    const { onOpenChange } = await mountInDialog({ tours: { prepare: true }, onTourEnd });
-    await waitForStep("Three modes");
+    const { onOpenChange } = await mountInDialog({
+      tours: { prepare: true },
+      onTourEnd,
+    });
+    await startTour("Three modes");
     await settle();
     await clickTour(user, "Next");
     await waitForStep("Add fields");

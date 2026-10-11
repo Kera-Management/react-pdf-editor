@@ -12,20 +12,18 @@ export interface EditorTourProps {
   onEnd: (reason: EditorTourEndReason) => void;
 }
 
-// Ark's step actions put these on the buttons as their accessible names.
-const TRANSLATIONS = {
-  nextStep: "Next",
-  prevStep: "Back",
-  close: "Close tour",
-  progressText: ({ current, total }: { current: number; total: number }) =>
-    `${current + 1} of ${total}`,
-};
+// Spotlight corners. Ark pads the cut-out 10px around the target, so this
+// roughly follows the rounded corners of the cards and menus it frames.
+const SPOTLIGHT_RADIUS = 16;
 
 /**
  * One run of a guided tour (spec §5.1): Ark UI's tour machine for the
  * dimmed backdrop, spotlight, focus handling and keyboard support, styled
  * as a neutral Chakra popover. Mounted per run and started on mount; the
  * caller unmounts it to end a run from outside (a mode switch, Finish).
+ *
+ * Every run opens on a centred intro card (Start tour / Skip) that says
+ * what the tour covers; "1 of N" counts only the steps after it.
  *
  * Next / Back / Skip only. Skip, the close button, Esc and a click on the
  * dimmed background all end the run as "dismissed"; Done on the last step
@@ -46,35 +44,57 @@ export const EditorTour: React.FC<EditorTourProps> = ({
   const latest = useRef({ onStepChange, onEnd });
   latest.current = { onStepChange, onEnd };
 
+  const introCount = steps[0]?.kind === "intro" ? 1 : 0;
+
   const tourSteps = useMemo<TourStepDetails[]>(
     () =>
-      steps.map((step) => ({
-        id: step.id,
-        type: "tooltip",
-        title: step.title,
-        description: step.body,
-        target: step.target,
-        placement: step.placement,
-        backdrop: true,
-        arrow: true,
-        // Ark runs a step's effect before showing it and its cleanup when
-        // the step ends (Next, Back, Skip, Esc, unmount).
-        ...(step.prepare && {
-          effect: ({ show }: { show: () => void }) => step.prepare!(show),
-        }),
-      })),
-    [steps]
+      steps.map((step) =>
+        step.kind === "intro"
+          ? {
+              id: step.id,
+              type: "dialog",
+              title: step.title,
+              description: step.body,
+              backdrop: true,
+            }
+          : {
+              id: step.id,
+              type: "tooltip",
+              title: step.title,
+              description: step.body,
+              target: step.target,
+              placement: step.placement,
+              backdrop: true,
+              arrow: true,
+              // Ark runs a step's effect before showing it and its cleanup when
+              // the step ends (Next, Back, Skip, Esc, unmount).
+              ...(step.prepare && {
+                effect: ({ show }: { show: () => void }) => step.prepare!(show),
+              }),
+            },
+      ),
+    [steps],
   );
 
   const tour = useTour({
     steps: tourSteps,
-    translations: TRANSLATIONS,
+    spotlightRadius: SPOTLIGHT_RADIUS,
+    // Ark's step actions put these on the buttons as their accessible names.
+    translations: {
+      nextStep: "Next",
+      prevStep: "Back",
+      close: "Close tour",
+      progressText: ({ current, total }) =>
+        `${current - introCount + 1} of ${total - introCount}`,
+    },
     // Only a click on the background ends the tour. Focus moving out on
     // its own (a menu handing focus back, the editor's auto-scroll to the
     // first field) must not.
     onFocusOutside: (event) => event.preventDefault(),
     onStepChange: ({ stepIndex }) => {
-      if (stepIndex >= 0) latest.current.onStepChange(stepIndex + 1);
+      // The intro is step 0; the steps after it count from 1.
+      if (stepIndex >= 0)
+        latest.current.onStepChange(stepIndex - introCount + 1);
     },
     onStatusChange: ({ status }) => {
       if (status === "started" || endedRef.current) return;
@@ -112,34 +132,60 @@ export const EditorTour: React.FC<EditorTourProps> = ({
   }, []);
 
   const step = tour.step;
+  const isIntro = step?.type === "dialog";
+  // Back from the first real step would only return to the intro.
+  const canGoBack = tour.hasPrevStep && tour.stepIndex > introCount;
 
   return (
     <Tour.Root tour={tour}>
       {/* Ark positions the backdrop, spotlight and popover absolutely
           against their offset parent: this layer, pinned to the viewport.
-          The layer itself lets clicks through; its parts take them. */}
+          The layer also blocks the editor while the tour runs: the
+          spotlight is a hole in the backdrop, so without it the
+          highlighted control (the open mode menu, Save) stays clickable
+          and a mode switch mid-tour starts the other mode's tour. A
+          press on the layer is "outside" the popover: Ark ignores it
+          inside the spotlight and dismisses the tour anywhere else, like
+          the backdrop. It is the parts' stacking context, so they stack backdrop < spotlight <
+          popover here. Ark copies the content's z-index onto the
+          positioner, so the content must carry the popover's. */}
       <Box
         data-part="tour-layer"
         position="fixed"
         inset="0"
         zIndex="popover"
-        pointerEvents="none"
+        pointerEvents="auto"
       >
         <Tour.Backdrop asChild>
-          <Box bg="blackAlpha.600" zIndex="popover" pointerEvents="auto" />
+          <Box bg="blackAlpha.600" zIndex="0" pointerEvents="auto" />
         </Tour.Backdrop>
         <Tour.Spotlight asChild>
-          <Box
-            zIndex="popover"
-            borderWidth="2px"
-            borderColor="border.emphasized"
-          />
+          <Box zIndex="1" borderWidth="2px" borderColor="border.emphasized" />
         </Tour.Spotlight>
         <Tour.Positioner asChild>
-          <Box zIndex="popover" pointerEvents="auto">
+          <Box
+            zIndex="2"
+            pointerEvents="auto"
+            // The intro card has no target: centre it in the viewport.
+            css={{
+              "&[data-type=dialog]": {
+                position: "absolute",
+                inset: "0",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                p: "4",
+                // Clicks beside the card reach the backdrop (dismiss).
+                pointerEvents: "none",
+              },
+            }}
+          >
             <Tour.Content asChild>
               <Box
                 data-part="tour-popover"
+                position="relative"
+                zIndex="2"
+                pointerEvents="auto"
                 bg="bg.panel"
                 color="fg"
                 borderWidth="1px"
@@ -147,7 +193,7 @@ export const EditorTour: React.FC<EditorTourProps> = ({
                 rounded="l3"
                 shadow="lg"
                 p="4"
-                w="xs"
+                w={isIntro ? "sm" : "xs"}
                 maxW="calc(100vw - var(--chakra-spacing-8))"
                 outline="none"
               >
@@ -168,11 +214,17 @@ export const EditorTour: React.FC<EditorTourProps> = ({
                   </Tour.ArrowTip>
                 </Tour.Arrow>
                 <HStack justify="space-between" align="center" mb="1">
-                  <Tour.ProgressText asChild>
+                  {isIntro ? (
                     <Text textStyle="xs" color="fg.muted">
-                      {tour.getProgressText()}
+                      Quick tour
                     </Text>
-                  </Tour.ProgressText>
+                  ) : (
+                    <Tour.ProgressText asChild>
+                      <Text textStyle="xs" color="fg.muted">
+                        {tour.getProgressText()}
+                      </Text>
+                    </Tour.ProgressText>
+                  )}
                   <Tour.CloseTrigger asChild>
                     <CloseButton size="2xs" variant="ghost" me="-2" />
                   </Tour.CloseTrigger>
@@ -200,7 +252,7 @@ export const EditorTour: React.FC<EditorTourProps> = ({
                     </Button>
                   </Tour.ActionTrigger>
                   <HStack gap="2">
-                    {tour.hasPrevStep && (
+                    {canGoBack && (
                       <Tour.ActionTrigger
                         asChild
                         action={{ label: "Back", action: "prev" }}
@@ -213,9 +265,19 @@ export const EditorTour: React.FC<EditorTourProps> = ({
                     {tour.hasNextStep ? (
                       <Tour.ActionTrigger
                         asChild
-                        action={{ label: "Next", action: "next" }}
+                        action={{
+                          label: isIntro ? "Start tour" : "Next",
+                          // Ark names a "next" button "Next" for screen
+                          // readers; a custom action keeps the visible
+                          // "Start tour" as its name.
+                          action: isIntro
+                            ? (actions) => actions.next()
+                            : "next",
+                        }}
                       >
-                        <Button size="xs">Next</Button>
+                        <Button size="xs">
+                          {isIntro ? "Start tour" : "Next"}
+                        </Button>
                       </Tour.ActionTrigger>
                     ) : (
                       <Tour.ActionTrigger

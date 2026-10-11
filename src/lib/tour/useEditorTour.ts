@@ -69,6 +69,10 @@ export const useEditorTour = ({
   const [started, setStarted] = useState<ReadonlySet<EditorTourId>>(
     () => new Set()
   );
+  // A run ended as dismissed (Skip, close, Esc, a background click): the
+  // user has said no to tours for now, so no other tour starts on its own
+  // in this mounted editor. "Show tour" still works.
+  const [declined, setDeclined] = useState(false);
   const [replayRequested, setReplayRequested] = useState(false);
   const lastStepRef = useRef(0);
   const keyRef = useRef(0);
@@ -86,7 +90,8 @@ export const useEditorTour = ({
     // Nothing on screen to point at: no tour, and nothing to report.
     if (steps.length === 0) return;
     keyRef.current += 1;
-    lastStepRef.current = 1;
+    // Every run opens on the intro card, step 0.
+    lastStepRef.current = 0;
     setActive({ tourId, steps, replay, mode, context, key: keyRef.current });
   }, [mode]);
 
@@ -96,6 +101,7 @@ export const useEditorTour = ({
     if (!run) return;
     latest.current.active = null;
     setActive(null);
+    if (reason === "dismissed") setDeclined(true);
     latest.current.onTourEnd?.(run.tourId, reason, {
       replay: run.replay,
       lastStep: lastStepRef.current,
@@ -111,9 +117,13 @@ export const useEditorTour = ({
   }, []);
 
   // Automatic start: the host says this mode's tour is unseen, it hasn't
-  // run in this mounted editor, and the editor is ready and unobstructed.
+  // run in this mounted editor, no tour was skipped here, and the editor
+  // is ready and unobstructed.
   const eligible =
-    tourAvailable && !!tours?.[TOUR_PROP_KEY[modeTour]] && !started.has(modeTour);
+    tourAvailable &&
+    !declined &&
+    !!tours?.[TOUR_PROP_KEY[modeTour]] &&
+    !started.has(modeTour);
   useEffect(() => {
     if (active || !eligible || !ready || blocked) return;
     begin(modeTour as EditorTourId, false);
@@ -161,7 +171,7 @@ export const useEditorTour = ({
     canReplay: tourAvailable && tours !== undefined && !active,
     /** This tour may still start automatically in this mounted editor. */
     isPending: (tourId: EditorTourId) =>
-      !!tours?.[TOUR_PROP_KEY[tourId]] && !started.has(tourId),
+      !declined && !!tours?.[TOUR_PROP_KEY[tourId]] && !started.has(tourId),
     end,
     dismiss,
     replay,

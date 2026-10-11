@@ -89,6 +89,7 @@ describe("automatic start", () => {
     expect(result.current.active?.tourId).toBe("pdf_sign");
     expect(result.current.active?.replay).toBe(false);
     expect(result.current.active?.steps.map((s) => s.id)).toEqual([
+      "pdf_sign-intro",
       "sign-fields",
       "sign-progress",
       "sign-signature",
@@ -119,14 +120,40 @@ describe("automatic start", () => {
   it("runs once per mounted editor, even if the host still says unseen", () => {
     const { result, rerender, onTourEnd } = setup({ mode: "edit", tours: { sign: true } });
     act(() => result.current.end("completed"));
+    // Ended before any step change: still on the intro card, step 0.
     expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "completed", {
       replay: false,
-      lastStep: 1,
+      lastStep: 0,
     });
     rerender({ mode: "view", tours: { sign: true } });
     rerender({ mode: "edit", tours: { sign: true } });
     expect(result.current.active).toBeNull();
     expect(result.current.isPending("pdf_sign")).toBe(false);
+  });
+
+  it("starts no other tour after one is skipped, until the editor remounts", () => {
+    root.innerHTML += `<button data-pdfe-tour="mode-menu">Prepare</button>`;
+    const tours = { prepare: true, sign: true };
+    const { result, rerender, onTourEnd } = setup({ mode: "build", tours });
+    expect(result.current.active?.tourId).toBe("pdf_prepare");
+    act(() => result.current.end("dismissed"));
+    rerender({ mode: "edit", tours });
+    expect(result.current.active).toBeNull();
+    // Not pending either, so the mobile friendly hint isn't held for it.
+    expect(result.current.isPending("pdf_sign")).toBe(false);
+    expect(onTourEnd).toHaveBeenCalledTimes(1);
+    // Show tour still replays it.
+    act(() => result.current.replay());
+    expect(result.current.active?.tourId).toBe("pdf_sign");
+  });
+
+  it("still starts the next mode's tour after one is completed", () => {
+    root.innerHTML += `<button data-pdfe-tour="mode-menu">Prepare</button>`;
+    const tours = { prepare: true, sign: true };
+    const { result, rerender } = setup({ mode: "build", tours });
+    act(() => result.current.end("completed"));
+    rerender({ mode: "edit", tours });
+    expect(result.current.active?.tourId).toBe("pdf_sign");
   });
 
   it("starts nothing, and reports nothing, when no step has an anchor", () => {
@@ -162,7 +189,7 @@ describe("ending", () => {
     unmount();
     expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", {
       replay: false,
-      lastStep: 1,
+      lastStep: 0,
     });
   });
 
@@ -192,7 +219,7 @@ describe("replay", () => {
     act(() => result.current.end("dismissed"));
     expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", {
       replay: true,
-      lastStep: 1,
+      lastStep: 0,
     });
   });
 
@@ -204,9 +231,45 @@ describe("replay", () => {
   });
 });
 
+describe("intro card", () => {
+  it("opens every tour, points at nothing and is the only intro", () => {
+    root.innerHTML += `<button data-pdfe-tour="mode-menu">Prepare</button>`;
+    for (const tourId of ["pdf_sign", "pdf_prepare"] as const) {
+      const all = presentSteps(tourId, context({ mode: tourId === "pdf_sign" ? "edit" : "build" }));
+      expect(all[0]).toMatchObject({ id: `${tourId}-intro`, kind: "intro" });
+      expect(all[0].target()).toBeNull();
+      expect(all.filter((s) => s.kind === "intro")).toHaveLength(1);
+    }
+  });
+
+  it("titles the Prepare intro", () => {
+    root.innerHTML += `<button data-pdfe-tour="mode-menu">Prepare</button>`;
+    const [intro] = presentSteps("pdf_prepare", context({ mode: "build" }));
+    expect(intro.title).toBe("Quick tour: preparing a document");
+  });
+
+  it("counts the sign tour's tips in its intro", () => {
+    const [intro] = presentSteps("pdf_sign", context());
+    expect(intro.title).toBe("Quick tour: signing");
+    expect(intro.body).toBe(
+      "Four quick tips on finding your fields, signing and submitting."
+    );
+    root.querySelector("[data-field-id='f_sig']")!.setAttribute("disabled", "");
+    expect(presentSteps("pdf_sign", context())[0].body).toMatch(/^Three quick tips/);
+  });
+
+  it("is left out with the tour when no step has an anchor", () => {
+    root.innerHTML = "";
+    expect(presentSteps("pdf_sign", context())).toEqual([]);
+  });
+});
+
 describe("sign tour steps (Variant A)", () => {
+  // The steps after the intro card.
+  const signSteps = (overrides: Partial<EditorTourContext> = {}) =>
+    presentSteps("pdf_sign", context(overrides)).filter((s) => s.kind !== "intro");
   const ids = (overrides: Partial<EditorTourContext> = {}) =>
-    presentSteps("pdf_sign", context(overrides)).map((s) => s.id);
+    signSteps(overrides).map((s) => s.id);
 
   it("skips the signature step when there is no signature field of yours", () => {
     root.querySelector("[data-field-id='f_sig']")!.setAttribute("disabled", "");
@@ -220,14 +283,14 @@ describe("sign tour steps (Variant A)", () => {
 
   it("points the first step at your first field, skipping others' fields", () => {
     root.querySelector("input")!.setAttribute("data-pdfe-gated", "");
-    const [first] = presentSteps("pdf_sign", context());
+    const [first] = signSteps();
     // f_name is gated; the next fillable overlay is the signature.
     expect(first.target()?.dataset.fieldId).toBe("f_sig");
   });
 
   it("falls back to the document when none of your fields can be filled", () => {
     root.querySelectorAll("[data-field-id]").forEach((el) => el.setAttribute("disabled", ""));
-    const [first] = presentSteps("pdf_sign", context());
+    const [first] = signSteps();
     expect(first.target()?.dataset.pdfeTour).toBe("canvas");
   });
 });
@@ -243,8 +306,11 @@ describe("Prepare tour steps", () => {
     `;
   });
 
+  // The steps after the intro card.
   const steps = (overrides: Partial<EditorTourContext> = {}) =>
-    presentSteps("pdf_prepare", context({ mode: "build", ...overrides }));
+    presentSteps("pdf_prepare", context({ mode: "build", ...overrides })).filter(
+      (s) => s.kind !== "intro"
+    );
   const ids = (overrides: Partial<EditorTourContext> = {}) =>
     steps(overrides).map((s) => s.id);
 

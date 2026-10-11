@@ -56,9 +56,20 @@ const base = {
   type: "text",
 };
 const FIELDS = {
-  landlord_name: [{ ...base, id: "f_landlord", name: "landlord_name", rect: [10, 750, 200, 770] }],
-  tenant_name: [{ ...base, id: "f_name", name: "tenant_name", rect: [10, 700, 200, 720] }],
-  tenant_sig: [{ ...base, id: "f_sig", name: "tenant_sig", rect: [10, 100, 200, 140] }],
+  landlord_name: [
+    {
+      ...base,
+      id: "f_landlord",
+      name: "landlord_name",
+      rect: [10, 750, 200, 770],
+    },
+  ],
+  tenant_name: [
+    { ...base, id: "f_name", name: "tenant_name", rect: [10, 700, 200, 720] },
+  ],
+  tenant_sig: [
+    { ...base, id: "f_sig", name: "tenant_sig", rect: [10, 100, 200, 140] },
+  ],
 };
 
 function makeFakePage() {
@@ -76,7 +87,10 @@ function makeFakePage() {
 }
 
 const setWidth = (width: number) =>
-  Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    value: width,
+  });
 const originalWidth = window.innerWidth;
 
 beforeEach(() => {
@@ -84,12 +98,13 @@ beforeEach(() => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
     () =>
       new Proxy({} as Record<string, unknown>, {
-        get: (target, key: string) => (key in target ? target[key] : (target[key] = vi.fn())),
+        get: (target, key: string) =>
+          key in target ? target[key] : (target[key] = vi.fn()),
         set: (target, key: string, value) => {
           target[key] = value;
           return true;
         },
-      }) as unknown as CanvasRenderingContext2D
+      }) as unknown as CanvasRenderingContext2D,
   );
   const page = makeFakePage();
   fakeDocRef.current = {
@@ -101,7 +116,9 @@ beforeEach(() => {
     destroy: vi.fn(),
   };
   getDocumentMock.mockReset();
-  getDocumentMock.mockImplementation(() => ({ promise: Promise.resolve(fakeDocRef.current) }));
+  getDocumentMock.mockImplementation(() => ({
+    promise: Promise.resolve(fakeDocRef.current),
+  }));
   metadataRef.current = {
     version: 3,
     fieldAssignments: {},
@@ -132,11 +149,13 @@ const signer: Partial<PDFEditorProps> = {
 };
 
 const fieldEl = (container: HTMLElement, id: string) =>
-  container.querySelector<HTMLElement>(`[id^="page_div_container_"] [data-field-id="${id}"]`);
+  container.querySelector<HTMLElement>(
+    `[id^="page_div_container_"] [data-field-id="${id}"]`,
+  );
 
 async function mount(props: Partial<PDFEditorProps> = {}) {
   const utils = renderWithChakra(
-    <PDFEditor src="fake://document.pdf" mode="edit" {...signer} {...props} />
+    <PDFEditor src="fake://document.pdf" mode="edit" {...signer} {...props} />,
   );
   await waitFor(() => {
     if (!fieldEl(utils.container, "f_name")) throw new Error("not mounted");
@@ -149,8 +168,10 @@ const popover = () =>
 const tourDialog = () => screen.findByRole("alertdialog");
 const stepTitle = async () =>
   within(await tourDialog()).getByRole("heading").textContent;
-const clickTour = async (user: ReturnType<typeof userEvent.setup>, name: string | RegExp) =>
-  user.click(within(await tourDialog()).getByRole("button", { name }));
+const clickTour = async (
+  user: ReturnType<typeof userEvent.setup>,
+  name: string | RegExp,
+) => user.click(within(await tourDialog()).getByRole("button", { name }));
 const highlighted = () =>
   document.querySelector<HTMLElement>("[data-tour-highlighted]");
 const waitForStep = (title: string) =>
@@ -158,12 +179,26 @@ const waitForStep = (title: string) =>
 // The tour attaches its outside-click and step-action handling a moment
 // after a step shows; give it that moment before a test clicks around it
 // (otherwise a slow run can click before anything is listening).
-const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 150)));
+const settle = () =>
+  act(() => new Promise((resolve) => setTimeout(resolve, 150)));
+// The intro's Start tour button. Found by its text: Ark labels every
+// "next" action with the Next translation.
+const startButton = async () =>
+  within(await tourDialog())
+    .getByText("Start tour")
+    .closest("button")!;
+// Every run opens on the intro card; Start tour moves on to step 1.
+const startTour = async () => {
+  await waitForStep("Quick tour: signing");
+  await settle();
+  await userEvent.setup().click(await startButton());
+  await waitForStep("Your fields are highlighted");
+};
 
 describe("sign tour: when it starts", () => {
   it("starts in Fill & Sign once the document has rendered", async () => {
     await mount({ tours: { sign: true } });
-    await waitForStep("Your fields are highlighted");
+    await startTour();
     expect(within(popover()!).getByText("1 of 4")).toBeInTheDocument();
     // Your first field, not the landlord's (gated) one above it.
     expect(highlighted()?.dataset.fieldId).toBe("f_name");
@@ -202,18 +237,20 @@ describe("sign tour: when it starts", () => {
         {...signer}
         onDecline={vi.fn()}
         tours={{ sign: true }}
-      />
+      />,
     );
     await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
-    expect(screen.queryByRole("alertdialog", { name: /Your fields/ })).toBeNull();
+    expect(
+      screen.queryByRole("alertdialog", { name: /Your fields/ }),
+    ).toBeNull();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    await waitForStep("Your fields are highlighted");
+    await startTour();
   });
 
   it("starts on a tablet in the original layout (Variant A)", async () => {
     setWidth(800);
     await mount({ tours: { sign: true }, mobileFriendlyView: true });
-    await waitForStep("Your fields are highlighted");
+    await startTour();
     const user = userEvent.setup();
     await clickTour(user, "Next");
     await waitForStep("Go field by field");
@@ -223,23 +260,131 @@ describe("sign tour: when it starts", () => {
   });
 });
 
+describe("sign tour: intro card", () => {
+  it("opens on the intro card, then Start tour goes to step 1 of the real steps", async () => {
+    await mount({ tours: { sign: true } });
+    await waitForStep("Quick tour: signing");
+    const card = popover()!;
+    expect(within(card).getByText("Quick tour")).toBeInTheDocument();
+    expect(card).toHaveTextContent(
+      "Four quick tips on finding your fields, signing and submitting.",
+    );
+    expect(await startButton()).toBeInTheDocument();
+    expect(
+      within(card).getByRole("button", { name: "Skip" }),
+    ).toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: "Back" })).toBeNull();
+    // No progress count, and nothing highlighted.
+    expect(card.textContent).not.toMatch(/\d of \d/);
+    expect(highlighted()).toBeNull();
+    await startTour();
+    expect(within(popover()!).getByText("1 of 4")).toBeInTheDocument();
+  });
+
+  it("Skip on the intro dismisses it with lastStep 0", async () => {
+    const user = userEvent.setup();
+    const onTourEnd = vi.fn();
+    await mount({ tours: { sign: true }, onTourEnd });
+    await waitForStep("Quick tour: signing");
+    await settle();
+    await clickTour(user, "Skip");
+    await waitFor(() => expect(onTourEnd).toHaveBeenCalledTimes(1));
+    expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", {
+      replay: false,
+      lastStep: 0,
+    });
+  });
+
+  it("names Start tour by its visible text", async () => {
+    await mount({ tours: { sign: true } });
+    await waitForStep("Quick tour: signing");
+    await settle();
+    expect(
+      within(popover()!).getByRole("button", { name: "Start tour" }),
+    ).toBeInTheDocument();
+  });
+
+  it("a click beside the intro card reaches the backdrop and dismisses it", async () => {
+    const user = userEvent.setup();
+    const onTourEnd = vi.fn();
+    await mount({ tours: { sign: true }, onTourEnd });
+    await waitForStep("Quick tour: signing");
+    await settle();
+    const positioner = document.querySelector<HTMLElement>(
+      '[data-scope="tour"][data-part="positioner"]',
+    )!;
+    // The full-viewport positioner that centres the card lets clicks through.
+    expect(getComputedStyle(positioner).pointerEvents).toBe("none");
+    const backdrop = document.querySelector<HTMLElement>(
+      '[data-scope="tour"][data-part="backdrop"]',
+    )!;
+    await user.pointer({
+      keys: "[MouseLeft]",
+      target: backdrop,
+      coords: { clientX: 400, clientY: 400 },
+    });
+    await waitFor(() => expect(onTourEnd).toHaveBeenCalledTimes(1));
+    expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", {
+      replay: false,
+      lastStep: 0,
+    });
+  });
+
+  it("has no Back on the first real step", async () => {
+    const user = userEvent.setup();
+    await mount({ tours: { sign: true } });
+    await startTour();
+    expect(
+      within(popover()!).queryByRole("button", { name: "Back" }),
+    ).toBeNull();
+    await clickTour(user, "Next");
+    await waitForStep("Go field by field");
+    expect(
+      within(popover()!).getByRole("button", { name: "Back" }),
+    ).toBeInTheDocument();
+  });
+
+  it("stacks the popover above the dimmed backdrop", async () => {
+    await mount({ tours: { sign: true } });
+    await startTour();
+    const zIndex = (el: Element) => Number(getComputedStyle(el).zIndex);
+    const backdrop = document.querySelector(
+      '[data-scope="tour"][data-part="backdrop"]',
+    )!;
+    const positioner = document.querySelector<HTMLElement>(
+      '[data-scope="tour"][data-part="positioner"]',
+    )!;
+    expect(zIndex(popover()!)).toBeGreaterThan(zIndex(backdrop));
+    // Ark copies the content's z-index onto the positioner as --z-index
+    // (jsdom can't resolve the var() itself, so read the copy).
+    await waitFor(() =>
+      expect(
+        Number(positioner.style.getPropertyValue("--z-index")),
+      ).toBeGreaterThan(zIndex(backdrop)),
+    );
+    expect(positioner.style.zIndex).toBe("var(--z-index)");
+  });
+});
+
 describe("sign tour: steps and copy (Variant A)", () => {
   it("walks the four steps with the spec's copy", async () => {
     const user = userEvent.setup();
     await mount({ tours: { sign: true } });
-    await waitForStep("Your fields are highlighted");
+    await startTour();
     expect(popover()).toHaveTextContent(
-      "Only highlighted fields are yours. Other parties' entries are shown but locked."
+      "Only highlighted fields are yours. Other parties' entries are shown but locked.",
     );
     await clickTour(user, "Next");
     await waitForStep("Go field by field");
     expect(popover()).toHaveTextContent(
-      "Use Start and Next to jump to each field you still need to fill."
+      "Use Start and Next to jump to each field you still need to fill.",
     );
     expect(highlighted()).toHaveAttribute("data-pdfe-tour", "progress");
     await clickTour(user, "Next");
     await waitForStep("Tap to sign");
-    expect(popover()).toHaveTextContent("Tap a signature field to draw your signature.");
+    expect(popover()).toHaveTextContent(
+      "Tap a signature field to draw your signature.",
+    );
     expect(highlighted()?.dataset.fieldId).toBe("f_sig");
     await clickTour(user, "Next");
     await waitForStep("Finish");
@@ -259,17 +404,17 @@ describe("sign tour: steps and copy (Variant A)", () => {
       onDecline: vi.fn(),
       savedSignature: "data:image/png;base64,AAAA",
     });
-    await waitForStep("Your fields are highlighted");
+    await startTour();
     await clickTour(user, "Next");
     await clickTour(user, "Next");
     await waitForStep("Tap to sign");
     expect(popover()).toHaveTextContent(
-      "Tap a signature field to add your saved signature or draw a new one."
+      "Tap a signature field to add your saved signature or draw a new one.",
     );
     await clickTour(user, "Next");
     await waitForStep("Finish");
     expect(popover()).toHaveTextContent(
-      "Select Submit signature when you're done. You can also decline to sign here."
+      "Select Submit signature when you're done. You can also decline to sign here.",
     );
   });
 
@@ -277,7 +422,7 @@ describe("sign tour: steps and copy (Variant A)", () => {
     metadataRef.current = { ...metadataRef.current, signatureFields: [] };
     const user = userEvent.setup();
     await mount({ tours: { sign: true } });
-    await waitForStep("Your fields are highlighted");
+    await startTour();
     expect(within(popover()!).getByText("1 of 3")).toBeInTheDocument();
     await clickTour(user, "Next");
     await clickTour(user, "Next");
@@ -290,7 +435,7 @@ describe("sign tour: how it ends", () => {
     const user = userEvent.setup();
     const onTourEnd = vi.fn();
     await mount({ tours: { sign: true }, onTourEnd });
-    await waitForStep("Your fields are highlighted");
+    await startTour();
     for (let i = 0; i < 3; i++) await clickTour(user, "Next");
     await waitForStep("Finish");
     await clickTour(user, "Done");
@@ -303,14 +448,26 @@ describe("sign tour: how it ends", () => {
   });
 
   it.each([
-    ["Skip", async (user: ReturnType<typeof userEvent.setup>) => clickTour(user, "Skip")],
-    ["the close button", async (user: ReturnType<typeof userEvent.setup>) => clickTour(user, "Close tour")],
-    ["Esc", async (user: ReturnType<typeof userEvent.setup>) => user.keyboard("{Escape}")],
+    [
+      "Skip",
+      async (user: ReturnType<typeof userEvent.setup>) =>
+        clickTour(user, "Skip"),
+    ],
+    [
+      "the close button",
+      async (user: ReturnType<typeof userEvent.setup>) =>
+        clickTour(user, "Close tour"),
+    ],
+    [
+      "Esc",
+      async (user: ReturnType<typeof userEvent.setup>) =>
+        user.keyboard("{Escape}"),
+    ],
   ])("%s dismisses it", async (_label, act) => {
     const user = userEvent.setup();
     const onTourEnd = vi.fn();
     await mount({ tours: { sign: true }, onTourEnd });
-    await waitForStep("Your fields are highlighted");
+    await startTour();
     await clickTour(user, "Next");
     await waitForStep("Go field by field");
     await act(user);
@@ -326,7 +483,7 @@ describe("sign tour: how it ends", () => {
     const user = userEvent.setup();
     const onTourEnd = vi.fn();
     await mount({ tours: { sign: true }, onTourEnd });
-    await waitForStep("Your fields are highlighted");
+    await startTour();
     for (let i = 0; i < 3; i++) await clickTour(user, "Next");
     await waitForStep("Finish");
     await user.keyboard("{Escape}");
@@ -341,9 +498,11 @@ describe("sign tour: how it ends", () => {
     const user = userEvent.setup();
     const onTourEnd = vi.fn();
     await mount({ tours: { sign: true }, onTourEnd });
-    await waitForStep("Your fields are highlighted");
+    await startTour();
     await settle();
-    const backdrop = document.querySelector<HTMLElement>('[data-scope="tour"][data-part="backdrop"]')!;
+    const backdrop = document.querySelector<HTMLElement>(
+      '[data-scope="tour"][data-part="backdrop"]',
+    )!;
     await user.pointer({
       keys: "[MouseLeft]",
       target: backdrop,
@@ -359,8 +518,12 @@ describe("sign tour: how it ends", () => {
   it("a click on the mode menu dismisses it, and switching modes doesn't restart it", async () => {
     const user = userEvent.setup();
     const onTourEnd = vi.fn();
-    await mount({ tours: { sign: true }, onTourEnd, allowedModes: ["edit", "view"] });
-    await waitForStep("Your fields are highlighted");
+    await mount({
+      tours: { sign: true },
+      onTourEnd,
+      allowedModes: ["edit", "view"],
+    });
+    await startTour();
     // A real click lands away from the spotlight (jsdom rects are all 0).
     await user.pointer({
       keys: "[MouseLeft]",
@@ -368,17 +531,25 @@ describe("sign tour: how it ends", () => {
       coords: { clientX: 400, clientY: 400 },
     });
     await waitFor(() => expect(onTourEnd).toHaveBeenCalledTimes(1));
-    expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", expect.anything());
+    expect(onTourEnd).toHaveBeenCalledWith(
+      "pdf_sign",
+      "dismissed",
+      expect.anything(),
+    );
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     // The same click went on to open the menu. Pick View, then come back
     // to Fill & Sign: no second automatic run in this editor.
     await user.click(
-      within(await screen.findByRole("menu")).getByRole("menuitemradio", { name: /^view/i })
+      within(await screen.findByRole("menu")).getByRole("menuitemradio", {
+        name: /^view/i,
+      }),
     );
     // The switch re-renders the header; a slow run needs a moment.
     await user.click(await screen.findByRole("button", { name: /^view/i }));
     await user.click(
-      within(await screen.findByRole("menu")).getByRole("menuitemradio", { name: /fill & sign/i })
+      within(await screen.findByRole("menu")).getByRole("menuitemradio", {
+        name: /fill & sign/i,
+      }),
     );
     await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
     expect(screen.queryByRole("alertdialog")).toBeNull();
@@ -388,7 +559,7 @@ describe("sign tour: how it ends", () => {
   it("closing the editor mid-tour reports it as dismissed", async () => {
     const onTourEnd = vi.fn();
     const { unmount } = await mount({ tours: { sign: true }, onTourEnd });
-    await waitForStep("Your fields are highlighted");
+    await startTour();
     unmount();
     expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", {
       replay: false,
@@ -399,12 +570,14 @@ describe("sign tour: how it ends", () => {
   it("stores nothing itself: the host records what was seen", async () => {
     const user = userEvent.setup();
     await mount({ tours: { sign: true } });
-    await waitForStep("Your fields are highlighted");
+    await startTour();
     const before = { ...window.localStorage };
     await clickTour(user, "Skip");
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect({ ...window.localStorage }).toEqual(before);
-    expect(Object.keys(window.localStorage).some((key) => /tour/i.test(key))).toBe(false);
+    expect(
+      Object.keys(window.localStorage).some((key) => /tour/i.test(key)),
+    ).toBe(false);
   });
 });
 
@@ -414,8 +587,10 @@ describe("Show tour", () => {
     const onTourEnd = vi.fn();
     await mount({ tours: { sign: false }, onTourEnd });
     await user.click(screen.getByRole("button", { name: "More actions" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Show tour" }));
-    await waitForStep("Your fields are highlighted");
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Show tour" }),
+    );
+    await startTour();
     await settle();
     await clickTour(user, "Skip");
     await waitFor(() => expect(onTourEnd).toHaveBeenCalledTimes(1));
@@ -443,11 +618,16 @@ describe("inside a host's modal Dialog", () => {
           <Dialog.Backdrop />
           <Dialog.Positioner>
             <Dialog.Content>
-              <PDFEditor src="fake://document.pdf" mode="edit" {...signer} {...props} />
+              <PDFEditor
+                src="fake://document.pdf"
+                mode="edit"
+                {...signer}
+                {...props}
+              />
             </Dialog.Content>
           </Dialog.Positioner>
         </Portal>
-      </Dialog.Root>
+      </Dialog.Root>,
     );
     await waitFor(() => {
       if (!fieldEl(document.body, "f_name")) throw new Error("not mounted");
@@ -460,7 +640,7 @@ describe("inside a host's modal Dialog", () => {
     const user = userEvent.setup();
     const onTourEnd = vi.fn();
     await mountInDialog({ tours: { sign: true }, onTourEnd });
-    await waitForStep("Your fields are highlighted");
+    await startTour();
     await settle();
     expect(document.body.style.pointerEvents).toBe("none");
     expect(popover()!.closest(".pdf-editor-root")).not.toBeNull();
@@ -479,8 +659,11 @@ describe("inside a host's modal Dialog", () => {
   it("Esc ends the tour without closing the host dialog", async () => {
     const user = userEvent.setup();
     const onTourEnd = vi.fn();
-    const { onOpenChange } = await mountInDialog({ tours: { sign: true }, onTourEnd });
-    await waitForStep("Your fields are highlighted");
+    const { onOpenChange } = await mountInDialog({
+      tours: { sign: true },
+      onTourEnd,
+    });
+    await startTour();
     await settle();
     await user.keyboard("{Escape}");
     await waitFor(() => expect(onTourEnd).toHaveBeenCalledTimes(1));
@@ -493,17 +676,24 @@ describe("inside a host's modal Dialog", () => {
     // With the tour gone, Esc is the host's again.
     await user.keyboard("{Escape}");
     await waitFor(() =>
-      expect(onOpenChange).toHaveBeenCalledWith(expect.objectContaining({ open: false }))
+      expect(onOpenChange).toHaveBeenCalledWith(
+        expect.objectContaining({ open: false }),
+      ),
     );
   });
 
   it("a click on the dimmed background ends the tour, not the host dialog", async () => {
     const user = userEvent.setup();
     const onTourEnd = vi.fn();
-    const { onOpenChange } = await mountInDialog({ tours: { sign: true }, onTourEnd });
-    await waitForStep("Your fields are highlighted");
+    const { onOpenChange } = await mountInDialog({
+      tours: { sign: true },
+      onTourEnd,
+    });
+    await startTour();
     await settle();
-    const backdrop = document.querySelector<HTMLElement>('[data-scope="tour"][data-part="backdrop"]')!;
+    const backdrop = document.querySelector<HTMLElement>(
+      '[data-scope="tour"][data-part="backdrop"]',
+    )!;
     await user.pointer({
       keys: "[MouseLeft]",
       target: backdrop,

@@ -14,7 +14,8 @@ export interface EditorTourEndMeta {
   /** True when the tour was started from "Show tour" in More actions. */
   replay: boolean;
   /** 1-based number of the last step shown, counting only the steps this
-   * run actually had (steps whose anchor was missing are skipped). */
+   * run actually had (steps whose anchor was missing are skipped). 0 when
+   * the run ended on the intro card, before the first step. */
   lastStep: number;
 }
 
@@ -31,10 +32,14 @@ export interface PDFEditorTours {
 /** One step, before it is handed to Ark UI's tour machine. */
 export interface EditorTourStep {
   id: string;
+  /** "intro": the centred card that opens every tour and says what it
+   * covers. It points at nothing and isn't counted in "1 of N". */
+  kind?: "intro";
   title: string;
   body: ReactNode;
   /** The element to highlight, looked up when the step shows. A step whose
-   * target is missing when the tour starts is left out. */
+   * target is missing when the tour starts is left out (the intro has
+   * none and is never left out). */
   target: () => HTMLElement | null;
   placement?: TourStepDetails["placement"];
   /** Gets the screen ready before the step shows (the Prepare tour's first

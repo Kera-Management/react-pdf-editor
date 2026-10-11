@@ -832,12 +832,28 @@ describe("guided sign tour on a phone (guided tour spec §3.2)", () => {
     document.querySelector<HTMLElement>("[data-tour-highlighted]");
   const hint = () => screen.queryByText(/Showing a mobile friendly version/);
   const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+  // Every run opens on the intro card; Start tour (found by its text: Ark
+  // labels every "next" action Next) moves on to the first step.
+  const startButton = async () =>
+    within(await tourDialog()).getByText("Start tour").closest("button")!;
+  const startTour = async (firstStep: string) => {
+    await waitForStep("Quick tour: signing");
+    await act(() => new Promise((resolve) => setTimeout(resolve, 150)));
+    await userEvent.setup().click(await startButton());
+    await waitForStep(firstStep);
+  };
 
   it("uses Variant B in the mobile friendly view, in place of the first-run hint", async () => {
     const user = userEvent.setup();
     const onTourEnd = vi.fn();
     await mountReflow({ tours: { sign: true }, onTourEnd, saveLabel: "Submit signature" });
-    await waitForStep("An easier-to-read version");
+    await waitForStep("Quick tour: signing");
+    expect(popoverText()).toContain(
+      "Three quick tips on finding your fields, signing and submitting."
+    );
+    // The intro takes the hint's place too.
+    expect(hint()).toBeNull();
+    await startTour("An easier-to-read version");
     expect(popoverText()).toContain("1 of 3");
     expect(popoverText()).toContain(
       "This is your document reformatted for your phone. Tap Original anytime to see the exact layout."
@@ -875,7 +891,7 @@ describe("guided sign tour on a phone (guided tour spec §3.2)", () => {
   it("marks the hint seen when the tour is skipped too", async () => {
     const user = userEvent.setup();
     await mountReflow({ tours: { sign: true } });
-    await waitForStep("An easier-to-read version");
+    await startTour("An easier-to-read version");
     await clickTour(user, "Skip");
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(window.localStorage.getItem("rpe.mobileFriendlyHintSeen")).toBe("1");
@@ -910,7 +926,7 @@ describe("guided sign tour on a phone (guided tour spec §3.2)", () => {
   it("marks the hint seen when the editor closes mid-tour", async () => {
     const onTourEnd = vi.fn();
     const { unmount } = await mountReflow({ tours: { sign: true }, onTourEnd });
-    await waitForStep("An easier-to-read version");
+    await startTour("An easier-to-read version");
     unmount();
     expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", {
       replay: false,
@@ -935,7 +951,7 @@ describe("guided sign tour on a phone (guided tour spec §3.2)", () => {
     expect(screen.queryByRole("alertdialog")).toBeNull();
     finishExtract();
     await waitFor(() => expect(reflowControl(container, "f_phone")).not.toBeNull());
-    await waitForStep("An easier-to-read version");
+    await startTour("An easier-to-read version");
   });
 
   it("uses Variant A on a phone whose document fell back to the original", async () => {
@@ -943,7 +959,7 @@ describe("guided sign tour on a phone (guided tour spec §3.2)", () => {
     vi.spyOn(console, "debug").mockImplementation(() => undefined);
     await mount({ mobileFriendlyView: true, tours: { sign: true } });
     await screen.findByText("This document can't be shown in mobile-friendly view.");
-    await waitForStep("Your fields are highlighted");
+    await startTour("Your fields are highlighted");
     // The fallback notice stays as it is.
     expect(
       screen.getByText("This document can't be shown in mobile-friendly view.")
@@ -961,14 +977,14 @@ describe("guided sign tour on a phone (guided tour spec §3.2)", () => {
     await settle();
     expect(screen.queryByRole("alertdialog")).toBeNull();
     await user.click(within(review).getByRole("button", { name: /Back to edit/ }));
-    await waitForStep("An easier-to-read version");
+    await startTour("An easier-to-read version");
   });
 
   it("ends as dismissed when the view is toggled mid-tour", async () => {
     const user = userEvent.setup();
     const onTourEnd = vi.fn();
     const { container } = await mountReflow({ tours: { sign: true }, onTourEnd });
-    await waitForStep("An easier-to-read version");
+    await startTour("An easier-to-read version");
     await user.click(segment("Original"));
     await waitFor(() => expect(onTourEnd).toHaveBeenCalledTimes(1));
     expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", {
@@ -983,7 +999,7 @@ describe("guided sign tour on a phone (guided tour spec §3.2)", () => {
     const user = userEvent.setup();
     const onTourEnd = vi.fn();
     await mountReflow({ tours: { sign: true }, onTourEnd });
-    await waitForStep("An easier-to-read version");
+    await startTour("An easier-to-read version");
     await clickTour(user, "Next");
     await clickTour(user, "Next");
     await waitForStep("Review, then submit");
