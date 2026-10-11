@@ -259,8 +259,7 @@ describe("HeaderBar: mobile", () => {
       progressSummary: { completed: 2, total: 5 },
       onOpenProgress,
     });
-    const button = screen.getByRole("button", { name: /progress/i });
-    expect(button).toHaveTextContent("Progress");
+    const button = screen.getByRole("button", { name: "Progress, 2 of 5" });
     expect(button).toHaveTextContent("2 of 5");
     await userEvent.click(button);
     expect(onOpenProgress).toHaveBeenCalledTimes(1);
@@ -355,6 +354,37 @@ describe("HeaderBar: mobile", () => {
       <HeaderBar {...baseProps} layout="mobile" mode="build" allowedModes={["build", "edit"]} />
     );
     expect(screen.getByRole("button", { name: /prepare/i })).toBeInTheDocument();
+  });
+
+  it("drops the count on mobile once every field is filled", () => {
+    renderHeader({
+      layout: "mobile",
+      progressSummary: { completed: 7, total: 7 },
+      onOpenProgress: vi.fn(),
+    });
+    const button = screen.getByRole("button", { name: "Progress, 7 of 7" });
+    expect(button).not.toHaveTextContent("7 of 7");
+  });
+
+  it("keeps Progress without a '0 of 0' count when there is nothing to count", () => {
+    const { rerender } = renderHeader({
+      layout: "mobile",
+      progressSummary: { completed: 0, total: 0 },
+      onOpenProgress: vi.fn(),
+    });
+    expect(screen.getByRole("button", { name: "Progress" })).not.toHaveTextContent("0 of 0");
+    // Tablet too: it is the only way to the progress panel there.
+    rerender(
+      <HeaderBar
+        {...baseProps}
+        layout="tablet"
+        progressSummary={{ completed: 0, total: 0 }}
+        onOpenProgress={vi.fn()}
+      />
+    );
+    const button = screen.getByRole("button", { name: /progress/i });
+    expect(button).toHaveTextContent("Progress");
+    expect(button).not.toHaveTextContent("0 of 0");
   });
 
   it("keeps the Save label visible on mobile", () => {

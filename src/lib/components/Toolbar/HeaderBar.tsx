@@ -466,6 +466,13 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
     </VisuallyHidden>
   );
 
+  // No "0 of 0" when there is nothing to count (the panel still lists the
+  // fields), and mobile drops the count once everything is filled: the
+  // icon is enough.
+  const showProgressCount =
+    !!progressSummary &&
+    progressSummary.total > 0 &&
+    !(mobile && progressSummary.completed >= progressSummary.total);
   const progressButton = showProgress && progressSummary && (
     <Button
       type="button"
@@ -473,11 +480,21 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
       variant="outline"
       flexShrink={0}
       onClick={onOpenProgress}
+      // Mobile drops the word to leave room for the mode switch and Save.
+      aria-label={
+        mobile && progressSummary.total > 0
+          ? `Progress, ${progressSummary.completed} of ${progressSummary.total}`
+          : mobile
+            ? "Progress"
+            : undefined
+      }
     >
-      Progress
-      <Badge size="sm" variant="subtle" colorPalette="gray">
-        {progressSummary.completed} of {progressSummary.total}
-      </Badge>
+      {mobile ? <ListChecksIcon /> : "Progress"}
+      {showProgressCount && (
+        <Badge size="sm" variant="subtle" colorPalette="gray">
+          {progressSummary.completed} of {progressSummary.total}
+        </Badge>
+      )}
     </Button>
   );
 
