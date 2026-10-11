@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, waitFor } from "@testing-library/react";
+import { waitFor } from "@testing-library/react";
+import { renderWithChakra } from "./testUtils";
 
 import PDFEditor from "./PDFEditor";
 
@@ -164,7 +165,7 @@ describe("PDFEditor: unmapped-field gate matrix", () => {
   };
 
   it("(a) a field mapped to the active participant is editable", async () => {
-    const { container } = render(
+    const { container } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="edit"
@@ -185,7 +186,7 @@ describe("PDFEditor: unmapped-field gate matrix", () => {
   });
 
   it("(b) a field mapped to someone else is locked with an assignee label", async () => {
-    const { container } = render(
+    const { container } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="edit"
@@ -209,7 +210,7 @@ describe("PDFEditor: unmapped-field gate matrix", () => {
   });
 
   it("(c) an unmapped field is locked as 'Not assigned to a signer' once a non-empty mapping exists", async () => {
-    const { container } = render(
+    const { container } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="edit"
@@ -234,7 +235,7 @@ describe("PDFEditor: unmapped-field gate matrix", () => {
   it("(d) with a wholly empty mapping, an unmapped field stays editable (plain fill & sign unaffected)", async () => {
     // No fieldAssignments prop AND empty embedded metadata (the beforeEach
     // default) -- the resolved mapping is empty altogether.
-    const { container } = render(
+    const { container } = renderWithChakra(
       <PDFEditor src="fake://document.pdf" mode="edit" activeParticipantId="anyone" />
     );
 
@@ -250,7 +251,7 @@ describe("PDFEditor: unmapped-field gate matrix", () => {
   });
 
   it("(e) unmappedVisibility='hidden' hides rather than disables the unmapped field", async () => {
-    const { container } = render(
+    const { container } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="edit"
@@ -280,7 +281,7 @@ describe("PDFEditor: unmapped-field gate matrix", () => {
       signatureFields: [],
     };
 
-    const { container } = render(
+    const { container } = renderWithChakra(
       <PDFEditor src="fake://document.pdf" mode="edit" activeParticipantId="assignee-a" />
     );
 

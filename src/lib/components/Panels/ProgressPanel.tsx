@@ -1,6 +1,23 @@
 import React, { useEffect, useState } from "react";
-import styles from "./ProgressPanel.module.css";
-import { CheckCircle, Circle, PlayCircle, Warning } from "@phosphor-icons/react";
+import {
+  Alert,
+  Box,
+  Button,
+  HStack,
+  Icon,
+  Progress,
+  Stack,
+  Text,
+} from "@chakra-ui/react";
+import {
+  CheckCircleIcon,
+  CheckIcon,
+  CircleIcon,
+  PlayIcon,
+  WarningIcon,
+} from "@phosphor-icons/react";
+import { PanelHeader } from "./PanelHeader";
+import { UserAvatar } from "./UserAvatar";
 import { humanizeFieldName } from "../../utils/fieldLabels";
 import { assigneesIncludeParticipant } from "../../utils/participantMatching";
 
@@ -199,93 +216,101 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
   const hasStarted = activeFieldName !== null;
 
   return (
-    <div className={styles.panel}>
-      {/* Participant Info */}
+    <Stack gap={4}>
+      {/* Participant: UserAvatar-style squircle + "Name · Role". */}
       {activeParticipant && (
-        <div className={styles.participant}>
-          <div className={styles.avatar}>
-            {activeParticipant.label.charAt(0).toUpperCase()}
-          </div>
-          <div className={styles.participantInfo}>
-            <span className={styles.participantName}>
+        <HStack gap={3} minW={0}>
+          <UserAvatar
+            size="sm"
+            name={activeParticipant.label}
+            flexShrink={0}
+          />
+          <Text truncate minW={0}>
+            <Text as="span" fontWeight="medium">
               {activeParticipant.label}
-            </span>
+            </Text>
             {activeParticipant.role && (
-              <span className={styles.participantRole}>
+              <Text as="span" color="fg.muted">
+                {" · "}
                 {activeParticipant.role}
-              </span>
+              </Text>
             )}
-          </div>
-        </div>
+          </Text>
+        </HStack>
       )}
 
-      {/* Progress Section */}
-      <div className={styles.progress}>
-        <div className={styles.progressHeader}>
-          <span className={styles.progressLabel}>Progress</span>
-          <span className={styles.progressValue}>
-            {completedFields} / {totalFields}
-          </span>
-        </div>
-        <div className={styles.progressBar}>
-          <div
-            className={`${styles.progressFill} ${isComplete ? styles.complete : ""}`}
-            style={{ width: `${progressPercentage}%` }}
-          />
-        </div>
-        <div className={styles.progressPercent}>
-          {isComplete ? (
-            <span className={styles.completeLabel}>
-              <CheckCircle weight="fill" size={14} />
-              All fields complete
-            </span>
-          ) : (
-            `${progressPercentage}% complete`
-          )}
-        </div>
-      </div>
+      {/* Progress: header with "N of M" badge, then the bar. */}
+      <Stack gap={2}>
+        <PanelHeader
+          title="Progress"
+          count={`${completedFields} of ${totalFields}`}
+        />
+        <Progress.Root
+          value={progressPercentage}
+          size="xs"
+          colorPalette="gray"
+          aria-label="Progress"
+        >
+          <Progress.Track>
+            <Progress.Range />
+          </Progress.Track>
+        </Progress.Root>
+      </Stack>
 
       {/* Guided navigation: Start jumps to the first remaining required
           field; Next advances from wherever guided navigation last sent
           the signer. Not shown once everything is complete -- the Finish
           affordance below takes over. */}
       {!isComplete && remainingFields.length > 0 && (
-        <button
+        <Button
           type="button"
-          className={styles.guidedButton}
+          size="sm"
+          w="full"
           onClick={hasStarted ? handleNext : handleStart}
         >
-          <PlayCircle weight="fill" size={16} />
+          <Icon boxSize="4">
+            <PlayIcon weight="fill" />
+          </Icon>
           {hasStarted ? "Next field" : "Start"}
-        </button>
+        </Button>
       )}
 
-      {/* Remaining Fields -- the full list, not a truncated preview. There's
-          no virtualization anywhere in this library, and a form's field
-          count is small enough that plain DOM + `overflow-y: auto` (see
-          .remainingList) is all scrolling ever needs here. */}
+      {/* Remaining Fields -- the full list, not a truncated preview. The
+          sidebar section scrolls; no inner scroller needed. */}
       {remainingFields.length > 0 && (
-        <div className={styles.remainingSection}>
-          <div className={styles.remainingHeader}>
-            <Warning weight="fill" size={14} />
-            <span>{remainingFields.length} fields remaining</span>
-          </div>
-          <div className={styles.remainingList}>
-            {remainingFields.map((fieldName) => (
-              <button
-                key={fieldName}
-                type="button"
-                className={`${styles.remainingItem} ${
-                  fieldName === activeFieldName ? styles.active : ""
-                }`}
-                onClick={() => goToField(fieldName)}
-              >
-                <Circle weight="regular" size={14} />
-                <span>{fieldLabels?.[fieldName] ?? humanizeFieldName(fieldName)}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+        <Stack gap={2}>
+          <PanelHeader title="Remaining" count={remainingFields.length} />
+          <Stack gap={0.5}>
+            {remainingFields.map((fieldName) => {
+              const isActive = fieldName === activeFieldName;
+              return (
+                <Button
+                  key={fieldName}
+                  type="button"
+                  size="sm"
+                  variant={isActive ? "subtle" : "ghost"}
+                  colorPalette="gray"
+                  justifyContent="flex-start"
+                  w="full"
+                  fontWeight="normal"
+                  aria-current={isActive ? "step" : undefined}
+                  onClick={() => goToField(fieldName)}
+                >
+                  <Icon
+                    boxSize="4"
+                    color={isActive ? "fg" : "fg.subtle"}
+                    flexShrink={0}
+                  >
+                    <CircleIcon weight={isActive ? "fill" : "regular"} />
+                  </Icon>
+                  <Text as="span" truncate>
+                    {fieldLabels?.[fieldName] ?? humanizeFieldName(fieldName)}
+                  </Text>
+                </Button>
+              );
+            })}
+          </Stack>
+        </Stack>
       )}
 
       {/* Unrendered-but-assigned fields -- couldn't be shown at all (e.g. a
@@ -294,41 +319,43 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
           purely as a heads-up: the signer isn't blocked by them, but
           something is wrong and the sender needs to know. */}
       {unrenderedAssignedFields.length > 0 && (
-        <div className={styles.unrenderedWarning}>
-          <Warning weight="fill" size={14} />
-          <span>
-            {unrenderedAssignedFields.length}{" "}
-            {unrenderedAssignedFields.length === 1 ? "field" : "fields"}{" "}
-            couldn't be shown. Contact the sender.
-          </span>
-        </div>
+        <Alert.Root status="warning" size="sm">
+          <Alert.Indicator>
+            <WarningIcon weight="bold" />
+          </Alert.Indicator>
+          <Alert.Content>
+            <Alert.Title>
+              {unrenderedAssignedFields.length}{" "}
+              {unrenderedAssignedFields.length === 1 ? "field" : "fields"}{" "}
+              couldn't be shown. Contact the sender.
+            </Alert.Title>
+          </Alert.Content>
+        </Alert.Root>
       )}
 
       {/* Complete State -- the Finish affordance. Always shown once
           isComplete; the button itself only appears when the host gave us
           somewhere to send it (onFinish is additive/optional). */}
       {isComplete && (
-        <div className={styles.completeState}>
-          <div className={styles.completeIcon}>
-            <CheckCircle weight="fill" size={32} />
-          </div>
-          <p>You've completed all your fields!</p>
-          <p className={styles.completeHint}>
-            Review your entries before submitting.
-          </p>
+        <Stack gap={2} align="center" textAlign="center" pt={2}>
+          <Icon boxSize="8" color="fg.muted">
+            <CheckCircleIcon />
+          </Icon>
+          <Text fontWeight="medium">You've completed all your fields.</Text>
+          <Text color="fg.muted">Review your entries before submitting.</Text>
           {onFinish && (
-            <button
-              type="button"
-              className={styles.finishButton}
-              onClick={onFinish}
-            >
-              <CheckCircle weight="bold" size={18} />
-              Finish and save
-            </button>
+            <Box w="full" pt={2}>
+              <Button type="button" size="sm" w="full" onClick={onFinish}>
+                <Icon boxSize="4">
+                  <CheckIcon weight="bold" />
+                </Icon>
+                Finish and save
+              </Button>
+            </Box>
           )}
-        </div>
+        </Stack>
       )}
-    </div>
+    </Stack>
   );
 };
 

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, waitFor } from "@testing-library/react";
+import { waitFor } from "@testing-library/react";
+import { renderWithChakra } from "./testUtils";
 
 import PDFEditor from "./PDFEditor";
 
@@ -154,7 +155,7 @@ describe("PDFEditor click-to-sign gating parity", () => {
   });
 
   it("hides both the text input and the signature button for an unassigned participant", async () => {
-    const { container } = render(
+    const { container } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="edit"
@@ -185,7 +186,7 @@ describe("PDFEditor click-to-sign gating parity", () => {
   });
 
   it("shows both the text input and the signature button for the assigned participant", async () => {
-    const { container } = render(
+    const { container } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="edit"
@@ -216,7 +217,7 @@ describe("PDFEditor click-to-sign gating parity", () => {
   });
 
   it("never renders an Acrobat action pushbutton as a fillable field", async () => {
-    render(
+    renderWithChakra(
       <PDFEditor src="fake://document.pdf" mode="edit" activeParticipantId="anyone" />
     );
     await waitFor(() => {
@@ -234,7 +235,7 @@ describe("PDFEditor click-to-sign gating parity", () => {
   });
 
   it("signature buttons carry data-field-name so guided navigation can find them", async () => {
-    render(
+    renderWithChakra(
       <PDFEditor src="fake://document.pdf" mode="edit" activeParticipantId="anyone" />
     );
     await waitFor(() => {

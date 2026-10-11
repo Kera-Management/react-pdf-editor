@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { Box, Input, Stack } from "@chakra-ui/react";
 
 import styles from "./SignaturePad.module.css";
 import { sizeSignatureCanvas } from "./canvasSetup";
@@ -108,21 +109,32 @@ export const TypeSignature: React.FC<TypeSignatureProps> = ({
   }, [text, onChange]);
 
   return (
-    <div className={styles.typeTab}>
-      <input
+    <Stack gap={3}>
+      <Input
         type="text"
-        className={styles.typeInput}
+        size="lg"
         value={text}
         onChange={(event) => setText(event.target.value)}
         placeholder="Type your name"
         aria-label="Signature text"
       />
-      <canvas
-        ref={canvasRef}
-        className={styles.typeCanvas}
-        role="img"
-        aria-label="Signature preview"
-      />
-    </div>
+      {/* Preview canvas: white with dark ink in both colour modes. */}
+      <Box
+        w="fit-content"
+        maxW="full"
+        bg="white"
+        borderWidth="1px"
+        borderColor="border"
+        rounded="lg"
+        overflow="hidden"
+      >
+        <canvas
+          ref={canvasRef}
+          className={styles.typeCanvas}
+          role="img"
+          aria-label="Signature preview"
+        />
+      </Box>
+    </Stack>
   );
 };

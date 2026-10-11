@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, waitFor } from "@testing-library/react";
+import { renderWithChakra } from "./testUtils";
 
 import PDFEditor from "./PDFEditor";
 
@@ -8,10 +9,10 @@ import PDFEditor from "./PDFEditor";
  * `pages` state, so every keystroke rebuilt `pages`, which gave `renderPages`
  * a fresh identity, which re-fired the canvas-render effect on top of a
  * render that could still be in flight -- pdf.js's "Cannot use the same
- * canvas during multiple render() operations." Field values now live in
+ * canvas during multiple renderWithChakra() operations." Field values now live in
  * `useFieldValues`, entirely decoupled from `pages`, so a value change must
  * never reach `page.proxy.render()` again. This mounts the real component
- * against a minimal fake pdf.js document and counts render() calls against
+ * against a minimal fake pdf.js document and counts renderWithChakra() calls against
  * the main document canvas specifically (PageThumbnails also legitimately
  * calls `page.proxy.render()` for its own, separate thumbnail canvas, so
  * calls are attributed by which canvas asked for its 2D context).
@@ -93,7 +94,7 @@ describe("PDFEditor render stability (value edits vs. canvas renders)", () => {
     // legitimate, unrelated work doesn't throw and pollute this test.
     Element.prototype.scrollIntoView = vi.fn();
 
-    // Tag each 2D context by the id of the canvas it came from, so render()
+    // Tag each 2D context by the id of the canvas it came from, so renderWithChakra()
     // calls made against the main page canvas and PageThumbnails' own
     // thumbnail canvas can be told apart without touching PageThumbnails.
     // `scale` is a no-op stand-in for the real CanvasRenderingContext2D
@@ -126,7 +127,7 @@ describe("PDFEditor render stability (value edits vs. canvas renders)", () => {
   });
 
   it("typing in a field does not change `pages` identity or re-invoke the canvas render", async () => {
-    const { container } = render(<PDFEditor src="fake://document.pdf" mode="edit" />);
+    const { container } = renderWithChakra(<PDFEditor src="fake://document.pdf" mode="edit" />);
 
     const input = await waitFor(() => {
       const el = container.querySelector<HTMLInputElement>(

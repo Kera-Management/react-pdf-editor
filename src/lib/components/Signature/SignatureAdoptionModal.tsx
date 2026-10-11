@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
+import { Box, Button, Image, Stack, Text } from "@chakra-ui/react";
 
 import { Modal } from "../Modal/Modal";
-import styles from "./SignatureAdoptionModal.module.css";
 import { SignaturePad, SignatureTab } from "./SignaturePad";
 
 export interface SignatureAdoptionModalProps {
@@ -21,7 +21,8 @@ export interface SignatureAdoptionModalProps {
 type View = "saved" | "capture";
 
 /**
- * Adoption modal built on the native Modal primitive. Two views:
+ * Adoption modal built on the Modal primitive (Chakra Dialog, bottom Drawer
+ * on mobile). Two views:
  *
  * - "saved": shown first whenever `savedSignature` is provided -- a
  *   preview plus a one-click "Use this signature" action, with a "Draw a
@@ -86,30 +87,25 @@ export const SignatureAdoptionModal: React.FC<SignatureAdoptionModalProps> = ({
   const footer =
     view === "saved" && savedSignature ? (
       <>
-        <button type="button" className={styles.secondaryButton} onClick={handleRedo}>
+        <Button type="button" variant="outline" onClick={handleRedo}>
           Draw a new one
-        </button>
-        <button
-          type="button"
-          className={styles.primaryButton}
-          onClick={handleUseSaved}
-        >
+        </Button>
+        <Button type="button" onClick={handleUseSaved}>
           Use this signature
-        </button>
+        </Button>
       </>
     ) : (
       <>
-        <button type="button" className={styles.secondaryButton} onClick={onClose}>
+        <Button type="button" variant="outline" onClick={onClose}>
           Cancel
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className={styles.primaryButton}
           onClick={handleAdoptDraft}
           disabled={!draftDataUrl}
         >
           Adopt
-        </button>
+        </Button>
       </>
     );
 
@@ -122,26 +118,38 @@ export const SignatureAdoptionModal: React.FC<SignatureAdoptionModalProps> = ({
       footer={footer}
     >
       {view === "saved" && savedSignature ? (
-        <div className={styles.savedView}>
-          <p className={styles.savedLabel}>Your saved signature</p>
-          <div className={styles.savedPreview}>
-            <img
+        <Stack gap={3}>
+          <Text fontWeight="medium">Your saved signature</Text>
+          {/* The signature image sits on white in both colour modes. */}
+          <Box
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            p={4}
+            bg="white"
+            borderWidth="1px"
+            borderColor="border"
+            rounded="lg"
+          >
+            <Image
               src={savedSignature}
               alt="Your saved signature"
-              className={styles.savedImage}
+              maxW="full"
+              maxH="120px"
+              objectFit="contain"
             />
-          </div>
-        </div>
+          </Box>
+        </Stack>
       ) : (
-        <div className={styles.captureView}>
+        <Stack gap={2}>
           <SignaturePad
             activeTab={activeTab}
             onTabChange={setActiveTab}
             signerName={signerName}
             onChange={setDraftDataUrl}
           />
-          {hint && <p className={styles.hint}>{hint}</p>}
-        </div>
+          {hint && <Text color="fg.muted">{hint}</Text>}
+        </Stack>
       )}
     </Modal>
   );

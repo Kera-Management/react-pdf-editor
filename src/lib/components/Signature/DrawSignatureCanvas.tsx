@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowCounterClockwise, Trash } from "@phosphor-icons/react";
+import { Box, Button, HStack, Icon, Stack } from "@chakra-ui/react";
+import { ArrowCounterClockwiseIcon, TrashIcon } from "@phosphor-icons/react";
 
 import styles from "./SignaturePad.module.css";
 import { sizeSignatureCanvas } from "./canvasSetup";
@@ -209,34 +210,63 @@ export const DrawSignatureCanvas: React.FC<DrawSignatureCanvasProps> = ({
   const hasStrokes = strokes.length > 0;
 
   return (
-    <div className={styles.drawTab}>
-      <canvas
-        ref={canvasRef}
-        className={styles.drawCanvas}
-        onPointerDown={onPointerDown}
-        role="img"
-        aria-label="Signature drawing area"
-      />
-      <div className={styles.drawActions}>
-        <button
+    <Stack gap={2}>
+      {/* The pad is the canvas, not chrome: white with dark ink in both
+          colour modes. The frame and baseline are chrome tokens. */}
+      <Box
+        position="relative"
+        w="fit-content"
+        maxW="full"
+        bg="white"
+        borderWidth="1px"
+        borderColor="border"
+        rounded="lg"
+        overflow="hidden"
+      >
+        <canvas
+          ref={canvasRef}
+          className={styles.drawCanvas}
+          onPointerDown={onPointerDown}
+          role="img"
+          aria-label="Signature drawing area"
+        />
+        <Box
+          aria-hidden="true"
+          position="absolute"
+          insetX={6}
+          bottom="25%"
+          borderBottomWidth="1px"
+          borderBottomStyle="dashed"
+          borderColor="border.emphasized"
+          pointerEvents="none"
+        />
+      </Box>
+      <HStack gap={2}>
+        <Button
           type="button"
-          className={styles.iconButton}
+          size="xs"
+          variant="outline"
           onClick={handleUndo}
           disabled={!hasStrokes}
         >
-          <ArrowCounterClockwise size={16} />
+          <Icon boxSize={4}>
+            <ArrowCounterClockwiseIcon />
+          </Icon>
           Undo
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className={styles.iconButton}
+          size="xs"
+          variant="outline"
           onClick={handleClear}
           disabled={!hasStrokes}
         >
-          <Trash size={16} />
+          <Icon boxSize={4}>
+            <TrashIcon />
+          </Icon>
           Clear
-        </button>
-      </div>
-    </div>
+        </Button>
+      </HStack>
+    </Stack>
   );
 };

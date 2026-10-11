@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
+
+import { renderWithChakra } from "../../testUtils";
 
 import { TypeSignature } from "./TypeSignature";
 import { stubCanvas } from "./testUtils";
@@ -15,7 +17,7 @@ describe("TypeSignature", () => {
     const { dataUrl } = stubCanvas();
     const onChange = vi.fn();
 
-    render(<TypeSignature signerName="Jane Doe" onChange={onChange} />);
+    renderWithChakra(<TypeSignature signerName="Jane Doe" onChange={onChange} />);
 
     expect(screen.getByLabelText(/signature text/i)).toHaveValue("Jane Doe");
     expect(onChange).toHaveBeenLastCalledWith(dataUrl);
@@ -25,7 +27,7 @@ describe("TypeSignature", () => {
     stubCanvas();
     const onChange = vi.fn();
 
-    render(<TypeSignature onChange={onChange} />);
+    renderWithChakra(<TypeSignature onChange={onChange} />);
 
     expect(screen.getByLabelText(/signature text/i)).toHaveValue("");
     expect(onChange).toHaveBeenLastCalledWith(null);
@@ -36,7 +38,7 @@ describe("TypeSignature", () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
 
-    render(<TypeSignature onChange={onChange} />);
+    renderWithChakra(<TypeSignature onChange={onChange} />);
     onChange.mockClear();
 
     await user.type(screen.getByLabelText(/signature text/i), "A");
@@ -49,7 +51,7 @@ describe("TypeSignature", () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
 
-    render(<TypeSignature signerName="A" onChange={onChange} />);
+    renderWithChakra(<TypeSignature signerName="A" onChange={onChange} />);
     onChange.mockClear();
 
     await user.clear(screen.getByLabelText(/signature text/i));
@@ -62,7 +64,7 @@ describe("TypeSignature", () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
 
-    render(<TypeSignature onChange={onChange} />);
+    renderWithChakra(<TypeSignature onChange={onChange} />);
     onChange.mockClear();
 
     await user.type(screen.getByLabelText(/signature text/i), "   ");

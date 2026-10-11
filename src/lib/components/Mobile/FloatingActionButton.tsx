@@ -1,133 +1,74 @@
-import React, { useState } from "react";
-import styles from "./FloatingActionButton.module.css";
-import {
-  Plus,
-  TextAa,
-  CheckSquare,
-  RowsPlusBottom,
-  RadioButton,
-  Signature,
-  TextAlignJustify,
-} from "@phosphor-icons/react";
-import { BuildModeFieldType } from "../../PDFEditor";
-
-export interface FABAction {
-  id: BuildModeFieldType;
-  label: string;
-  icon: React.ReactNode;
-}
+import React from "react";
+import { Button, Icon, Stack } from "@chakra-ui/react";
+import { PlusIcon } from "@phosphor-icons/react";
+import type { BuildModeFieldType } from "../../PDFEditor";
+import { ADD_FIELD_ACTIONS } from "./addFieldActions";
 
 export interface FloatingActionButtonProps {
-  /** Callback when a field type is selected */
-  onFieldSelect: (fieldType: BuildModeFieldType) => void;
-  /** Whether the FAB is visible */
+  /** Opens the "Add a field" drawer. */
+  onClick: () => void;
+  /** Whether the button is shown. */
   isVisible?: boolean;
-  /** Position from bottom */
-  bottomOffset?: number;
 }
 
-const fieldActions: FABAction[] = [
-  {
-    id: "signature",
-    label: "Signature",
-    icon: <Signature weight="duotone" size={20} />,
-  },
-  {
-    id: "text",
-    label: "Text",
-    icon: <TextAa weight="duotone" size={20} />,
-  },
-  {
-    id: "multiline",
-    label: "Text Area",
-    icon: <TextAlignJustify weight="duotone" size={20} />,
-  },
-  {
-    id: "checkbox",
-    label: "Checkbox",
-    icon: <CheckSquare weight="duotone" size={20} />,
-  },
-  {
-    id: "dropdown",
-    label: "Dropdown",
-    icon: <RowsPlusBottom weight="duotone" size={20} />,
-  },
-  {
-    id: "radio",
-    label: "Radio",
-    icon: <RadioButton weight="duotone" size={20} />,
-  },
-];
-
+/**
+ * Mobile "Add field" button (spec §3.12, C6): the app's `MobileActionsFab`
+ * inverted pill. Positioning is the caller's job (MobileChrome stacks it
+ * under the page pill). Replaces the round FAB and its radial menu.
+ */
 export const FloatingActionButton: React.FC<FloatingActionButtonProps> = ({
-  onFieldSelect,
+  onClick,
   isVisible = true,
-  bottomOffset = 24,
 }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  const handleToggle = () => {
-    setIsExpanded(!isExpanded);
-  };
-
-  const handleSelect = (fieldType: BuildModeFieldType) => {
-    onFieldSelect(fieldType);
-    setIsExpanded(false);
-  };
-
   if (!isVisible) return null;
-
   return (
-    <div
-      className={styles.container}
-      style={{ bottom: bottomOffset }}
-      data-expanded={isExpanded}
+    <Button
+      type="button"
+      onClick={onClick}
+      rounded="full"
+      colorPalette="gray"
+      bg="bg.inverted"
+      color="fg.inverted"
+      size="lg"
+      h="11"
+      px={8}
+      shadow="lg"
     >
-      {/* Backdrop when expanded */}
-      {isExpanded && (
-        <div
-          className={styles.backdrop}
-          onClick={() => setIsExpanded(false)}
-          aria-hidden="true"
-        />
-      )}
-
-      {/* Speed dial menu */}
-      <div className={`${styles.menu} ${isExpanded ? styles.expanded : ""}`}>
-        {fieldActions.map((action, index) => (
-          <button
-            key={action.id}
-            type="button"
-            className={styles.menuItem}
-            onClick={() => handleSelect(action.id)}
-            style={{
-              transitionDelay: isExpanded ? `${index * 30}ms` : "0ms",
-            }}
-            aria-label={action.label}
-          >
-            <span className={styles.menuIcon}>{action.icon}</span>
-            <span className={styles.menuLabel}>{action.label}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Main FAB button */}
-      <button
-        type="button"
-        className={`${styles.fab} ${isExpanded ? styles.active : ""}`}
-        onClick={handleToggle}
-        aria-expanded={isExpanded}
-        aria-label={isExpanded ? "Close menu" : "Add field"}
-      >
-        <Plus
-          weight="bold"
-          size={24}
-          className={styles.fabIcon}
-        />
-      </button>
-    </div>
+      <Icon asChild boxSize="4">
+        <PlusIcon weight="bold" />
+      </Icon>
+      Add field
+    </Button>
   );
 };
 
-export default FloatingActionButton;
+export interface AddFieldListProps {
+  /** Called with the chosen type. The caller closes the drawer. */
+  onSelect: (fieldType: BuildModeFieldType) => void;
+}
 
+/** Body of the "Add a field" drawer: one row per field type (RowActions sheet). */
+export const AddFieldList: React.FC<AddFieldListProps> = ({ onSelect }) => (
+  <Stack gap={2}>
+    {ADD_FIELD_ACTIONS.map((action) => (
+      <Button
+        key={action.id}
+        type="button"
+        variant="outline"
+        size="lg"
+        w="full"
+        px={3}
+        justifyContent="flex-start"
+        fontWeight="normal"
+        onClick={() => onSelect(action.id)}
+      >
+        <Icon asChild boxSize="5" color="fg.muted">
+          {action.icon}
+        </Icon>
+        {action.label}
+      </Button>
+    ))}
+  </Stack>
+);
+
+export default FloatingActionButton;

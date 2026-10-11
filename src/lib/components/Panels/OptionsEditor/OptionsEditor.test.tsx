@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
+import { renderWithChakra as render } from "../../../testUtils";
 import { OptionsEditor } from "./OptionsEditor";
 
 const noop = () => {};
@@ -102,5 +103,75 @@ describe("OptionsEditor", () => {
 
     await user.click(addButton);
     expect(onAddOption).not.toHaveBeenCalled();
+  });
+
+  it("shows the option count as a badge next to the Options heading", () => {
+    render(
+      <OptionsEditor
+        options={[
+          { exportValue: "a", displayValue: "A" },
+          { exportValue: "b", displayValue: "B" },
+          { exportValue: "c", displayValue: "C" },
+        ]}
+        onAddOption={noop}
+        onRemoveOption={noop}
+      />
+    );
+    const group = screen.getByRole("group", { name: "Options" });
+    expect(group).toHaveTextContent("3");
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+  });
+
+  it("puts type=button on every button (the host wraps the editor in a form)", () => {
+    render(
+      <OptionsEditor
+        options={[{ exportValue: "a", displayValue: "A" }]}
+        onAddOption={noop}
+        onRemoveOption={noop}
+      />
+    );
+    for (const button of screen.getAllByRole("button")) {
+      expect(button).toHaveAttribute("type", "button");
+    }
+  });
+
+  describe("A7: no options", () => {
+    it("warns when there are no options", () => {
+      render(
+        <OptionsEditor options={[]} onAddOption={noop} onRemoveOption={noop} />
+      );
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent("No options");
+      expect(alert).toHaveTextContent(
+        "Add at least one option so signers can choose."
+      );
+    });
+
+    it("clears the warning once an option is added", () => {
+      const { rerender } = render(
+        <OptionsEditor options={[]} onAddOption={noop} onRemoveOption={noop} />
+      );
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+      rerender(
+        <OptionsEditor
+          options={[{ exportValue: "a", displayValue: "A" }]}
+          onAddOption={noop}
+          onRemoveOption={noop}
+        />
+      );
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("can leave the warning to the parent (showEmptyWarning={false})", () => {
+      render(
+        <OptionsEditor
+          options={[]}
+          onAddOption={noop}
+          onRemoveOption={noop}
+          showEmptyWarning={false}
+        />
+      );
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
   });
 });

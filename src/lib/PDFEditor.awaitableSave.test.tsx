@@ -1,6 +1,7 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, waitFor } from "@testing-library/react";
+import { act, waitFor } from "@testing-library/react";
+import { renderWithChakra } from "./testUtils";
 import { PDFDocument } from "pdf-lib";
 
 import PDFEditor, { PDFEditorRef } from "./PDFEditor";
@@ -119,7 +120,7 @@ describe("PDFEditor awaitable onSave", () => {
 
   async function mountEditor(onSave: (bytes: Uint8Array) => void | Promise<void>) {
     const ref = React.createRef<PDFEditorRef>();
-    const utils = render(
+    const utils = renderWithChakra(
       <PDFEditor
         ref={ref}
         src="fake://document.pdf"
@@ -142,7 +143,11 @@ describe("PDFEditor awaitable onSave", () => {
           resolveHostSave = resolve;
         })
     );
-    const { ref, getByText, queryByText } = await mountEditor(onSave);
+    const { ref, getAllByRole } = await mountEditor(onSave);
+    // The header's polite live region announces "Saving" / "Unsaved
+    // changes" / "All changes saved".
+    const saveStatus = () =>
+      getAllByRole("status").map((el) => el.textContent ?? "");
 
     let savePromise!: Promise<void>;
     act(() => {
@@ -152,7 +157,7 @@ describe("PDFEditor awaitable onSave", () => {
     // Host promise is pending: the header must say so.
     await waitFor(() => {
       expect(onSave).toHaveBeenCalledTimes(1);
-      expect(getByText("Saving")).toBeTruthy();
+      expect(saveStatus()).toContain("Saving");
     });
 
     await act(async () => {
@@ -161,7 +166,7 @@ describe("PDFEditor awaitable onSave", () => {
     });
 
     await waitFor(() => {
-      expect(queryByText("Saving")).toBeNull();
+      expect(saveStatus()).not.toContain("Saving");
     });
   });
 
@@ -173,7 +178,11 @@ describe("PDFEditor awaitable onSave", () => {
           rejectHostSave = reject;
         })
     );
-    const { ref, getByText, queryByText } = await mountEditor(onSave);
+    const { ref, getAllByRole } = await mountEditor(onSave);
+    // The header's polite live region announces "Saving" / "Unsaved
+    // changes" / "All changes saved".
+    const saveStatus = () =>
+      getAllByRole("status").map((el) => el.textContent ?? "");
 
     let savePromise!: Promise<void>;
     act(() => {
@@ -185,7 +194,7 @@ describe("PDFEditor awaitable onSave", () => {
     });
 
     await waitFor(() => {
-      expect(getByText("Saving")).toBeTruthy();
+      expect(saveStatus()).toContain("Saving");
     });
 
     await act(async () => {
@@ -194,19 +203,21 @@ describe("PDFEditor awaitable onSave", () => {
     });
 
     await waitFor(() => {
-      expect(queryByText("Saving")).toBeNull();
+      expect(saveStatus()).not.toContain("Saving");
     });
   });
 
   it("void-returning onSave behaves exactly as before", async () => {
     const onSave = vi.fn();
-    const { ref, queryByText } = await mountEditor(onSave);
+    const { ref, getAllByRole } = await mountEditor(onSave);
+    const saveStatus = () =>
+      getAllByRole("status").map((el) => el.textContent ?? "");
 
     await act(async () => {
       await ref.current!.save();
     });
 
     expect(onSave).toHaveBeenCalledTimes(1);
-    expect(queryByText("Saving")).toBeNull();
+    expect(saveStatus()).not.toContain("Saving");
   });
 });

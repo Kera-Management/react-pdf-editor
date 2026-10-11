@@ -1,15 +1,20 @@
-import React, { useCallback, useEffect, useId, useRef } from "react";
-import { X } from "@phosphor-icons/react";
-import { BottomSheet } from "../Mobile/BottomSheet";
+import React from "react";
+import {
+  CloseButton,
+  Dialog,
+  Drawer,
+  Portal,
+  Separator,
+} from "@chakra-ui/react";
+import { XIcon } from "@phosphor-icons/react";
 import { useResponsive } from "../../hooks/useResponsive";
-import styles from "./Modal.module.css";
 
 export type ModalSize = "sm" | "md" | "lg";
 
 export interface ModalProps {
   /** Whether the modal is open */
   isOpen: boolean;
-  /** Called on Escape, backdrop click, close button, or (mobile) sheet dismissal */
+  /** Called on Escape, backdrop click, the close button, or (mobile) drawer dismissal */
   onClose: () => void;
   /** Dialog title, also wired to aria-labelledby */
   title: string;
@@ -21,25 +26,32 @@ export interface ModalProps {
   size?: ModalSize;
 }
 
-const FOCUSABLE_SELECTOR = [
-  "a[href]",
-  "button:not([disabled])",
-  "textarea:not([disabled])",
-  "input:not([disabled])",
-  "select:not([disabled])",
-  '[tabindex]:not([tabindex="-1"])',
-].join(", ");
+/**
+ * Desktop widths, kept from 3.x so callers' layouts don't shift. The
+ * signature pad's 480px canvas needs the `md` width to render unscaled.
+ * Chakra's own dialog sizes are a little narrower at each step.
+ */
+const MAX_WIDTH: Record<ModalSize, string> = {
+  sm: "400px",
+  md: "560px",
+  lg: "720px",
+};
 
-function getFocusable(container: HTMLElement): HTMLElement[] {
-  return Array.from(
-    container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
-  ).filter((el) => !el.hasAttribute("disabled"));
-}
+const closeButton = (
+  <CloseButton type="button" size="sm">
+    <XIcon weight="bold" />
+  </CloseButton>
+);
 
 /**
- * Native modal primitive: a centered focus-trapped dialog on desktop, the
- * existing BottomSheet on mobile. Storage- and domain-agnostic -- hosts
- * decide what goes in `children`/`footer`.
+ * Modal primitive. A Chakra `Dialog` centred on desktop and tablet, a Chakra
+ * `Drawer placement="bottom"` on mobile. Both render inside a `Portal`, so
+ * they stack above a host dialog; Chakra provides the focus trap, focus
+ * restore, Escape and outside-click dismissal.
+ *
+ * Mirrors the app's `components/Modal` (title, separators, footer) and
+ * `MobileActionsFab` (bottom drawer shell). Domain-agnostic: hosts decide
+ * what goes in `children`/`footer`.
  */
 export const Modal: React.FC<ModalProps> = ({
   isOpen,
@@ -50,124 +62,93 @@ export const Modal: React.FC<ModalProps> = ({
   size = "md",
 }) => {
   const { isMobile } = useResponsive();
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
-  const titleId = useId();
 
-  // On open: remember the opener and move focus into the dialog.
-  // On close (or unmount): restore focus to the opener.
-  useEffect(() => {
-    if (!isOpen) return undefined;
-
-    previouslyFocusedRef.current =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-
-    const node = dialogRef.current;
-    if (node) {
-      const focusable = getFocusable(node);
-      (focusable[0] ?? node).focus();
-    }
-
-    return () => {
-      previouslyFocusedRef.current?.focus();
-    };
-  }, [isOpen]);
-
-  // Escape closes regardless of desktop dialog vs mobile sheet.
-  useEffect(() => {
-    if (!isOpen) return undefined;
-
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
-      }
-    };
-
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
-  }, [isOpen, onClose]);
-
-  const handleTabTrap = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "Tab") return;
-
-    const node = dialogRef.current;
-    if (!node) return;
-
-    const focusable = getFocusable(node);
-    if (focusable.length === 0) {
-      e.preventDefault();
-      node.focus();
-      return;
-    }
-
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    const active = document.activeElement;
-
-    if (e.shiftKey) {
-      if (active === first || !node.contains(active)) {
-        e.preventDefault();
-        last.focus();
-      }
-    } else if (active === last || !node.contains(active)) {
-      e.preventDefault();
-      first.focus();
-    }
-  }, []);
-
-  const handleBackdropMouseDown = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (e.target === e.currentTarget) {
-        onClose();
-      }
-    },
-    [onClose]
-  );
-
-  if (!isOpen) return null;
+  const handleOpenChange = (details: { open: boolean }) => {
+    if (!details.open) onClose();
+  };
 
   if (isMobile) {
     return (
-      <BottomSheet isOpen={isOpen} onClose={onClose} title={title} snapPoint="partial">
-        <div className={styles.mobileBody}>{children}</div>
-        {footer && <div className={styles.mobileFooter}>{footer}</div>}
-      </BottomSheet>
+      <Drawer.Root
+        open={isOpen}
+        onOpenChange={handleOpenChange}
+        placement="bottom"
+        lazyMount
+        unmountOnExit
+      >
+        <Portal>
+          <Drawer.Backdrop />
+          <Drawer.Positioner>
+            <Drawer.Content
+              bg="bg.panel"
+              roundedTop="l3"
+              maxH="85dvh"
+              data-pdfe-modal="drawer"
+            >
+              <Drawer.Header>
+                <Drawer.Title>{title}</Drawer.Title>
+              </Drawer.Header>
+              <Drawer.CloseTrigger asChild>{closeButton}</Drawer.CloseTrigger>
+              <Drawer.Body
+                overflowY="auto"
+                pb={
+                  footer
+                    ? undefined
+                    : "calc(var(--chakra-spacing-6) + env(safe-area-inset-bottom))"
+                }
+              >
+                {children}
+              </Drawer.Body>
+              {footer && (
+                <>
+                  <Separator />
+                  <Drawer.Footer
+                    flexWrap="wrap"
+                    gap={2}
+                    pb="calc(var(--chakra-spacing-4) + env(safe-area-inset-bottom))"
+                  >
+                    {footer}
+                  </Drawer.Footer>
+                </>
+              )}
+            </Drawer.Content>
+          </Drawer.Positioner>
+        </Portal>
+      </Drawer.Root>
     );
   }
 
   return (
-    <div
-      className={styles.backdrop}
-      onMouseDown={handleBackdropMouseDown}
+    <Dialog.Root
+      open={isOpen}
+      onOpenChange={handleOpenChange}
+      placement="center"
+      size={size}
+      lazyMount
+      unmountOnExit
     >
-      <div
-        ref={dialogRef}
-        className={`${styles.dialog} ${styles[size]}`}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        onKeyDown={handleTabTrap}
-      >
-        <div className={styles.header}>
-          <h2 id={titleId} className={styles.title}>
-            {title}
-          </h2>
-          <button
-            type="button"
-            className={styles.closeButton}
-            onClick={onClose}
-            aria-label="Close"
-          >
-            <X weight="bold" size={18} />
-          </button>
-        </div>
-        <div className={styles.body}>{children}</div>
-        {footer && <div className={styles.footer}>{footer}</div>}
-      </div>
-    </div>
+      <Portal>
+        <Dialog.Backdrop />
+        <Dialog.Positioner>
+          <Dialog.Content maxW={MAX_WIDTH[size]} data-pdfe-modal="dialog">
+            <Dialog.Header>
+              <Dialog.Title>{title}</Dialog.Title>
+            </Dialog.Header>
+            <Dialog.CloseTrigger asChild>{closeButton}</Dialog.CloseTrigger>
+            <Separator />
+            <Dialog.Body pt={4}>{children}</Dialog.Body>
+            {footer && (
+              <>
+                <Separator />
+                <Dialog.Footer flexWrap="wrap" gap={2} pt={4}>
+                  {footer}
+                </Dialog.Footer>
+              </>
+            )}
+          </Dialog.Content>
+        </Dialog.Positioner>
+      </Portal>
+    </Dialog.Root>
   );
 };
 

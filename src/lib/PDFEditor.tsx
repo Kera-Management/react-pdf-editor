@@ -6,8 +6,9 @@ import React, {
   forwardRef,
   useCallback,
   useEffect,
-  useId,
   useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -47,27 +48,35 @@ import { useResponsive } from "./hooks/useResponsive";
 import { usePanelState } from "./hooks/usePanelState";
 import { useFieldValues, type FieldValueMap } from "./hooks/useFieldValues";
 import HeaderBar from "./components/Toolbar/HeaderBar";
-import { PageThumbnails } from "./components/Panels/PageThumbnails";
-import { FieldPalette } from "./components/Panels/FieldPalette";
-import { PropertiesPanel } from "./components/Panels/PropertiesPanel";
-import { ProgressPanel } from "./components/Panels/ProgressPanel";
+import type { ProgressPanelProps } from "./components/Panels/ProgressPanel";
 import {
-  PartiesPanel,
   type PartiesConfig,
   type PartiesSelection,
   type PartyRole,
 } from "./components/Panels/PartiesPanel";
 import type { PartiesPanelAssignMode } from "./components/Panels/PartiesPanel/types";
 import { ContextToolbar } from "./components/Toolbar/ContextToolbar";
-import { Popover } from "./components/Popover";
-import { OptionsEditor } from "./components/Panels/OptionsEditor";
-import { fieldTypeIcons, fieldTypeLabels } from "./components/shared/fieldTypeMeta";
-import { BottomSheet, SnapPoint } from "./components/Mobile/BottomSheet";
-import { FloatingActionButton } from "./components/Mobile/FloatingActionButton";
+import {
+  fieldTypeLabels,
+  isFieldMissingOptions,
+} from "./components/shared/fieldTypeMeta";
 import BuildModeFieldRenderer from "./components/BuildModeFieldRenderer";
 import { SignatureAdoptionModal } from "./components/Signature/SignatureAdoptionModal";
-import { Modal } from "./components/Modal/Modal";
-import { Signature, Spinner, Warning } from "@phosphor-icons/react";
+import { SignatureIcon, WarningIcon } from "@phosphor-icons/react";
+import { Alert } from "@chakra-ui/react";
+import { EditorLayout, type EditorLayoutKind } from "./shell/EditorLayout";
+import {
+  LeftSidebar,
+  RAIL_EASING,
+  RAIL_TRANSITION_MS,
+  RAIL_WIDTH,
+} from "./shell/LeftSidebar";
+import { RightSidebar } from "./shell/RightSidebar";
+import { FieldSettingsPopover } from "./shell/FieldSettingsPopover";
+import { ConfirmDialogs, OptionsEditorDialog } from "./shell/ConfirmDialogs";
+import { MobileChrome, type MobileDrawer } from "./shell/MobileChrome";
+import { FIELD_ACTION_BAR_CLEARANCE } from "./components/Mobile/FieldActionBar";
+import { StatusStates } from "./shell/StatusStates";
 
 export interface PDFFormFields {
   [x: string]: string;
@@ -117,12 +126,7 @@ interface PDFFormRawField {
 
 // Extended field type for build mode
 export type BuildModeFieldType =
-  | "text"
-  | "checkbox"
-  | "dropdown"
-  | "radio"
-  | "multiline"
-  | "signature";
+  "text" | "checkbox" | "dropdown" | "radio" | "multiline" | "signature";
 
 export interface BuildModeField {
   id: string;
@@ -161,9 +165,87 @@ interface PDFPageAndFormFields {
   fields?: PDFFormRawField[];
 }
 
+/** How long a guided-navigation target keeps `data-flash` (C6). */
+const FIELD_FLASH_MS = 1200;
+
+/** Index of 100% in `zoomLevels`. */
+const DEFAULT_ZOOM_INDEX = 4;
+
+/** Default size (PDF points) of a newly placed field, per type. */
+const DEFAULT_FIELD_DIMENSIONS: Record<
+  BuildModeFieldType,
+  { width: number; height: number }
+> = {
+  text: { width: 115, height: 16 },
+  multiline: { width: 300, height: 80 },
+  checkbox: { width: 16, height: 16 },
+  dropdown: { width: 115, height: 16 },
+  radio: { width: 100, height: 16 },
+  signature: { width: 115, height: 16 },
+};
+
+// Layout effects warn during SSR; the editor only lays out in the browser.
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
+/**
+ * The rail slide's in-flight `scale()` on the page wrapper (1 when none).
+ * Anything turning a screen rect into PDF units must multiply the zoom by
+ * this, or a click/drop during the 220ms slide lands in the wrong place.
+ */
+const railTransformScale = (wrapper: HTMLElement | null): number => {
+  if (!wrapper || !wrapper.style.transform) return 1;
+  if (typeof DOMMatrixReadOnly === "undefined") return 1;
+  const transform = window.getComputedStyle(wrapper).transform;
+  if (!transform || transform === "none") return 1;
+  return new DOMMatrixReadOnly(transform).a || 1;
+};
+
+const prefersReducedMotion = () =>
+  typeof window !== "undefined" &&
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/**
+ * Fit-to-width (B7/C4): index of the LARGEST zoom step that still fits
+ * `availableWidth`, or 0 when even the smallest is too wide. The one rule
+ * shared by the fit button, resize re-fit and the rail slide's prediction.
+ */
+const fitZoomIndex = (availableWidth: number, maxPageWidth: number) => {
+  const fitScale = availableWidth / maxPageWidth;
+  let fitIndex = 0;
+  for (let i = 0; i < zoomLevels.length; i++) {
+    if (zoomLevels[i] <= fitScale) fitIndex = i;
+  }
+  return fitIndex;
+};
+
 const zoomLevels = [
   0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 3.5, 4.0,
 ];
+
+/** Build-mode selection (A6): the primary field plus every selected id. */
+interface FieldSelection {
+  primary: string | null;
+  ids: string[];
+}
+
+const EMPTY_SELECTION: FieldSelection = { primary: null, ids: [] };
+
+/**
+ * Drops one field from a selection. If it was the primary, the primary
+ * falls back to the most recently added remaining field. The one rule for
+ * both Shift-click deselect and deleting a selected field.
+ */
+const removeFromSelection = (
+  prev: FieldSelection,
+  fieldId: string
+): FieldSelection => {
+  const ids = prev.ids.filter((id) => id !== fieldId);
+  const primary =
+    prev.primary === fieldId ? (ids[ids.length - 1] ?? null) : prev.primary;
+  return { primary, ids };
+};
 
 /** Party ids whose role is currently "excluded", read out of a roles record. */
 const computeExcludedFromRoles = (
@@ -252,11 +334,19 @@ export interface PDFEditorProps {
   ) => void | Promise<void>;
   /** Optional mapping from field name to participant ids for enforcement in edit mode. If not provided, will be automatically extracted from PDF metadata. */
   fieldAssignments?: Record<string, string[]>;
-  /** Theme for the editor UI. Defaults to "light". */
+  /**
+   * @deprecated Since 4.0.0 this is ignored. The editor's chrome is Chakra
+   * UI and follows the host's colour mode (the `.dark` class set by
+   * next-themes); the canvas variables in `theme.css` key off the same
+   * class. Kept only so existing hosts still type-check.
+   */
   theme?: "light" | "dark";
   /** Optional callback when the close button is clicked */
   onClose?: () => void;
-  /** Allowed modes to show in the mode selector. Defaults to all modes. */
+  /**
+   * Modes offered in the header's mode menu. Defaults to `[mode]` (since
+   * 3.0.0), so the menu only renders when a host passes two or more.
+   */
   allowedModes?: PDFEditorMode[];
   /**
    * Optional callback for a download action. When provided, a Download button
@@ -267,8 +357,8 @@ export interface PDFEditorProps {
   isDownloading?: boolean;
   /**
    * Generic slot for a host application to inject its own panel into the
-   * editor's side panel (desktop right sidebar + mobile sheet), alongside
-   * the built-in Properties/Progress panels. The editor renders only the
+   * editor's side panel (desktop right sidebar, tablet side drawer, mobile
+   * drawer), alongside the built-in Properties/Progress panels. The editor renders only the
    * chrome (title + section) — it has no opinion on what `content` is, so
    * host apps can put anything here without this library knowing about it.
    * Omitting this prop leaves every existing consumer pixel-identical.
@@ -393,7 +483,6 @@ const dataUrlToUint8Array = (dataUrl: string): Uint8Array => {
   return bytes;
 };
 
-
 export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
   (props, ref) => {
     const {
@@ -406,7 +495,6 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       unassignedVisibility = "readonly",
       onBuildSave,
       fieldAssignments,
-      theme = "light",
       onClose,
       // Defaults to JUST the initial mode, not every mode -- a host that
       // wants the mode switcher must opt in explicitly by passing
@@ -453,6 +541,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // "still loading" so the failure renders an error panel instead of the
     // null-forever state this used to be indistinguishable from.
     const [loadError, setLoadError] = useState<Error | null>(null);
+    // Bumped by the error state's "Try again" (C7). A dependency of the
+    // document-load effect, so a retry re-runs getDocument() for the same
+    // `src` without the host having to remount the editor.
+    const [retryNonce, setRetryNonce] = useState(0);
 
     // Field VALUES (typed text, checked/selected state) live here, entirely
     // separate from `pages` (which holds field STRUCTURE: geometry, type,
@@ -478,7 +570,38 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     const [buildModeFields, setBuildModeFields] = useState<BuildModeField[]>(
       []
     );
-    const [selectedField, setSelectedField] = useState<string | null>(null);
+    // Selection model (A6). `primary` is the field the context toolbar,
+    // popover, drag/resize handles and keyboard nudge act on; `ids` is the
+    // whole selection (primary included). Shift-click toggles a field in or
+    // out; everything else is a single selection. Batch actions (Required,
+    // Delete) apply to every id; geometry edits stay single-field.
+    const [selection, setSelection] = useState<FieldSelection>(EMPTY_SELECTION);
+    const selectedField = selection.primary;
+    const selectedFieldIds = selection.ids;
+    // Single-select (or clear) -- every pre-A6 call site keeps this exact
+    // signature, so they all collapse a multi-selection back to one field.
+    const setSelectedField = useCallback((fieldId: string | null) => {
+      setSelection((prev) =>
+        fieldId === null
+          ? prev.primary === null && prev.ids.length === 0
+            ? prev
+            : EMPTY_SELECTION
+          : prev.primary === fieldId && prev.ids.length === 1
+            ? prev
+            : { primary: fieldId, ids: [fieldId] }
+      );
+    }, []);
+    // Shift-click: add the field (and make it primary, so the toolbar
+    // follows the last click) or remove it (primary falls back to the most
+    // recently added remaining field).
+    const toggleFieldInSelection = useCallback((fieldId: string) => {
+      setSelection((prev) => {
+        if (prev.ids.includes(fieldId)) {
+          return removeFromSelection(prev, fieldId);
+        }
+        return { primary: fieldId, ids: [...prev.ids, fieldId] };
+      });
+    }, []);
     const [draggedFieldType, setDraggedFieldType] =
       useState<BuildModeFieldType | null>(null);
     // Property editing is handled inside FieldPalette now
@@ -488,7 +611,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // so the LIVE ANCHOR effect and the field Popover below can both depend
     // on its geometry without a forward reference.
     const selectedFieldData = selectedField
-      ? buildModeFields.find((f) => f.id === selectedField) ?? null
+      ? (buildModeFields.find((f) => f.id === selectedField) ?? null)
       : null;
 
     // Desktop field Popover (name/size/placeholder/options) anchored to the
@@ -496,13 +619,11 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // state, not usePanelState -- this is a lightweight anchored panel, not
     // a sidebar/sheet slot.
     const [propertiesPopoverOpen, setPropertiesPopoverOpen] = useState(false);
-    // "Edit options..." modal, opened from inside the field Popover for
+    // "Edit options" dialog, opened from inside the field Popover for
     // dropdown/radio fields only. Kept separate from propertiesPopoverOpen
-    // so the popover can step aside for it (see the Modal render below --
-    // --z-modal (500) sits BELOW --z-popover (600), so the popover would
-    // otherwise render on top of the modal's backdrop).
+    // so the popover can step aside while the dialog is up and reopen when
+    // it closes (existing flow; Chakra handles the stacking).
     const [optionsModalOpen, setOptionsModalOpen] = useState(false);
-    const fieldPopoverIdPrefix = useId();
 
     // Id of the signature field currently being signed (edit mode
     // click-to-sign), or null when the adoption modal is closed. A single
@@ -531,8 +652,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // Prepare-mode save writes fields into the PDF, and Fill & Sign renders
     // fields FROM the PDF -- so unsaved prepared fields are invisible
     // there, which reads as "my fields disappeared" without a notice.
-    const [hasUnsavedBuildChanges, setHasUnsavedBuildChanges] =
-      useState(false);
+    const [hasUnsavedBuildChanges, setHasUnsavedBuildChanges] = useState(false);
     // The blocking dialog shown when switching Prepare -> Fill & Sign while
     // prepared fields are unsaved (see handleModeChange).
     const [showUnsavedPrepareDialog, setShowUnsavedPrepareDialog] =
@@ -591,31 +711,27 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     const isPinching = useRef<boolean>(false);
 
     // New UI state
-    const { isMobile } = useResponsive();
+    const { isMobile, isTablet } = useResponsive();
     const { togglePanel, isPanelOpen } = usePanelState();
 
     // Active page tracking
     const [activePage, setActivePage] = useState(1);
+    // Page a thumbnail click is smooth-scrolling to. While set, the live
+    // page tracker ignores the pages scrolled past on the way, so the
+    // highlight doesn't jump back and forth before landing.
+    const pageJumpTargetRef = useRef<number | null>(null);
+    const pageJumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // Mobile bottom sheet state
-    const [bottomSheetOpen, setBottomSheetOpen] = useState(false);
-    const [bottomSheetSnap, setBottomSheetSnap] =
-      useState<SnapPoint>("collapsed");
+    // Mobile drawers (spec §3.11): exactly one open at a time, so a single
+    // value replaces 3.x's three independent sheet open/snap pairs (which
+    // had to close each other by hand). Opening one drawer closes the rest.
+    const [openDrawer, setOpenDrawer] = useState<MobileDrawer>(null);
 
-    // Mobile sheet state for the host-injected sidebarPanel. Kept separate
-    // from bottomSheetOpen above (which is driven by build-mode field
-    // selection) so opening one never fights the other for the same sheet.
-    const [hostPanelSheetOpen, setHostPanelSheetOpen] = useState(false);
-    const [hostPanelSheetSnap, setHostPanelSheetSnap] =
-      useState<SnapPoint>("partial");
-
-    // Mobile sheet state for the native parties panel. Its own open/snap
-    // pair, kept separate from bottomSheetOpen and hostPanelSheetOpen above,
-    // so all three sheets have independent entry points and never fight
-    // over the same surface -- the exact hostPanel pattern.
-    const [partiesSheetOpen, setPartiesSheetOpen] = useState(false);
-    const [partiesSheetSnap, setPartiesSheetSnap] =
-      useState<SnapPoint>("partial");
+    // Tablet (C9): both sidebars are overlay Drawers, collapsed by default.
+    // Kept apart from the persisted desktop panel state so collapsing them
+    // on a tablet never hides the desktop rails next time.
+    const [tabletLeftOpen, setTabletLeftOpen] = useState(false);
+    const [tabletRightOpen, setTabletRightOpen] = useState(false);
 
     // Live view of which parties are currently "excluded", used below to
     // derive assignableParticipants. Rather than lifting usePartiesState up
@@ -628,8 +744,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // selection to the host. Seeded eagerly from `parties.initial.roles` so
     // there's no render where an already-excluded party briefly still
     // counts as assignable.
-    const [excludedPartyIds, setExcludedPartyIds] = useState<Set<string>>(
-      () => computeExcludedFromRoles(parties?.initial.roles)
+    const [excludedPartyIds, setExcludedPartyIds] = useState<Set<string>>(() =>
+      computeExcludedFromRoles(parties?.initial.roles)
     );
 
     useEffect(() => {
@@ -710,6 +826,53 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // untouched -- this only ever fires once.
     const hasFitOnOpenRef = useRef(false);
 
+    // B7/C4: true once the user picks a zoom themselves (zoom buttons,
+    // reset, pinch, Ctrl/Cmd+wheel, Ctrl/Cmd +/-/0). While false, container
+    // resizes (window resize, sidebar open/close) re-fit to width; once
+    // true, the user's zoom survives them. "Fit to width" clears it again.
+    // Reset per document load.
+    const userZoomedRef = useRef(false);
+
+    // RAIL SLIDE: while the desktop pages rail animates open/shut, the
+    // canvas is pre-scaled with a CSS transform toward the zoom it will fit
+    // at, then re-rendered sharp at that zoom when the slide ends.
+    // `railAnimatingRef` keeps the resize re-fit from stepping the zoom on
+    // every frame of the slide. `railSwapRef` carries the hand-off from the
+    // transform to the real zoom (see the layout effect after renderPages).
+    const pageWrapperRef = useRef<HTMLDivElement>(null);
+    const railAnimatingRef = useRef(false);
+    const railTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // The pending end-of-slide step. Run once, by whichever comes first:
+    // the rail's own transitionend (the real end; on open the rail starts
+    // a frame late) or the backup timer.
+    const railSettleRef = useRef<(() => void) | null>(null);
+    const railSwapRef = useRef<{
+      scrollShift: number;
+      snapshots: Map<number, HTMLCanvasElement>;
+    } | null>(null);
+    // Every snapshot still on a page, with its safety timer, so a new slide
+    // or unmount can lift them all and free their pixels at once.
+    // Latest zoom for the slide's end-of-slide timer (its closure is stale).
+    const zoomLevelRef = useRef(zoomLevel);
+    zoomLevelRef.current = zoomLevel;
+    const railSnapshotsRef = useRef(
+      new Map<HTMLCanvasElement, ReturnType<typeof setTimeout> | null>()
+    );
+    const clearRailSnapshots = () => {
+      railSnapshotsRef.current.forEach((timer, node) => {
+        if (timer) clearTimeout(timer);
+        node.remove();
+      });
+      railSnapshotsRef.current.clear();
+    };
+    useEffect(
+      () => () => {
+        if (railTimerRef.current) clearTimeout(railTimerRef.current);
+        clearRailSnapshots();
+      },
+      []
+    );
+
     // SIGNER COMPLETION auto-scroll: guards the guided jump-to-first-
     // incomplete-field effect (see below) so it only ever fires once per
     // document load, not on every re-render while pagesReady stays true.
@@ -749,6 +912,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         // pass, not silently skip them because a PREVIOUS document already
         // used them up.
         hasFitOnOpenRef.current = false;
+        userZoomedRef.current = false;
         autoScrolledRef.current = false;
         try {
           const doc = await getDocument(
@@ -792,7 +956,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       // pdfDoc is keeping change while loading the pdf
       // intend not include pdfDoc as dep to avoid endless loop in this effect hook
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [src, reloadBytes]);
+    }, [src, reloadBytes, retryNonce]);
 
     useEffect(() => {
       const loadFormFieldsAndPages = async () => {
@@ -890,6 +1054,166 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [pagesReady]);
 
+    // Assignment gating for one edit-mode overlay: null when the active
+    // participant may fill it (or gating doesn't apply), else the label
+    // explaining whose it is. Shared by the DOM gating (title/aria-label/
+    // disabled, applied by renderPages and re-applied by the gating effect
+    // below whenever the labels change) and the visible B6 chip, so the two
+    // agree after every commit.
+    // The per-document assignment inputs, resolved once per change rather
+    // than per field per render (a 120-field lease re-resolved the whole
+    // mapping 240 times a keystroke). Shared by gating, the Progress panel,
+    // completion and the save gate, so they can never disagree.
+    // `pagesReady` stands in for extractedMetadata, a ref filled on every
+    // document load before pagesReady turns true.
+    //
+    // Keyed on the CONTENT of `participants` and `fieldAssignments`, not
+    // their identity: hosts usually pass both inline, so an identity key
+    // recomputed this (and gatingSignature after it) on every keystroke.
+    // Serialising them is linear and far cheaper than what it guards.
+    const participantsKey = useMemo(
+      () => JSON.stringify(participants?.map((p) => [p.id, p.label]) ?? null),
+      [participants]
+    );
+    const fieldAssignmentsKey = useMemo(
+      () => JSON.stringify(fieldAssignments ?? null),
+      [fieldAssignments]
+    );
+    const gatingInputs = useMemo(() => {
+      const effectiveAssignments = resolveEffectiveFieldAssignments(
+        fieldAssignments,
+        extractedMetadata.current.fieldAssignments
+      );
+      // First roster entry wins, as `participants.find` did.
+      const labelById = new Map<string, string>();
+      participants?.forEach((p) => {
+        const id = normalizeParticipantId(p.id);
+        if (!labelById.has(id)) labelById.set(id, p.label);
+      });
+      return {
+        effectiveAssignments,
+        hasAssignmentMapping: Object.keys(effectiveAssignments).length > 0,
+        labelById,
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [fieldAssignmentsKey, participantsKey, pagesReady]);
+
+    const getGatedLabel = (field: PDFFormRawField): string | null => {
+      if (mode !== "edit" || !activeParticipantId) return null;
+      // The HOST'S assignments win over the PDF's embedded metadata:
+      // a host passing the prop is asserting live source-of-truth
+      // data (e.g. a signing request's field->recipient pairs), and
+      // baked-in metadata can be stale or keyed in a different
+      // identity vocabulary (seen live: an inspection PDF keyed the
+      // landlord field to the ORG id while the request and the
+      // active participant used the signer's uid, so the metadata
+      // priority made every field read as someone else's).
+      // Embedded metadata remains the fallback for hosts that pass
+      // nothing, which is how lease PDFs built in Prepare work.
+      // (Shared with the progress counter and completion math via
+      // resolveEffectiveFieldAssignments -- see its doc comment for
+      // why they must never resolve this differently.)
+      const { effectiveAssignments, hasAssignmentMapping, labelById } =
+        gatingInputs;
+      // Whether a mapping exists AT ALL, not just whether THIS field
+      // has an entry -- see resolveEffectiveFieldAssignments's doc
+      // comment for the full rule. A lease with 120 AcroForm fields
+      // but only 6 explicit assignments is exactly the case this
+      // guards: without it, every one of the other 114 defaulted to
+      // "allow", so any signer could fill any field the app never
+      // meant for them (the server's field-write allowlist, e.g.
+      // Kera's submitSignerFields, rejects those submissions
+      // anyway -- but the client let the signer fill them first).
+      const assignedIds = effectiveAssignments?.[field.name];
+      const isAssigned = assignedIds
+        ? assigneesIncludeParticipant(assignedIds, activeParticipantId)
+        : !hasAssignmentMapping; // unmapped: "not yours" once ANY mapping exists, unrestricted only when none does
+      if (isAssigned) return null;
+
+      // Readonly-but-visible: tell the viewer WHY, rather than
+      // leaving a disabled field with no explanation. Resolved
+      // from the same full `participants` roster
+      // assignableParticipants/allParticipants derive from, so
+      // it names the assignee even if that party has since been
+      // excluded from the assignable list. A field with NO
+      // assignee entry at all gets its own distinct label --
+      // "assigned to someone else" and "assigned to no one in
+      // particular" are different anomalies, and conflating them
+      // as one generic message would hide which one this is.
+      const firstAssigneeId = assignedIds?.[0];
+      const assigneeLabel = firstAssigneeId
+        ? labelById.get(normalizeParticipantId(firstAssigneeId))
+        : undefined;
+      const gatedLabel = assignedIds
+        ? `Assigned to ${assigneeLabel || "another signer"}`
+        : "Not assigned to a signer";
+      return gatedLabel;
+    };
+
+    // renderPages is memoised on [pages] (see its deps note), so it reads the
+    // gating inputs through this ref rather than a stale closure: a zoom
+    // re-render must apply the CURRENT labels, not the ones from the render
+    // where `pages` last changed.
+    const gatingRef = useRef({
+      mode,
+      activeParticipantId,
+      unassignedVisibility,
+      getGatedLabel,
+    });
+    gatingRef.current = {
+      mode,
+      activeParticipantId,
+      unassignedVisibility,
+      getGatedLabel,
+    };
+
+    // Enforce assignment on one overlay element in edit mode by disabling or
+    // hiding it (rules and labels: getGatedLabel above). Stable identity:
+    // reads everything through gatingRef.
+    const applyAssignmentGating = useCallback(
+      (el: HTMLElement, field: PDFFormRawField | undefined) => {
+        if (!field) return;
+        const gating = gatingRef.current;
+        const applies = gating.mode === "edit" && !!gating.activeParticipantId;
+        const gatedLabel = applies ? gating.getGatedLabel(field) : null;
+        if (gatedLabel) {
+          // Marks what this loop changed, so it can undo exactly that.
+          el.dataset.pdfeGated = "";
+          if (gating.unassignedVisibility === "hidden") {
+            el.style.display = "none";
+          } else {
+            el.style.display = "";
+            el.setAttribute("disabled", "true");
+            el.setAttribute("title", gatedLabel);
+            el.setAttribute("aria-label", gatedLabel);
+          }
+        } else {
+          // Only undo an element this loop gated: leave anything it never
+          // touched (e.g. a view-mode overlay's own `disabled`) alone.
+          if (!("pdfeGated" in el.dataset)) return;
+          delete el.dataset.pdfeGated;
+          el.style.display = "";
+          // View mode overlays are disabled by their own JSX
+          // (`disabled={mode === "view"}`); keep that.
+          if (gating.mode !== "view") el.removeAttribute("disabled");
+          // Only clear a title/aria-label THIS gating loop added --
+          // never strips a combobox's own JSX-managed
+          // `title={field.name}`.
+          const isGatedLabel = (value: string | null) =>
+            !!value &&
+            (value.startsWith("Assigned to ") ||
+              value === "Not assigned to a signer");
+          if (isGatedLabel(el.getAttribute("title"))) {
+            el.removeAttribute("title");
+          }
+          if (isGatedLabel(el.getAttribute("aria-label"))) {
+            el.removeAttribute("aria-label");
+          }
+        }
+      },
+      []
+    );
+
     const renderPages = useCallback(
       (scale: number) => {
         let maxPageActualWidth = 0;
@@ -952,12 +1276,16 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                   renderTasksRef.current.set(pageNumber, renderTask);
                   renderTask.promise
                     .then(() => {
-                      if (renderTasksRef.current.get(pageNumber) === renderTask) {
+                      if (
+                        renderTasksRef.current.get(pageNumber) === renderTask
+                      ) {
                         renderTasksRef.current.delete(pageNumber);
                       }
                     })
                     .catch((renderError) => {
-                      if (renderTasksRef.current.get(pageNumber) === renderTask) {
+                      if (
+                        renderTasksRef.current.get(pageNumber) === renderTask
+                      ) {
                         renderTasksRef.current.delete(pageNumber);
                       }
                       // Expected whenever a newer render (another zoom
@@ -1003,122 +1331,45 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           pageDivContainer
             ?.querySelectorAll<HTMLElement>("[data-field-id]")
             .forEach((el) => {
-            const field = page.fields?.find(
-              (field) => field.id === el.dataset.fieldId
-            );
-            const rect = field?.rect?.map((x) => x * scale);
-            if (rect) {
-              // rect are [llx, lly, urx, ury]
-              /**
-               * llx: Lower-left x-coordinate (horizontal position of the lower-left corner).
-               * lly: Lower-left y-coordinate (vertical position of the lower-left corner).
-               * urx: Upper-right x-coordinate (horizontal position of the upper-right corner).
-               * ury: Upper-right y-coordinate (vertical position of the upper-right corner).
-               */
-              el.style.left = rect[0] + "px";
-              /**
-               * The coordinate system used in many graphics-related contexts, including PDF,
-               * often has the origin (0,0) located at the bottom-left corner, with the y-axis increasing upwards.
-               * This convention is known as the Cartesian coordinate system.
-               */
-              el.style.top = viewport.height - rect[3] + "px";
-              el.style.width = rect[2] - rect[0] + "px";
-              el.style.height = rect[3] - rect[1] + "px";
-            }
-
-            // Enforce assignment in edit mode by disabling or hiding
-            if (mode === "edit" && activeParticipantId && field) {
-              // The HOST'S assignments win over the PDF's embedded metadata:
-              // a host passing the prop is asserting live source-of-truth
-              // data (e.g. a signing request's field->recipient pairs), and
-              // baked-in metadata can be stale or keyed in a different
-              // identity vocabulary (seen live: an inspection PDF keyed the
-              // landlord field to the ORG id while the request and the
-              // active participant used the signer's uid, so the metadata
-              // priority made every field read as someone else's).
-              // Embedded metadata remains the fallback for hosts that pass
-              // nothing, which is how lease PDFs built in Prepare work.
-              // (Shared with the progress counter and completion math via
-              // resolveEffectiveFieldAssignments -- see its doc comment for
-              // why they must never resolve this differently.)
-              const effectiveAssignments = resolveEffectiveFieldAssignments(
-                fieldAssignments,
-                extractedMetadata.current.fieldAssignments
+              const field = page.fields?.find(
+                (field) => field.id === el.dataset.fieldId
               );
-              // Whether a mapping exists AT ALL, not just whether THIS field
-              // has an entry -- see resolveEffectiveFieldAssignments's doc
-              // comment for the full rule. A lease with 120 AcroForm fields
-              // but only 6 explicit assignments is exactly the case this
-              // guards: without it, every one of the other 114 defaulted to
-              // "allow", so any signer could fill any field the app never
-              // meant for them (the server's field-write allowlist, e.g.
-              // Kera's submitSignerFields, rejects those submissions
-              // anyway -- but the client let the signer fill them first).
-              const hasAssignmentMapping =
-                Object.keys(effectiveAssignments).length > 0;
-              const assignedIds = effectiveAssignments?.[field.name];
-              const isAssigned = assignedIds
-                ? assigneesIncludeParticipant(assignedIds, activeParticipantId)
-                : !hasAssignmentMapping; // unmapped: "not yours" once ANY mapping exists, unrestricted only when none does
-
-              if (!isAssigned) {
-                if (unassignedVisibility === "hidden") {
-                  el.style.display = "none";
-                } else {
-                  el.setAttribute("disabled", "true");
-                  // Readonly-but-visible: tell the viewer WHY, rather than
-                  // leaving a disabled field with no explanation. Resolved
-                  // from the same full `participants` roster
-                  // assignableParticipants/allParticipants derive from, so
-                  // it names the assignee even if that party has since been
-                  // excluded from the assignable list. A field with NO
-                  // assignee entry at all gets its own distinct label --
-                  // "assigned to someone else" and "assigned to no one in
-                  // particular" are different anomalies, and conflating them
-                  // as one generic message would hide which one this is.
-                  const firstAssigneeId = assignedIds?.[0];
-                  const assigneeLabel = firstAssigneeId
-                    ? participants?.find(
-                        (p) =>
-                          normalizeParticipantId(p.id) ===
-                          normalizeParticipantId(firstAssigneeId)
-                      )?.label
-                    : undefined;
-                  const gatedLabel = assignedIds
-                    ? `Assigned to ${assigneeLabel || "another signer"}`
-                    : "Not assigned to a signer";
-                  el.setAttribute("title", gatedLabel);
-                  el.setAttribute("aria-label", gatedLabel);
-                }
-              } else {
-                el.style.display = "";
-                el.removeAttribute("disabled");
-                // Only clear a title/aria-label THIS gating loop added --
-                // never strips a combobox's own JSX-managed
-                // `title={field.name}`.
-                const isGatedLabel = (value: string | null) =>
-                  !!value &&
-                  (value.startsWith("Assigned to ") ||
-                    value === "Not assigned to a signer");
-                if (isGatedLabel(el.getAttribute("title"))) {
-                  el.removeAttribute("title");
-                }
-                if (isGatedLabel(el.getAttribute("aria-label"))) {
-                  el.removeAttribute("aria-label");
-                }
+              const rect = field?.rect?.map((x) => x * scale);
+              if (rect) {
+                // rect are [llx, lly, urx, ury]
+                /**
+                 * llx: Lower-left x-coordinate (horizontal position of the lower-left corner).
+                 * lly: Lower-left y-coordinate (vertical position of the lower-left corner).
+                 * urx: Upper-right x-coordinate (horizontal position of the upper-right corner).
+                 * ury: Upper-right y-coordinate (vertical position of the upper-right corner).
+                 */
+                el.style.left = rect[0] + "px";
+                /**
+                 * The coordinate system used in many graphics-related contexts, including PDF,
+                 * often has the origin (0,0) located at the bottom-left corner, with the y-axis increasing upwards.
+                 * This convention is known as the Cartesian coordinate system.
+                 */
+                el.style.top = viewport.height - rect[3] + "px";
+                el.style.width = rect[2] - rect[0] + "px";
+                el.style.height = rect[3] - rect[1] + "px";
               }
-            }
 
-            // Required-field indicator: a single data attribute, read by a
-            // CSS rule keyed off it, covers every overlay type (text
-            // input, select, checkbox/radio, the signature button)
-            // uniformly rather than special-casing each one's JSX.
-            if (field && extractedMetadata.current.requiredFields.includes(field.name)) {
-              el.setAttribute("data-required", "true");
-            } else {
-              el.removeAttribute("data-required");
-            }
-          });
+              // Enforce assignment in edit mode by disabling or hiding.
+              applyAssignmentGating(el, field);
+
+              // Required-field indicator: a single data attribute, read by a
+              // CSS rule keyed off it, covers every overlay type (text
+              // input, select, checkbox/radio, the signature button)
+              // uniformly rather than special-casing each one's JSX.
+              if (
+                field &&
+                extractedMetadata.current.requiredFields.includes(field.name)
+              ) {
+                el.setAttribute("data-required", "true");
+              } else {
+                el.removeAttribute("data-required");
+              }
+            });
         });
         if (maxPageWidth === 0) {
           setMaxPageWidth(maxPageActualWidth);
@@ -1144,26 +1395,117 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       // remaining case where a re-render *is* legitimate: zoom changes.
       //
       // NOTE: also deliberately excludes activeParticipantId/unassignedVisibility/
-      // fieldAssignments, which the enable/disable gating above (mode === "edit"
-      // && activeParticipantId) reads. Today that's harmless because
-      // activeParticipantId is fixed before mount (set once by the signing
-      // party) and never changes without `pages` also changing, so the DOM
-      // never needs to re-gate on its own. But if a future caller starts
-      // flipping activeParticipantId post-mount (e.g. switching the active
-      // signer mid-session), this callback won't re-run and the disabled/
-      // hidden state on existing inputs will go stale until something else
-      // changes `pages`. Don't add those deps here without checking; doing so
-      // changes this callback's identity and reruns it more often, which
-      // risks re-render regressions across all 13 consumers of this library.
+      // fieldAssignments/participants, which the assignment gating reads.
+      // Gating reads them through gatingRef (always current), and the
+      // separate gating effect below re-applies it whenever the computed
+      // labels change, so post-mount changes (async assignments, switching
+      // the active signer) re-gate the DOM without re-rendering any canvas.
+      // Don't add those deps here: doing so changes this callback's identity
+      // and reruns the full canvas render, which risks re-render regressions
+      // across all 13 consumers of this library.
       // eslint-disable-next-line react-hooks/exhaustive-deps
       [pages]
     );
 
-    useEffect(() => {
+    // A layout effect so the canvases take their new size in the same frame
+    // as the field overlays (which React positions at commit). Before, a
+    // zoom change could paint one frame of overlays at the new scale over
+    // canvases at the old one.
+    useIsomorphicLayoutEffect(() => {
       if (pagesReady) {
         renderPages(zoomLevels[zoomLevel]);
       }
     }, [pagesReady, renderPages, zoomLevel]);
+
+    // RAIL SLIDE hand-off, in the same frame the pages took their new size:
+    // drop the transform, keep the anchored point where it was, and lift
+    // each snapshot once its page has re-rendered underneath it.
+    useIsomorphicLayoutEffect(() => {
+      const swap = railSwapRef.current;
+      if (!swap) return;
+      railSwapRef.current = null;
+      const wrapper = pageWrapperRef.current;
+      if (wrapper) {
+        wrapper.style.transition = "";
+        wrapper.style.transform = "";
+        wrapper.style.transformOrigin = "";
+      }
+      if (divRef.current) divRef.current.scrollTop += swap.scrollShift;
+      swap.snapshots.forEach((snapshot, pageNumber) => {
+        const remove = () => {
+          const timer = railSnapshotsRef.current.get(snapshot);
+          if (timer) clearTimeout(timer);
+          railSnapshotsRef.current.delete(snapshot);
+          snapshot.remove();
+        };
+        const task = renderTasksRef.current.get(pageNumber);
+        if (!task) {
+          remove();
+          return;
+        }
+        task.promise.then(remove, remove);
+        // Never leave a stale snapshot over the page.
+        railSnapshotsRef.current.set(snapshot, setTimeout(remove, 2000));
+      });
+    }, [zoomLevel]);
+
+    // Signature of the current gating decision for every field (edit mode
+    // with an active participant only). The effect below keys off it, so the
+    // DOM is re-gated exactly when a label or the visibility mode changes,
+    // never on value keystrokes.
+    // field id -> gated label, for every gated field (edit mode with an
+    // active participant only). Built once per change of its inputs; the
+    // B6 chips read it instead of re-running getGatedLabel per render.
+    const gatedLabelById = useMemo(() => {
+      const labels = new Map<string, string>();
+      if (!pages || mode !== "edit" || !activeParticipantId) return labels;
+      pages.forEach((page) => {
+        page.fields?.forEach((field) => {
+          const label = getGatedLabel(field);
+          if (label) labels.set(field.id, label);
+        });
+      });
+      return labels;
+      // getGatedLabel is recreated every render; these are its inputs.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [mode, activeParticipantId, gatingInputs, pages]);
+
+    const gatingSignature = useMemo(() => {
+      if (!pages) return "";
+      // Not empty when gating is off: the effect must still run once to
+      // undo gating left over from when it applied.
+      if (mode !== "edit" || !activeParticipantId) return "off";
+      const parts: string[] = [unassignedVisibility];
+      gatedLabelById.forEach((label, id) => parts.push(`${id}:${label}`));
+      return parts.join("\u0000");
+    }, [
+      mode,
+      activeParticipantId,
+      unassignedVisibility,
+      gatedLabelById,
+      pages,
+    ]);
+
+    // Re-apply assignment gating when its inputs change after the canvas
+    // rendered (renderPages only runs on `pages`/zoom changes), so the
+    // overlays' disabled/title/aria-label always match the B6 chips.
+    useEffect(() => {
+      if (!pagesReady || !gatingSignature || !pages) return;
+      const container = divRef.current;
+      if (!container) return;
+      pages.forEach((page) => {
+        const pageDivContainer = container.querySelector(
+          "div#page_div_container_" + page.proxy.pageNumber
+        );
+        pageDivContainer
+          ?.querySelectorAll<HTMLElement>("[data-field-id]")
+          .forEach((el) => {
+            const field = page.fields?.find((f) => f.id === el.dataset.fieldId);
+            applyAssignmentGating(el, field);
+          });
+      });
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [gatingSignature, pagesReady, applyAssignmentGating]);
 
     // Cancel any still-in-flight page renders on unmount so a resolving/
     // rejecting RenderTask never touches a canvas that's gone.
@@ -1216,9 +1558,13 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
               bestPage = pageNumber;
             }
           });
-          if (bestPage !== null) {
-            setActivePage(bestPage);
+          if (bestPage === null) return;
+          const target = pageJumpTargetRef.current;
+          if (target !== null) {
+            if (bestPage !== target) return;
+            pageJumpTargetRef.current = null;
           }
+          setActivePage(bestPage);
         },
         {
           root: container,
@@ -1234,59 +1580,114 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       return () => observer.disconnect();
     }, [pages]);
 
-    // re-calculate view scale level on window resize event.
+    // Fit-to-width (B7/C4): the LARGEST predefined zoom step that still
+    // fits the available width, falling back to the smallest step when even
+    // that is too wide. The old "closest step" logic could round UP past the
+    // container (a 360px phone landed at 125%), and its `|| 6` fallback
+    // turned a legitimate index 0 into 125% as well.
     const resetViewScale = useCallback(
-      (divWidth: number | undefined) => {
-        if (divWidth && maxPageWidth) {
-          const scaleValue = divWidth / maxPageWidth;
-          let minDifference = Infinity;
-          let closestZoomLevel;
-          for (let i = 0; i < zoomLevels.length; i++) {
-            const difference = Math.abs(scaleValue - zoomLevels[i]);
-            if (difference < minDifference) {
-              minDifference = difference;
-              closestZoomLevel = i;
-            }
-          }
-          setZoomLevel(closestZoomLevel || 6);
-        }
+      (availableWidth: number | undefined) => {
+        if (!availableWidth || !maxPageWidth) return;
+        setZoomLevel(fitZoomIndex(availableWidth, maxPageWidth));
       },
       [maxPageWidth]
     );
 
+    // Width the pages can actually use: the scroller's inner width minus
+    // its horizontal padding. Falls back to offsetWidth where clientWidth
+    // isn't laid out (jsdom).
+    const getAvailableCanvasWidth = useCallback((): number | undefined => {
+      const el = divRef.current;
+      if (!el) return undefined;
+      const inner = el.clientWidth || el.offsetWidth;
+      if (!inner) return undefined;
+      let padding = 0;
+      if (typeof window !== "undefined" && window.getComputedStyle) {
+        const cs = window.getComputedStyle(el);
+        padding =
+          (parseFloat(cs.paddingLeft) || 0) +
+          (parseFloat(cs.paddingRight) || 0);
+      }
+      return Math.max(inner - padding, 0);
+    }, []);
+
     // FIT-WIDTH ON OPEN: the moment maxPageWidth is first measured for this
     // document, fit it to the container's width -- exactly once, guarded by
     // hasFitOnOpenRef (reset per document load above) so later re-measures
-    // (a resize, a zoom button, pinch) never get silently overridden by
-    // this running again.
+    // never get silently overridden by this running again.
     useEffect(() => {
       if (maxPageWidth > 0 && !hasFitOnOpenRef.current) {
         hasFitOnOpenRef.current = true;
-        resetViewScale(divRef.current?.offsetWidth);
+        resetViewScale(getAvailableCanvasWidth());
       }
-    }, [maxPageWidth, resetViewScale]);
+    }, [maxPageWidth, resetViewScale, getAvailableCanvasWidth]);
 
+    // Re-fit when the canvas width changes -- window resizes AND layout
+    // changes such as the pages sidebar opening/closing -- but only while
+    // the user hasn't chosen a zoom themselves (userZoomedRef). Keyed on the
+    // scroller's OUTER width (offsetWidth includes the scrollbar), so a
+    // scrollbar appearing after a zoom change can't feed back into another
+    // re-fit.
     useEffect(() => {
-      const handleResize = () => {
-        resetViewScale(divRef?.current?.offsetWidth);
+      const el = divRef.current;
+      let lastOuterWidth = el?.offsetWidth ?? 0;
+      const refit = () => {
+        const outer = divRef.current?.offsetWidth ?? 0;
+        if (outer === lastOuterWidth) return;
+        lastOuterWidth = outer;
+        // The rail slide sets the zoom itself when it ends.
+        if (railAnimatingRef.current) return;
+        if (userZoomedRef.current) return;
+        resetViewScale(getAvailableCanvasWidth());
       };
-      window.addEventListener("resize", handleResize);
+      const handleWindowResize = () => {
+        // Window resizes always count, even if the observer below already
+        // recorded the width (it may not exist in this environment).
+        // The rail slide sets the zoom itself when it ends.
+        if (railAnimatingRef.current) return;
+        if (userZoomedRef.current) return;
+        lastOuterWidth = divRef.current?.offsetWidth ?? 0;
+        resetViewScale(getAvailableCanvasWidth());
+      };
+      window.addEventListener("resize", handleWindowResize);
+      let observer: ResizeObserver | undefined;
+      if (el && typeof ResizeObserver !== "undefined") {
+        observer = new ResizeObserver(refit);
+        observer.observe(el);
+      }
       return () => {
-        window.removeEventListener("resize", handleResize);
+        window.removeEventListener("resize", handleWindowResize);
+        observer?.disconnect();
       };
-    }, [resetViewScale]);
+      // docReady/pagesReady: divRef only exists once the editor (not the
+      // loading state) has rendered.
+    }, [resetViewScale, getAvailableCanvasWidth, docReady, pagesReady]);
 
-    // HeaderBar's fit-to-width button: reuses the exact same "closest
-    // predefined zoom step" logic the resize handler above already uses.
+    // HeaderBar's fit-to-width button: an explicit fit, so later resizes
+    // follow the container again.
     const handleFitZoom = useCallback(() => {
-      resetViewScale(divRef.current?.offsetWidth);
-    }, [resetViewScale]);
+      userZoomedRef.current = false;
+      resetViewScale(getAvailableCanvasWidth());
+    }, [resetViewScale, getAvailableCanvasWidth]);
 
     // HeaderBar's reset-zoom button: back to 100%, regardless of how far a
     // fit or manual zoom drifted from it.
     const handleResetZoom = useCallback(() => {
+      userZoomedRef.current = true;
       const defaultIndex = zoomLevels.indexOf(1.0);
-      setZoomLevel(defaultIndex >= 0 ? defaultIndex : 6);
+      setZoomLevel(defaultIndex >= 0 ? defaultIndex : DEFAULT_ZOOM_INDEX);
+    }, []);
+
+    // Manual zoom steps shared by the header buttons, Ctrl/Cmd+wheel and
+    // the Ctrl/Cmd +/- keys (C5).
+    const handleZoomIn = useCallback(() => {
+      userZoomedRef.current = true;
+      setZoomLevel((prev) => Math.min(prev + 1, zoomLevels.length - 1));
+    }, []);
+
+    const handleZoomOut = useCallback(() => {
+      userZoomedRef.current = true;
+      setZoomLevel((prev) => Math.max(prev - 1, 0));
     }, []);
 
     // Pinch-to-zoom handlers
@@ -1314,6 +1715,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         const threshold = 30; // Pixels needed to trigger zoom change
 
         if (Math.abs(delta) > threshold) {
+          userZoomedRef.current = true;
           if (delta > 0 && zoomLevel < zoomLevels.length - 1) {
             setZoomLevel((prev) => Math.min(prev + 1, zoomLevels.length - 1));
           } else if (delta < 0 && zoomLevel > 0) {
@@ -1356,6 +1758,112 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         container.removeEventListener("touchend", handleTouchEnd);
       };
     }, [handlePinchZoom, handlePinchEnd]);
+
+    // C5: Ctrl/Cmd + wheel zooms the document instead of the browser page.
+    // Non-passive so preventDefault() actually stops the browser zoom.
+    // Deltas accumulate and step one zoom level per WHEEL_ZOOM_THRESHOLD
+    // pixels: a mouse notch (~100px) is one step, like the header buttons,
+    // while a trackpad pinch (a stream of small ctrlKey deltas) zooms
+    // gradually instead of racing through every level (and re-rendering
+    // every canvas) in a fraction of a second.
+    useEffect(() => {
+      const container = divRef.current;
+      if (!container) return undefined;
+      const WHEEL_ZOOM_THRESHOLD = 50;
+      // A pause this long ends a gesture, so a leftover partial delta can't
+      // join a later, unrelated one.
+      const WHEEL_GESTURE_GAP_MS = 300;
+      let accumulated = 0;
+      let lastWheelAt = -Infinity;
+      const handleWheel = (e: WheelEvent) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        e.preventDefault();
+        if (e.deltaY === 0) return;
+        // deltaMode 1 = lines (Firefox mouse wheel), 2 = pages: each event
+        // is a whole notch, so it is one step however few px it reports
+        // (Firefox's 3 lines x 16px = 48 fell under the threshold).
+        if (e.deltaMode !== 0) {
+          accumulated = 0;
+          if (e.deltaY < 0) handleZoomIn();
+          else handleZoomOut();
+          return;
+        }
+        const delta = e.deltaY;
+        if (e.timeStamp - lastWheelAt > WHEEL_GESTURE_GAP_MS) accumulated = 0;
+        lastWheelAt = e.timeStamp;
+        // A change of direction starts a fresh gesture.
+        if (Math.sign(delta) !== Math.sign(accumulated)) accumulated = 0;
+        accumulated += delta;
+        if (Math.abs(accumulated) < WHEEL_ZOOM_THRESHOLD) return;
+        if (accumulated < 0) handleZoomIn();
+        else handleZoomOut();
+        accumulated = 0;
+      };
+      container.addEventListener("wheel", handleWheel, { passive: false });
+      return () => container.removeEventListener("wheel", handleWheel);
+    }, [handleZoomIn, handleZoomOut, docReady, pagesReady]);
+
+    // Whether the most recent pointer press landed inside this editor. Key
+    // handlers that also accept events aimed at <body> (where focus falls
+    // after clicking a non-focusable spot) check it, so a click elsewhere
+    // on the host page hands those keys (Esc, browser zoom) back to it.
+    const lastPressInEditorRef = useRef(false);
+    useEffect(() => {
+      const handlePointerDown = (e: PointerEvent) => {
+        const root = divRef.current?.closest(".pdf-editor-root");
+        lastPressInEditorRef.current =
+          !!root && e.target instanceof Node && root.contains(e.target);
+      };
+      window.addEventListener("pointerdown", handlePointerDown, {
+        capture: true,
+      });
+      return () =>
+        window.removeEventListener("pointerdown", handlePointerDown, {
+          capture: true,
+        });
+    }, []);
+
+    // C5: Ctrl/Cmd + "=" / "+" zooms in, "-" zooms out, "0" resets to 100%.
+    // Only while focus is inside this editor, or nowhere (<body>) when the
+    // user's last click was inside it. Never while typing in a field, so
+    // host-page shortcuts, browser zoom and native text editing keep
+    // working everywhere else on the page.
+    useEffect(() => {
+      const isEditableTarget = (target: EventTarget | null) => {
+        if (!(target instanceof HTMLElement)) return false;
+        const tag = target.tagName;
+        return (
+          tag === "INPUT" ||
+          tag === "TEXTAREA" ||
+          tag === "SELECT" ||
+          target.isContentEditable
+        );
+      };
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+        if (isEditableTarget(e.target)) return;
+        const root = divRef.current?.closest(".pdf-editor-root");
+        if (!root) return;
+        const target = e.target as Node | null;
+        const inEditor =
+          !!target &&
+          (root.contains(target) ||
+            (target === document.body && lastPressInEditorRef.current));
+        if (!inEditor) return;
+        if (e.key === "=" || e.key === "+") {
+          e.preventDefault();
+          handleZoomIn();
+        } else if (e.key === "-" || e.key === "_") {
+          e.preventDefault();
+          handleZoomOut();
+        } else if (e.key === "0") {
+          e.preventDefault();
+          handleResetZoom();
+        }
+      };
+      window.addEventListener("keydown", handleKeyDown);
+      return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [handleZoomIn, handleZoomOut, handleResetZoom]);
 
     const getAllFieldsValue = () => {
       // Get field values from the fieldValues map (keyed by field id), not
@@ -1429,10 +1937,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       const completion = calculateParticipantCompletion({
         metadata: {
           ...extractedMetadata.current,
-          fieldAssignments: resolveEffectiveFieldAssignments(
-            fieldAssignments,
-            extractedMetadata.current.fieldAssignments
-          ),
+          fieldAssignments: gatingInputs.effectiveAssignments,
         },
         formFields,
         participantId: activeParticipantId,
@@ -1499,16 +2004,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
 
     const addBuildModeField = useCallback(
       (type: BuildModeFieldType, x: number, y: number, pageNumber: number) => {
-        const defaultDimensions = {
-          text: { width: 115, height: 16 },
-          multiline: { width: 300, height: 80 },
-          checkbox: { width: 16, height: 16 },
-          dropdown: { width: 115, height: 16 },
-          radio: { width: 100, height: 16 },
-          signature: { width: 115, height: 16 },
-        };
-
-        const dimensions = defaultDimensions[type];
+        const dimensions = DEFAULT_FIELD_DIMENSIONS[type];
         const fieldId = generateFieldId();
 
         setBuildModeFields((prev) => [
@@ -1539,7 +2035,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         setIsDirty(true);
         setHasUnsavedBuildChanges(true);
       },
-      []
+      [setSelectedField]
     );
 
     // Handle touch drop for mobile build mode
@@ -1561,7 +2057,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         if (!canvas) return;
 
         const canvasRect = canvas.getBoundingClientRect();
-        const scale = zoomLevels[zoomLevel];
+        // On-screen scale: the zoom, times any rail-slide transform.
+        const scale =
+          zoomLevels[zoomLevel] * railTransformScale(pageWrapperRef.current);
 
         const relativeX = clientX - canvasRect.left;
         const relativeY = clientY - canvasRect.top;
@@ -1628,7 +2126,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           if (field.type === "checkbox") mappedType = "checkbox";
           else if (field.type === "combobox") mappedType = "dropdown";
           else if (field.type === "radio") mappedType = "radio";
-          else if (field.type === "list") mappedType = "dropdown"; // fallback
+          else if (field.type === "list")
+            mappedType = "dropdown"; // fallback
           // A signature field is a plain PDFTextField on disk (see
           // onSaveAs) -- extracted metadata is the only record that it's a
           // signature, not ordinary text. Check it before the multiline
@@ -1650,8 +2149,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           // Get assignments for this field from extracted metadata
           const fieldAssignments =
             extractedMetadata.current.fieldAssignments[field.name] || [];
-          const isRequired =
-            extractedMetadata.current.requiredFields.includes(field.name);
+          const isRequired = extractedMetadata.current.requiredFields.includes(
+            field.name
+          );
 
           initial.push({
             id: `existing_${field.id}`,
@@ -1671,8 +2171,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 typeof field.value === "string"
                   ? field.value
                   : typeof field.defaultValue === "string"
-                  ? field.defaultValue
-                  : undefined,
+                    ? field.defaultValue
+                    : undefined,
               options: field.items,
               multiline: field.multiline,
               fontSize: 12,
@@ -1691,7 +2191,16 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     const deleteBuildModeField = useCallback(
       (fieldId: string) => {
         setBuildModeFields((prev) => prev.filter((f) => f.id !== fieldId));
-        if (selectedField === fieldId) {
+        // A member of a multi-selection just drops out of it; if it was the
+        // primary, the primary falls back to the most recently added
+        // remaining field (the same rule as Shift-click deselect).
+        if (selectedFieldIds.length > 1 && selectedFieldIds.includes(fieldId)) {
+          setSelection((prev) => removeFromSelection(prev, fieldId));
+          if (selectedField === fieldId) {
+            setPropertiesPopoverOpen(false);
+            setOptionsModalOpen(false);
+          }
+        } else if (selectedField === fieldId) {
           setSelectedField(null);
           // The field being edited/assigned just vanished -- close both the
           // properties popover and the options modal it can open.
@@ -1701,8 +2210,44 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         setIsDirty(true);
         setHasUnsavedBuildChanges(true);
       },
-      [selectedField]
+      [selectedField, selectedFieldIds, setSelectedField]
     );
+
+    // A6 batch actions from the context toolbar: apply to EVERY selected
+    // field. (Drag, resize and nudge stay single-field by design.)
+    const handleBatchRequired = useCallback(
+      (required: boolean) => {
+        if (selectedFieldIds.length === 0) return;
+        const ids = new Set(selectedFieldIds);
+        setBuildModeFields((prev) =>
+          prev.map((field) =>
+            ids.has(field.id)
+              ? { ...field, properties: { ...field.properties, required } }
+              : field
+          )
+        );
+        setIsDirty(true);
+        setHasUnsavedBuildChanges(true);
+      },
+      [selectedFieldIds]
+    );
+
+    // Field keyboard shortcuts (Delete/Backspace, Cmd/Ctrl+D) follow the
+    // toolbar: with several fields selected, Delete removes all of them and
+    // Duplicate does nothing (the toolbar disables it).
+    const isInMultiSelection = (fieldId: string) =>
+      selectedFieldIds.length > 1 && selectedFieldIds.includes(fieldId);
+
+    const handleBatchDelete = useCallback(() => {
+      if (selectedFieldIds.length === 0) return;
+      const ids = new Set(selectedFieldIds);
+      setBuildModeFields((prev) => prev.filter((field) => !ids.has(field.id)));
+      setSelectedField(null);
+      setPropertiesPopoverOpen(false);
+      setOptionsModalOpen(false);
+      setIsDirty(true);
+      setHasUnsavedBuildChanges(true);
+    }, [selectedFieldIds, setSelectedField]);
 
     const moveBuildModeField = useCallback(
       (fieldId: string, x: number, y: number) => {
@@ -1753,25 +2298,40 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
 
     // Handle field selection with single click for property editor
     const handleFieldSelect = useCallback(
-      (fieldId: string) => {
-        setSelectedField(fieldId);
-
-        // Open the bottom sheet on mobile. Only one sheet at a time: three
-        // stacked sheets share the same snap CSS and would sit on top of
-        // each other, all part-visible and none usable. Desktop no longer
-        // opens a sidebar panel here -- the ContextToolbar's "Field
-        // properties" button opens the field Popover instead (see
-        // propertiesPopoverOpen), anchored via the LIVE ANCHOR effect below
-        // rather than a one-shot measurement taken at select time.
-        if (isMobile) {
-          setHostPanelSheetOpen(false);
-          setPartiesSheetOpen(false);
-          setBottomSheetOpen(true);
-          setBottomSheetSnap("partial");
+      (fieldId: string, options?: { additive?: boolean }) => {
+        // Shift-click (desktop): toggle in the multi-selection, no sheet.
+        if (options?.additive && !isMobile) {
+          toggleFieldInSelection(fieldId);
+          // The settings popover edits ONE field and follows the primary;
+          // a shift-click changes the primary (or makes a multi-selection,
+          // where Edit is disabled), so close it rather than let it jump.
+          setPropertiesPopoverOpen(false);
+          setOptionsModalOpen(false);
+          return;
         }
+        setSelectedField(fieldId);
+        // A tap only selects, on every layout: the field keeps its live
+        // drag and resize handles. Settings open from an explicit Edit (the
+        // desktop toolbar's gear, or the mobile action bar), never as a
+        // side effect of selecting -- a modal sheet on every tap blocked
+        // moving the field the user had just tapped.
       },
-      [isMobile]
+      [isMobile, setSelectedField, toggleFieldInSelection]
     );
+
+    // Mobile Prepare: when a field is selected, make sure the docked action
+    // bar isn't covering it. Only on a change of selection, never mid-drag.
+    useEffect(() => {
+      if (!isMobile || mode !== "build" || !selectedField) return;
+      const el = divRef.current?.querySelector<HTMLElement>(
+        `[data-build-field-id="${selectedField}"]`
+      );
+      if (!el) return;
+      const barTop = window.innerHeight - parseFloat(FIELD_ACTION_BAR_CLEARANCE);
+      if (el.getBoundingClientRect().bottom > barTop) {
+        el.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      }
+    }, [isMobile, mode, selectedField]);
 
     // Computes the on-canvas rect for the field currently selected in build
     // mode. Deliberately geometry-based (the field's PDF-space x/y/width/
@@ -1789,7 +2349,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       );
       if (!pageContainer) return null;
       const containerRect = pageContainer.getBoundingClientRect();
-      const scale = zoomLevels[zoomLevel];
+      // On-screen scale: the zoom, times any rail-slide transform.
+      const scale =
+        zoomLevels[zoomLevel] * railTransformScale(pageWrapperRef.current);
       return new DOMRect(
         containerRect.left + selectedFieldData.x * scale,
         containerRect.top + selectedFieldData.y * scale,
@@ -1877,11 +2439,12 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         // Focus on the input after a short delay to ensure scroll completes
         setTimeout(() => {
           input.focus();
-          // Highlight the input briefly
-          input.style.boxShadow = "0 0 0 3px rgba(0, 178, 152, 0.3)";
+          // Flash it briefly (C6): a data attribute read by token CSS
+          // (`[data-flash]` in PDFEditor.module.css), not an inline colour.
+          input.setAttribute("data-flash", "true");
           setTimeout(() => {
-            input.style.boxShadow = "";
-          }, 2000);
+            input.removeAttribute("data-flash");
+          }, FIELD_FLASH_MS);
         }, 300);
       }
     }, []);
@@ -1902,10 +2465,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       const completion = calculateParticipantCompletion({
         metadata: {
           ...extractedMetadata.current,
-          fieldAssignments: resolveEffectiveFieldAssignments(
-            fieldAssignments,
-            extractedMetadata.current.fieldAssignments
-          ),
+          fieldAssignments: gatingInputs.effectiveAssignments,
         },
         formFields: getAllFieldsValue(),
         participantId: activeParticipantId,
@@ -1921,6 +2481,15 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // Handle page navigation from thumbnails
     const handlePageSelect = useCallback((pageNumber: number) => {
       setActivePage(pageNumber);
+      // Hold the highlight on the target until the scroll lands. The timer
+      // releases it if the target can never be the most visible page
+      // (e.g. a short last page).
+      pageJumpTargetRef.current = pageNumber;
+      if (pageJumpTimerRef.current) clearTimeout(pageJumpTimerRef.current);
+      pageJumpTimerRef.current = setTimeout(() => {
+        pageJumpTargetRef.current = null;
+        pageJumpTimerRef.current = null;
+      }, 1000);
       const pageContainer = document.querySelector(
         `#page_div_container_${pageNumber}`
       );
@@ -1928,6 +2497,13 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         pageContainer.scrollIntoView({ behavior: "smooth", block: "center" });
       }
     }, []);
+
+    useEffect(
+      () => () => {
+        if (pageJumpTimerRef.current) clearTimeout(pageJumpTimerRef.current);
+      },
+      []
+    );
 
     // Handle mode change - only allow switching to allowed modes.
     // Leaving Prepare for Fill & Sign with unsaved prepared fields gets a
@@ -1967,7 +2543,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           setHasUnsavedBuildChanges(true);
         }
       },
-      [buildModeFields]
+      [buildModeFields, setSelectedField]
     );
 
     // "Duplicate on all pages" -- the per-page-initials pain point: place
@@ -2024,25 +2600,104 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       setContextToolbarTarget(null);
       setPropertiesPopoverOpen(false);
       setOptionsModalOpen(false);
+    }, [setSelectedField]);
+
+    // Esc on the canvas clears the build-mode selection (A6). Registered as
+    // a native WINDOW capture listener, not a React onKeyDown: a host Chakra
+    // Dialog's close-on-Esc (zag's dismissable layer) listens on `document`
+    // in the capture phase, which runs before React ever dispatches, so
+    // stopPropagation there could not stop the host dialog closing. Window
+    // capture runs first, and preventDefault() makes zag skip its dismiss.
+    // Only intercepts when there is a selection to clear, so an Esc with
+    // nothing selected still reaches the host (its Dialog's close-on-Esc,
+    // which routes through requestClose). Focus elsewhere (an editor
+    // popover, a host input) is left alone so those layers close normally.
+    const canvasEscapeRef = useRef({
+      mode,
+      hasSelection: false,
+      clear: handleCanvasClick,
+    });
+    canvasEscapeRef.current = {
+      mode,
+      hasSelection: selectedField !== null || selectedFieldIds.length > 0,
+      clear: handleCanvasClick,
+    };
+    useEffect(() => {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key !== "Escape" || e.isComposing) return;
+        const {
+          mode: currentMode,
+          hasSelection,
+          clear,
+        } = canvasEscapeRef.current;
+        if (currentMode !== "build" || !hasSelection) return;
+        const scroller = divRef.current;
+        if (!scroller) return;
+        const target = e.target as Node | null;
+        const onCanvas =
+          !!target &&
+          (scroller.contains(target) ||
+            (target === document.body && lastPressInEditorRef.current));
+        if (!onCanvas) return;
+        e.preventDefault();
+        clear();
+      };
+      window.addEventListener("keydown", handleKeyDown, { capture: true });
+      return () =>
+        window.removeEventListener("keydown", handleKeyDown, { capture: true });
     }, []);
 
-    // Handle FAB field selection (mobile)
+    // Click-to-add (mobile "Add field" and the desktop palette's click /
+    // Enter), A5: place the new field at the centre of what the user can
+    // SEE, on the active page. Uses the same viewport -> page-canvas -> PDF
+    // conversion as drop (handleDrop: client point minus the page canvas's
+    // rect, divided by scale), then centres the field on that point and
+    // clamps it inside the page so it can never land off-page. The old
+    // math divided the scroller's scroll offsets by scale, which ignored
+    // where the active page actually sits in the scroll content and put
+    // fields on page 3 at page-1 coordinates (often below the page).
     const handleFABFieldSelect = useCallback(
       (fieldType: BuildModeFieldType) => {
-        // Add field to center of viewport
-        if (divRef.current && pages && pages.length > 0) {
-          const container = divRef.current;
-          const containerRect = container.getBoundingClientRect();
-          const scale = zoomLevels[zoomLevel];
+        const container = divRef.current;
+        if (!container || !pages || pages.length === 0) return;
+        const pageIndex = Math.min(Math.max(activePage, 1), pages.length) - 1;
+        const pageContainer = container.querySelector(
+          `#page_div_container_${pageIndex + 1}`
+        );
+        const canvas = pageContainer?.querySelector("canvas");
+        if (!canvas) return;
 
-          // Calculate center position
-          const centerX =
-            (containerRect.width / 2 + container.scrollLeft) / scale;
-          const centerY =
-            (containerRect.height / 2 + container.scrollTop) / scale;
+        // On-screen scale: the zoom, times any rail-slide transform.
+        const scale =
+          zoomLevels[zoomLevel] * railTransformScale(pageWrapperRef.current);
+        const containerRect = container.getBoundingClientRect();
+        const canvasRect = canvas.getBoundingClientRect();
+        const { width: fieldWidth, height: fieldHeight } =
+          DEFAULT_FIELD_DIMENSIONS[fieldType];
 
-          addBuildModeField(fieldType, centerX, centerY, activePage - 1);
-        }
+        // Page size in PDF units. The rendered canvas rect is authoritative
+        // (it reflects the current scale); the pdf.js viewport is the
+        // fallback when layout hasn't produced a size yet.
+        const pageViewport = pages[pageIndex].proxy.getViewport({ scale: 1 });
+        const pageWidth = canvasRect.width
+          ? canvasRect.width / scale
+          : pageViewport.width;
+        const pageHeight = canvasRect.height
+          ? canvasRect.height / scale
+          : pageViewport.height;
+
+        // Viewport centre, canvas-relative, in PDF units (same as drop).
+        const centreX = containerRect.left + containerRect.width / 2;
+        const centreY = containerRect.top + containerRect.height / 2;
+        const pdfCentreX = (centreX - canvasRect.left) / scale;
+        const pdfCentreY = (centreY - canvasRect.top) / scale;
+
+        const clamp = (value: number, max: number) =>
+          Math.min(Math.max(value, 0), Math.max(max, 0));
+        const x = clamp(pdfCentreX - fieldWidth / 2, pageWidth - fieldWidth);
+        const y = clamp(pdfCentreY - fieldHeight / 2, pageHeight - fieldHeight);
+
+        addBuildModeField(fieldType, x, y, pageIndex);
       },
       [pages, zoomLevel, activePage, addBuildModeField]
     );
@@ -2144,7 +2799,13 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         // coordinate space pdf-lib expects) is used directly.
         const signatureFieldRects = new Map<
           string,
-          { pageIndex: number; x: number; y: number; width: number; height: number }
+          {
+            pageIndex: number;
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+          }
         >();
         if (mode !== "build") {
           pages?.forEach((p) => {
@@ -2379,9 +3040,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             // fields) lives in signatureStampGeometry with its own tests.
             pdfPage.drawImage(
               pngImage,
-              signatureStampGeometry(rect, (w, h) =>
-                pngImage.scaleToFit(w, h)
-              )
+              signatureStampGeometry(rect, (w, h) => pngImage.scaleToFit(w, h))
             );
           } catch (error) {
             console.error(`Failed to stamp signature for ${fieldName}:`, error);
@@ -2479,10 +3138,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         const completion = calculateParticipantCompletion({
           metadata: {
             ...extractedMetadata.current,
-            fieldAssignments: resolveEffectiveFieldAssignments(
-              fieldAssignments,
-              extractedMetadata.current.fieldAssignments
-            ),
+            fieldAssignments: gatingInputs.effectiveAssignments,
           },
           formFields: getAllFieldsValue(),
           participantId: activeParticipantId,
@@ -2623,65 +3279,55 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         window.removeEventListener("beforeunload", handleBeforeUnload);
     }, [isDirty]);
 
-    // A failed getDocument() used to leave this returning null forever --
-    // indistinguishable from a hang. Show a plain error panel instead.
+    // Load failed, or still loading the document or its pages.
     if (loadError) {
       return (
-        <div
-          className={`${styles.rootContainer} ${styles.stateContainer} pdf-editor-root`}
-          data-theme={theme}
-        >
-          <div className={styles.errorPanel} role="alert">
-            <Warning
-              size={32}
-              weight="fill"
-              className={styles.errorIcon}
-              aria-hidden="true"
-            />
-            <h2 className={styles.errorHeading}>
-              We couldn&apos;t open this document
-            </h2>
-            <p className={styles.errorBody}>
-              The file may be corrupted, in an unsupported format, or missing.
-              Try reloading the page or choosing a different file.
-            </p>
-            <p className={styles.errorDetail}>{loadError.message}</p>
-          </div>
-        </div>
+        <StatusStates
+          kind="error"
+          error={loadError}
+          onClose={onClose}
+          onRetry={() => {
+            // Drop readiness in the same render as the error: the error
+            // path leaves docReady true and pagesReady may be left over
+            // from a previous document, which would otherwise render the
+            // editor over stale, destroyed pages for a frame.
+            setDocReady(false);
+            setPagesReady(false);
+            setLoadError(null);
+            setRetryNonce((n) => n + 1);
+          }}
+        />
       );
     }
-
-    // Still loading the document or its pages -- show a skeleton instead of
-    // rendering nothing, so the loading state reads as "in progress" rather
-    // than a blank screen.
     if (!docReady || !pagesReady) {
-      return (
-        <div
-          className={`${styles.rootContainer} ${styles.stateContainer} pdf-editor-root`}
-          data-theme={theme}
-        >
-          <div
-            className={`${styles.loadingSkeleton} skeleton`}
-            aria-label="Loading document"
-            role="status"
-          />
-        </div>
-      );
+      return <StatusStates kind="loading" onClose={onClose} />;
     }
 
     // Drag and drop handlers
     const handleDragOver = (e: React.DragEvent) => {
       e.preventDefault();
       e.dataTransfer.dropEffect = "copy";
+      // Drop-target outline (spec §4). Set imperatively: no re-render per
+      // dragover event.
+      e.currentTarget.setAttribute("data-drop-target", "true");
+    };
+
+    const handleDragLeave = (e: React.DragEvent) => {
+      const next = e.relatedTarget as Node | null;
+      if (next && e.currentTarget.contains(next)) return;
+      e.currentTarget.removeAttribute("data-drop-target");
     };
 
     const handleDrop = (e: React.DragEvent, pageNumber: number) => {
       e.preventDefault();
+      e.currentTarget.removeAttribute("data-drop-target");
 
       if (mode !== "build" || !draggedFieldType) return;
 
       const pageContainer = e.currentTarget as HTMLElement;
-      const scale = zoomLevels[zoomLevel];
+      // On-screen scale: the zoom, times any rail-slide transform.
+      const scale =
+        zoomLevels[zoomLevel] * railTransformScale(pageWrapperRef.current);
 
       // Calculate position relative to page container, accounting for the canvas
       const canvas = pageContainer.querySelector("canvas");
@@ -2762,7 +3408,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 ? [...current, participantId]
                 : current.filter((id) => id !== participantId);
               updateBuildModeField(selectedFieldData.id, {
-                properties: { ...selectedFieldData.properties, assignees: next },
+                properties: {
+                  ...selectedFieldData.properties,
+                  assignees: next,
+                },
               });
             },
             participants: assignableParticipants ?? [],
@@ -2806,6 +3455,16 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       });
     };
 
+    // A6: the toolbar's Required toggle reads "on" only when every selected
+    // field is required (a single selection: just that field).
+    const selectionAllRequired =
+      selectedFieldIds.length > 1
+        ? selectedFieldIds.every(
+            (id) =>
+              buildModeFields.find((f) => f.id === id)?.properties.required
+          )
+        : !!selectedFieldData?.properties.required;
+
     // Calculate zoom percentage for display
     const zoomPercentage = Math.round(zoomLevels[zoomLevel] * 100);
 
@@ -2829,165 +3488,345 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     const isFieldValueComplete = (value?: string): boolean =>
       !!value && value.trim() !== "" && value !== "Off";
 
+    // Lazily built: only computed for the surface that renders it.
+    const buildProgressPanelProps = (): ProgressPanelProps => ({
+      activeParticipantId,
+      participants: assignableParticipants,
+      fieldAssignments: gatingInputs.effectiveAssignments,
+      formFields: progressData.formFields,
+      totalFields: progressData.totalFields,
+      completedFields: progressData.completedFields,
+      mode,
+      onFieldFocus: handleFieldFocus,
+      onFinish: handleSaveClick,
+      renderedFieldNames: getRenderedFieldNames(),
+      fieldLabels,
+    });
+
+    const layout: EditorLayoutKind = isMobile
+      ? "mobile"
+      : isTablet
+        ? "tablet"
+        : "desktop";
+    const isTabletLayout = layout === "tablet";
+    const leftOpen = isTabletLayout
+      ? tabletLeftOpen
+      : isPanelOpen("thumbnails");
+    // The tablet drawer always shows every right-hand section it has: its
+    // open/closed state is tabletRightOpen alone, never the persisted
+    // desktop panel state (C9).
+    const isRightSectionOpen = (panel: "progress" | "parties" | "hostPanel") =>
+      isTabletLayout || isPanelOpen(panel);
+    const partiesSectionOpen =
+      showPartiesPanel && isRightSectionOpen("parties");
+    const hostPanelSectionOpen =
+      showSidebarPanel && isRightSectionOpen("hostPanel");
+    const desktopRightOpen =
+      isPanelOpen("progress") || hostPanelSectionOpen || partiesSectionOpen;
+    const rightOpen = isTabletLayout ? tabletRightOpen : desktopRightOpen;
+    const partiesTitle = parties?.title ?? "Recipients";
+    const sidebarVariant = isTabletLayout ? "drawer" : "rail";
+
+    // RAIL SLIDE: animate the canvas alongside the desktop rail. The pages
+    // re-centre on their own as the canvas area's width animates; this
+    // adds the zoom. It scales the page stack with a transform (cheap, no
+    // pdf.js work per frame) toward the zoom the new width will fit, then
+    // swaps in the real zoom when the slide ends. Snapshots of the visible
+    // pages cover the blank canvases while pdf.js re-renders them.
+    const settleRailSlide = () => {
+      const settle = railSettleRef.current;
+      railSettleRef.current = null;
+      if (railTimerRef.current) clearTimeout(railTimerRef.current);
+      railTimerRef.current = null;
+      settle?.();
+    };
+
+    const finishRailSlide = () => {
+      if (railTimerRef.current) clearTimeout(railTimerRef.current);
+      railTimerRef.current = null;
+      railSettleRef.current = null;
+      railAnimatingRef.current = false;
+      railSwapRef.current = null;
+      clearRailSnapshots();
+      const wrapper = pageWrapperRef.current;
+      if (wrapper) {
+        wrapper.style.transition = "";
+        wrapper.style.transform = "";
+        wrapper.style.transformOrigin = "";
+      }
+    };
+
+    const slideCanvasWithRail = (opening: boolean) => {
+      finishRailSlide();
+      const scroller = divRef.current;
+      const wrapper = pageWrapperRef.current;
+      const available = getAvailableCanvasWidth();
+      if (!scroller || !wrapper || !available || !maxPageWidth) return;
+      if (prefersReducedMotion()) return; // the resize re-fit handles it
+
+      const fromIndex = zoomLevel;
+      const predicted = userZoomedRef.current
+        ? fromIndex
+        : fitZoomIndex(
+            available + (opening ? -RAIL_WIDTH : RAIL_WIDTH),
+            maxPageWidth
+          );
+      const ratio = zoomLevels[predicted] / zoomLevels[fromIndex];
+
+      // Scale about the point in the middle of the viewport, so what the
+      // user is looking at stays put.
+      const anchorY =
+        scroller.scrollTop + scroller.clientHeight / 2 - wrapper.offsetTop;
+      railAnimatingRef.current = true;
+      if (ratio !== 1) {
+        wrapper.style.transformOrigin = `50% ${anchorY}px`;
+        wrapper.style.transition = "";
+        wrapper.style.transform = "scale(1)";
+        void wrapper.offsetWidth; // commit the start state
+        wrapper.style.transition = `transform ${RAIL_TRANSITION_MS}ms ${RAIL_EASING}`;
+        wrapper.style.transform = `scale(${ratio})`;
+      }
+
+      railSettleRef.current = () => {
+        railAnimatingRef.current = false;
+        // Fit to the width the canvas actually ended at.
+        const finalAvailable = getAvailableCanvasWidth();
+        const target =
+          userZoomedRef.current || !finalAvailable
+            ? fromIndex
+            : fitZoomIndex(finalAvailable, maxPageWidth);
+        // The zoom moved during the slide (a zoom key, a pinch): the
+        // transform no longer describes the pages, so just settle. And if
+        // the zoom is already right, setZoomLevel would be a no-op and the
+        // hand-off effect would never run, so never take the swap path then.
+        if (zoomLevelRef.current !== fromIndex || target === fromIndex) {
+          finishRailSlide();
+          if (target !== zoomLevelRef.current && !userZoomedRef.current) {
+            setZoomLevel(target);
+          }
+          return;
+        }
+        // Cover the visible pages with a copy of their current pixels: the
+        // re-render clears each canvas before pdf.js repaints it.
+        const snapshots = new Map<number, HTMLCanvasElement>();
+        const view = scroller.getBoundingClientRect();
+        scroller
+          .querySelectorAll<HTMLCanvasElement>('canvas[id^="page_canvas_"]')
+          .forEach((canvas) => {
+            const rect = canvas.getBoundingClientRect();
+            if (rect.bottom < view.top || rect.top > view.bottom) return;
+            if (!canvas.width || !canvas.height) return;
+            const copy = document.createElement("canvas");
+            copy.width = canvas.width;
+            copy.height = canvas.height;
+            const ctx = copy.getContext("2d");
+            if (!ctx) return;
+            ctx.drawImage(canvas, 0, 0);
+            copy.setAttribute("aria-hidden", "true");
+            copy.dataset.pdfeSnapshot = "";
+            Object.assign(copy.style, {
+              position: "absolute",
+              inset: "0",
+              width: "100%",
+              height: "100%",
+              pointerEvents: "none",
+            });
+            canvas.after(copy);
+            const n = Number(canvas.id.replace("page_canvas_", ""));
+            snapshots.set(n, copy);
+          });
+        const realRatio = zoomLevels[target] / zoomLevels[fromIndex];
+        railSwapRef.current = {
+          scrollShift: anchorY * (realRatio - 1),
+          snapshots,
+        };
+        setZoomLevel(target);
+      };
+      // Backup only: the rail's transitionend normally settles first.
+      railTimerRef.current = setTimeout(
+        settleRailSlide,
+        RAIL_TRANSITION_MS + 150
+      );
+    };
+
+    const toggleDesktopRail = () => {
+      slideCanvasWithRail(!leftOpen);
+      togglePanel("thumbnails");
+    };
+
+    // A8 sidebar toggle: the tablet overlay drawer, or the desktop rail.
+    const handleToggleLeftSidebar = () => {
+      if (isTabletLayout) setTabletLeftOpen((open) => !open);
+      else toggleDesktopRail();
+    };
+
+    // Opens one right-hand panel: a bottom drawer on mobile, the end drawer
+    // (showing every section) on tablet. Desktop shows the rail
+    // inline, so these entry points only exist off desktop.
+    const openRightPanel = (panel: "progress" | "parties" | "hostPanel") => {
+      if (isMobile) {
+        setOpenDrawer(panel);
+        return;
+      }
+      setTabletRightOpen(true);
+    };
+
     return (
-      <div
-        className={`${styles.rootContainer} pdf-editor-root`}
-        data-theme={theme}
-      >
-        {/* Header Bar */}
-        <HeaderBar
-          mode={mode}
-          onModeChange={handleModeChange}
-          allowedModes={allowedModes}
-          zoomPercentage={zoomPercentage}
-          onZoomIn={() =>
-            setZoomLevel((prev) => Math.min(prev + 1, zoomLevels.length - 1))
-          }
-          onZoomOut={() => setZoomLevel((prev) => Math.max(prev - 1, 0))}
-          zoomInDisabled={zoomLevel >= zoomLevels.length - 1}
-          zoomOutDisabled={zoomLevel <= 0}
-          onFitZoom={handleFitZoom}
-          onResetZoom={handleResetZoom}
-          onSave={handleSaveClick}
-          isSaving={isSaving}
-          isDirty={isDirty}
-          saveLabel={saveLabel}
-          onDownload={onDownload}
-          isDownloading={isDownloading}
-          onClose={onClose ? requestClose : undefined}
-          onDecline={onDecline ? handleDeclineClick : undefined}
-          declineLabel={declineLabel}
-          currentPage={activePage}
-          totalPages={pages?.length || 0}
-          isMobile={isMobile}
-          onToggleLeftPanel={() => togglePanel("thumbnails")}
-          onToggleHostPanel={
-            showSidebarPanel
-              ? () => {
-                  // One sheet at a time -- see handleFieldSelect's comment.
-                  setBottomSheetOpen(false);
-                  setPartiesSheetOpen(false);
-                  setHostPanelSheetOpen((open) => !open);
-                  setHostPanelSheetSnap("partial");
-                }
-              : undefined
-          }
-          hostPanelTitle={sidebarPanel?.title}
-          onToggleParties={
-            showPartiesPanel
-              ? () => {
-                  // One sheet at a time -- see handleFieldSelect's comment.
-                  setBottomSheetOpen(false);
-                  setHostPanelSheetOpen(false);
-                  setPartiesSheetOpen((open) => !open);
-                  setPartiesSheetSnap("partial");
-                }
-              : undefined
-          }
-          progressSummary={
-            mode === "edit"
-              ? {
-                  completed: progressData.completedFields,
-                  total: progressData.totalFields,
-                }
-              : undefined
-          }
-          onOpenProgress={
-            mode === "edit"
-              ? () => {
-                  // One sheet at a time -- see handleFieldSelect's comment.
-                  // Edit mode's BottomSheet already renders ProgressPanel
-                  // (see the mode === "build" ? Properties : Progress
-                  // branch below) -- this just adds the mobile entry point
-                  // into it.
-                  setHostPanelSheetOpen(false);
-                  setPartiesSheetOpen(false);
-                  setBottomSheetOpen(true);
-                  setBottomSheetSnap("partial");
-                }
-              : undefined
-          }
-        />
-
-        {/* Main Layout */}
-        <div className={styles.mainLayout}>
-          {/* Left Sidebar - Desktop only */}
-          {!isMobile && (
-            <div
-              className={`${styles.leftSidebar} ${
-                !isPanelOpen("thumbnails") ? styles.collapsed : ""
-              }`}
+      <EditorLayout
+        layout={layout}
+        leftOpen={leftOpen}
+        onLeftOpenChange={(open) => {
+          if (isTabletLayout) setTabletLeftOpen(open);
+          else if (open !== leftOpen) toggleDesktopRail();
+        }}
+        rightOpen={rightOpen}
+        onRightOpenChange={(open) => {
+          // Only the tablet end drawer is driven from here; the desktop
+          // rail follows its sections' own open state.
+          if (isTabletLayout) setTabletRightOpen(open);
+        }}
+        header={
+          <HeaderBar
+            mode={mode}
+            onModeChange={handleModeChange}
+            allowedModes={allowedModes}
+            zoomPercentage={zoomPercentage}
+            onZoomIn={handleZoomIn}
+            onZoomOut={handleZoomOut}
+            zoomInDisabled={zoomLevel >= zoomLevels.length - 1}
+            zoomOutDisabled={zoomLevel <= 0}
+            onFitZoom={handleFitZoom}
+            onResetZoom={handleResetZoom}
+            onSave={handleSaveClick}
+            isSaving={isSaving}
+            isDirty={isDirty}
+            saveLabel={saveLabel}
+            onDownload={onDownload}
+            isDownloading={isDownloading}
+            onClose={onClose ? requestClose : undefined}
+            onDecline={onDecline ? handleDeclineClick : undefined}
+            declineLabel={declineLabel}
+            currentPage={activePage}
+            totalPages={pages?.length || 0}
+            layout={layout}
+            isMobile={isMobile}
+            leftSidebarOpen={leftOpen}
+            onToggleLeftSidebar={handleToggleLeftSidebar}
+            onOpenHostPanel={
+              showSidebarPanel && layout !== "desktop"
+                ? () => openRightPanel("hostPanel")
+                : undefined
+            }
+            hostPanelTitle={sidebarPanel?.title}
+            onOpenParties={
+              showPartiesPanel && layout !== "desktop"
+                ? () => openRightPanel("parties")
+                : undefined
+            }
+            progressSummary={
+              mode === "edit"
+                ? {
+                    completed: progressData.completedFields,
+                    total: progressData.totalFields,
+                  }
+                : undefined
+            }
+            onOpenProgress={
+              mode === "edit" && layout !== "desktop"
+                ? () => openRightPanel("progress")
+                : undefined
+            }
+          />
+        }
+        leftSidebar={
+          !isMobile ? (
+            <LeftSidebar
+              // The tablet drawer owns visibility; the rail hides itself.
+              isOpen={isTabletLayout ? true : leftOpen}
+              variant={sidebarVariant}
+              onSlideEnd={settleRailSlide}
+              showFieldPalette={mode === "build"}
+              fieldPaletteProps={{
+                onFieldDragStart: setDraggedFieldType,
+                onFieldDragEnd: () => setDraggedFieldType(null),
+                onTouchDrop: handleFieldTouchDrop,
+                onFieldAdd: handleFABFieldSelect,
+                selectedField: selectedFieldData,
+                onCloseEditor: () => setSelectedField(null),
+              }}
+              pageThumbnailsProps={
+                pages
+                  ? { pages, activePage, onPageSelect: handlePageSelect }
+                  : undefined
+              }
+            />
+          ) : undefined
+        }
+        canvasBanner={
+          /* Prepared-but-unsaved fields are invisible in Fill & Sign
+             (fields render from the PDF; only a Prepare save writes them
+             in). Without this, they look like they vanished. */
+          mode === "edit" && hasUnsavedBuildChanges ? (
+            <Alert.Root
+              status="warning"
+              size="sm"
+              role="status"
+              mx={4}
+              mt={3}
+              w="auto"
+              flexShrink={0}
+              // Above the canvas grid pseudo-element.
+              position="relative"
+              zIndex={1}
             >
-              {/* Field Palette - Build mode only (shown first). Auto-sized,
-                  not flex:1 -- the palette is a fixed six-item list that
-                  never fills a half-sidebar share; the freed space goes to
-                  Pages below, which actually scales with document length
-                  (same reasoning as .sidebarSectionAuto's original use for
-                  the short Properties section). */}
-              {mode === "build" && (
-                <div className={`${styles.sidebarSection} ${styles.sidebarSectionAuto}`}>
-                  <div className={styles.sidebarHeader}>
-                    <span className={styles.sidebarTitle}>Fields</span>
-                  </div>
-                  <div className={styles.sidebarContent}>
-                    <FieldPalette
-                      onFieldDragStart={setDraggedFieldType}
-                      onFieldDragEnd={() => setDraggedFieldType(null)}
-                      onTouchDrop={handleFieldTouchDrop}
-                      onFieldAdd={handleFABFieldSelect}
-                      selectedField={selectedFieldData}
-                      onCloseEditor={() => setSelectedField(null)}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Page Thumbnails */}
-              <div className={styles.sidebarSection}>
-                <div className={styles.sidebarHeader}>
-                  <span className={styles.sidebarTitle}>Pages</span>
-                </div>
-                <div className={styles.sidebarContent}>
-                  {pages && (
-                    <PageThumbnails
-                      pages={pages}
-                      activePage={activePage}
-                      onPageSelect={handlePageSelect}
-                    />
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Canvas Area */}
-          <div className={styles.canvasArea}>
-            {/* Prepared-but-unsaved fields are invisible in Fill & Sign
-                (fields render from the PDF; only a Prepare save writes them
-                in). Without this, they look like they vanished. */}
-            {mode === "edit" && hasUnsavedBuildChanges && (
-              <div className={styles.unsavedPrepareNotice} role="status">
-                Fields added in Prepare are not saved yet, so they cannot be
-                filled here. Switch back to Prepare and select Save first.
-              </div>
-            )}
-            <div
-              ref={divRef}
-              className={styles.documentContainer}
-              onClick={handleCanvasClick}
-            >
-              <div className={styles.pageWrapper}>
-                {pages &&
-                  pages.length > 0 &&
-                  pages
-                    .filter((page) => !page.proxy?.destroyed)
-                    .map((page, index) => (
+              <Alert.Indicator>
+                <WarningIcon weight="bold" />
+              </Alert.Indicator>
+              <Alert.Content>
+                <Alert.Description>
+                  Fields added in Prepare are not saved yet, so they cannot be
+                  filled here. Switch back to Prepare and select Save first.
+                </Alert.Description>
+              </Alert.Content>
+            </Alert.Root>
+          ) : undefined
+        }
+        canvas={
+          <div
+            ref={divRef}
+            className={styles.documentContainer}
+            data-part="document-scroller"
+            // Mobile Prepare: room below the last page so any field can
+            // scroll clear of the docked field action bar.
+            style={
+              isMobile && mode === "build" && selectedField
+                ? { paddingBottom: FIELD_ACTION_BAR_CLEARANCE }
+                : undefined
+            }
+            // Focusable (not tabbable) so a click on the canvas gives it
+            // focus: Ctrl/Cmd zoom keys (C5) and Esc-to-clear (A6) then
+            // reach the editor, and arrow keys scroll the document.
+            tabIndex={-1}
+            onClick={handleCanvasClick}
+          >
+            <div ref={pageWrapperRef} className={styles.pageWrapper}>
+              {pages &&
+                pages.length > 0 &&
+                pages
+                  .filter((page) => !page.proxy?.destroyed)
+                  .map((page, index) => (
+                    <div
+                      key={"page_" + page.proxy.pageNumber}
+                      className={styles.pageFrame}
+                    >
                       <div
                         id={"page_div_container_" + page.proxy.pageNumber}
-                        key={"page_" + page.proxy.pageNumber}
                         className={styles.pageContainer}
                         onDragOver={
                           mode === "build" ? handleDragOver : undefined
+                        }
+                        onDragLeave={
+                          mode === "build" ? handleDragLeave : undefined
                         }
                         onDrop={
                           mode === "build"
@@ -2999,9 +3838,6 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                           id={"page_canvas_" + page.proxy.pageNumber}
                           className={styles.pageCanvas}
                         />
-
-                        {/* Page Number Badge */}
-                        <div className={styles.pageNumber}>{index + 1}</div>
 
                         {/* Existing form fields (hidden in build mode) */}
                         {mode !== "build" &&
@@ -3133,7 +3969,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                     <span
                                       className={styles.signatureFieldPrompt}
                                     >
-                                      <Signature weight="bold" size={14} />
+                                      <SignatureIcon weight="bold" size={14} />
                                       Sign
                                     </span>
                                   )}
@@ -3155,7 +3991,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                   className={styles.pdfInput}
                                   style={style}
                                   disabled={mode === "view"}
-                                  checked={!!currentValue && currentValue !== "Off"}
+                                  checked={
+                                    !!currentValue && currentValue !== "Off"
+                                  }
                                   onChange={(e) => {
                                     if (mode !== "view") {
                                       updateFieldValue(
@@ -3260,11 +4098,23 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                 field={field}
                                 scale={zoomLevels[zoomLevel]}
                                 isSelected={selectedField === field.id}
+                                isMultiSelected={
+                                  selectedFieldIds.length > 1 &&
+                                  selectedFieldIds.includes(field.id)
+                                }
                                 onSelect={handleFieldSelect}
-                                onDelete={deleteBuildModeField}
+                                onDelete={(fieldId) =>
+                                  isInMultiSelection(fieldId)
+                                    ? handleBatchDelete()
+                                    : deleteBuildModeField(fieldId)
+                                }
                                 onMove={moveBuildModeField}
                                 onResize={resizeBuildModeField}
-                                onDuplicate={duplicateField}
+                                onDuplicate={(fieldId) => {
+                                  if (!isInMultiSelection(fieldId)) {
+                                    duplicateField(fieldId);
+                                  }
+                                }}
                                 onDuplicateOnAllPages={duplicateFieldOnAllPages}
                                 onOpenProperties={(fieldId) => {
                                   handleFieldSelect(fieldId);
@@ -3274,11 +4124,58 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                 allParticipants={participants}
                               />
                             ))}
-                      </div>
-                    ))}
-              </div>
-            </div>
 
+                        {/* B6: visible "Assigned to X" chip inside each gated
+                          (not-yours) overlay, edit mode only. Same label as
+                          the overlay's title/aria-label (getGatedLabel, kept
+                          in sync by the gating effect), so the chip itself
+                          is aria-hidden. Positioned from
+                          the same scaled rect as its input, so it tracks
+                          zoom with it. */}
+                        {mode === "edit" &&
+                          unassignedVisibility === "readonly" &&
+                          (() => {
+                            // One viewport per page, not per field.
+                            const scale = zoomLevels[zoomLevel];
+                            const pageHeight = page.proxy.getViewport({
+                              scale,
+                            }).height;
+                            return page.fields?.map((field) => {
+                              const gatedLabel = gatedLabelById.get(field.id);
+                              if (!gatedLabel) return null;
+                              return (
+                                <span
+                                  key={`gated_${field.id}`}
+                                  className={styles.gatedChipSlot}
+                                  data-gated-chip={field.id}
+                                  aria-hidden="true"
+                                  style={{
+                                    left: field.rect[0] * scale,
+                                    top: pageHeight - field.rect[3] * scale,
+                                    width:
+                                      (field.rect[2] - field.rect[0]) * scale,
+                                    height:
+                                      (field.rect[3] - field.rect[1]) * scale,
+                                  }}
+                                >
+                                  <span className={styles.gatedChip}>
+                                    {gatedLabel}
+                                  </span>
+                                </span>
+                              );
+                            });
+                          })()}
+                      </div>
+
+                      {/* Page number, below the page */}
+                      <div className={styles.pageNumber}>{index + 1}</div>
+                    </div>
+                  ))}
+            </div>
+          </div>
+        }
+        canvasOverlays={
+          <>
             {/* Context Toolbar - Desktop */}
             {!isMobile && mode === "build" && selectedField && (
               <ContextToolbar
@@ -3294,6 +4191,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                     : undefined
                 }
                 feedbackText={toolbarFeedbackText}
+                // Single-field handlers only: ContextToolbar routes to the
+                // onBatch* handlers itself while selectionCount > 1.
                 onDelete={() => {
                   clearToolbarFeedback();
                   deleteBuildModeField(selectedField);
@@ -3305,7 +4204,19 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 onDuplicateAllPages={() =>
                   handleDuplicateFieldOnAllPages(selectedField)
                 }
-                isRequired={!!selectedFieldData?.properties.required}
+                isRequired={selectionAllRequired}
+                // A6: "N selected" state. Required and Delete apply to the
+                // whole selection; Edit and Duplicate act on one field, so
+                // the toolbar disables them while count > 1.
+                selectionCount={selectedFieldIds.length}
+                onBatchRequired={(required: boolean) => {
+                  clearToolbarFeedback();
+                  handleBatchRequired(required);
+                }}
+                onBatchDelete={() => {
+                  clearToolbarFeedback();
+                  handleBatchDelete();
+                }}
                 onToggleRequired={() => {
                   clearToolbarFeedback();
                   if (!selectedFieldData) return;
@@ -3323,531 +4234,212 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
               />
             )}
 
-            {/* Field Popover - Desktop, build mode: replaces the old
-                desktop Properties sidebar section. Anchored to the same
-                contextToolbarTarget the ContextToolbar above uses, so it
-                tracks the field through the same LIVE ANCHOR effect. */}
+            {/* Field settings popover - Desktop, build mode. Anchored to
+                the same contextToolbarTarget the ContextToolbar uses, so
+                it tracks the field through the same LIVE ANCHOR effect. */}
             {!isMobile && mode === "build" && selectedFieldData && (
-              <Popover
-                isOpen={propertiesPopoverOpen}
-                onClose={() => setPropertiesPopoverOpen(false)}
-                anchorRect={contextToolbarTarget}
-                containerRef={divRef}
-                title={fieldTypeLabels[selectedFieldData.type]}
-              >
-                <div className={styles.fieldPopoverForm}>
-                  <span
-                    className={styles.fieldPopoverTypeIcon}
-                    aria-hidden="true"
-                  >
-                    {fieldTypeIcons[selectedFieldData.type]}
-                  </span>
-
-                  <div className={styles.fieldPopoverFormGroup}>
-                    <label
-                      htmlFor={`${fieldPopoverIdPrefix}-name`}
-                      className={styles.fieldPopoverLabel}
-                    >
-                      Field Name
-                    </label>
-                    <input
-                      id={`${fieldPopoverIdPrefix}-name`}
-                      type="text"
-                      className={styles.fieldPopoverInput}
-                      value={selectedFieldData.name}
-                      onChange={(e) =>
-                        updateBuildModeField(selectedFieldData.id, {
-                          name: e.target.value,
-                        })
-                      }
-                      placeholder="Enter field name"
-                    />
-                  </div>
-
-                  {(selectedFieldData.type === "text" ||
-                    selectedFieldData.type === "multiline") && (
-                    <div className={styles.fieldPopoverFormGroup}>
-                      <label
-                        htmlFor={`${fieldPopoverIdPrefix}-placeholder`}
-                        className={styles.fieldPopoverLabel}
-                      >
-                        Placeholder
-                      </label>
-                      <input
-                        id={`${fieldPopoverIdPrefix}-placeholder`}
-                        type="text"
-                        className={styles.fieldPopoverInput}
-                        value={selectedFieldData.properties.placeholder || ""}
-                        onChange={(e) =>
-                          updateBuildModeField(selectedFieldData.id, {
-                            properties: {
-                              ...selectedFieldData.properties,
-                              placeholder: e.target.value,
-                            },
-                          })
-                        }
-                        placeholder="Enter placeholder text"
-                      />
-                    </div>
-                  )}
-
-                  {(selectedFieldData.type === "dropdown" ||
-                    selectedFieldData.type === "radio") && (
-                    <button
-                      type="button"
-                      className={styles.fieldPopoverEditOptionsButton}
-                      onClick={() => {
-                        // The options Modal's backdrop (--z-modal: 500)
-                        // sits below this Popover (--z-popover: 600) --
-                        // step the popover aside while the modal is up so
-                        // it doesn't render on top of the modal's own
-                        // dialog. Reopened by the modal's onClose below.
-                        setPropertiesPopoverOpen(false);
-                        setOptionsModalOpen(true);
-                      }}
-                    >
-                      Edit options...
-                    </button>
-                  )}
-
-                  <div className={styles.fieldPopoverFormGroup}>
-                    <fieldset className={styles.fieldPopoverSizeFieldset}>
-                      <legend className={styles.fieldPopoverLabel}>
-                        Size
-                      </legend>
-                      <div className={styles.fieldPopoverSizeRow}>
-                        <div className={styles.fieldPopoverSizeField}>
-                          <label
-                            htmlFor={`${fieldPopoverIdPrefix}-width`}
-                            className={styles.fieldPopoverSizeLabel}
-                          >
-                            Width
-                          </label>
-                          <input
-                            id={`${fieldPopoverIdPrefix}-width`}
-                            type="number"
-                            className={styles.fieldPopoverSizeInput}
-                            value={Math.round(selectedFieldData.width)}
-                            min={20}
-                            onChange={(e) => {
-                              const numValue = parseInt(e.target.value, 10);
-                              if (!isNaN(numValue) && numValue > 0) {
-                                updateBuildModeField(selectedFieldData.id, {
-                                  width: numValue,
-                                });
-                              }
-                            }}
-                          />
-                        </div>
-                        <div className={styles.fieldPopoverSizeField}>
-                          <label
-                            htmlFor={`${fieldPopoverIdPrefix}-height`}
-                            className={styles.fieldPopoverSizeLabel}
-                          >
-                            Height
-                          </label>
-                          <input
-                            id={`${fieldPopoverIdPrefix}-height`}
-                            type="number"
-                            className={styles.fieldPopoverSizeInput}
-                            value={Math.round(selectedFieldData.height)}
-                            min={20}
-                            onChange={(e) => {
-                              const numValue = parseInt(e.target.value, 10);
-                              if (!isNaN(numValue) && numValue > 0) {
-                                updateBuildModeField(selectedFieldData.id, {
-                                  height: numValue,
-                                });
-                              }
-                            }}
-                          />
-                        </div>
-                      </div>
-                    </fieldset>
-                  </div>
-                </div>
-              </Popover>
-            )}
-          </div>
-
-          {/* Right Sidebar - Desktop only */}
-          {!isMobile && (
-            <div
-              className={`${styles.rightSidebar} ${
-                !isPanelOpen("progress") &&
-                !(showSidebarPanel && isPanelOpen("hostPanel")) &&
-                !(showPartiesPanel && isPanelOpen("parties"))
-                  ? styles.collapsed
-                  : ""
-              } ${
-                showPartiesPanel && isPanelOpen("parties")
-                  ? styles.partiesOpen
-                  : ""
-              }`}
-            >
-              {/* Progress Panel - Edit mode */}
-              {mode === "edit" && isPanelOpen("progress") && (
-                <div className={styles.sidebarSection}>
-                  <div className={styles.sidebarHeader}>
-                    <span className={styles.sidebarTitle}>Progress</span>
-                  </div>
-                  <div className={styles.sidebarContent}>
-                    <ProgressPanel
-                      activeParticipantId={activeParticipantId}
-                      participants={assignableParticipants}
-                      fieldAssignments={resolveEffectiveFieldAssignments(
-                        fieldAssignments,
-                        extractedMetadata.current.fieldAssignments
-                      )}
-                      formFields={progressData.formFields}
-                      totalFields={progressData.totalFields}
-                      completedFields={progressData.completedFields}
-                      mode={mode}
-                      onFieldFocus={handleFieldFocus}
-                      onFinish={handleSaveClick}
-                      renderedFieldNames={getRenderedFieldNames()}
-                      fieldLabels={fieldLabels}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Host Panel - generic slot, shown alongside Properties/Progress */}
-              {showSidebarPanel && isPanelOpen("hostPanel") && (
-                <div className={styles.sidebarSection}>
-                  <div className={styles.sidebarHeader}>
-                    <span className={styles.sidebarTitle}>
-                      {sidebarPanel!.title}
-                    </span>
-                  </div>
-                  <div className={styles.sidebarContent}>
-                    {sidebarPanel!.content}
-                  </div>
-                </div>
-              )}
-
-              {/* Parties Panel - native recipients/signers panel */}
-              {showPartiesPanel &&
-                isPanelOpen("parties") &&
-                partiesConfigForPanel && (
-                  <div className={styles.sidebarSection}>
-                    <div className={styles.sidebarHeader}>
-                      <span className={styles.sidebarTitle}>
-                        {parties!.title ?? "Recipients"}
-                      </span>
-                    </div>
-                    <div className={styles.sidebarContent}>
-                      <PartiesPanel
-                        config={partiesConfigForPanel}
-                        participants={participants ?? []}
-                        assignMode={assignModeForParties}
-                      />
-                    </div>
-                  </div>
-                )}
-            </div>
-          )}
-        </div>
-
-        {/* Mobile Page Indicator */}
-        {isMobile && pages && pages.length > 1 && (
-          <div className={styles.pageIndicator}>
-            {activePage} / {pages.length}
-          </div>
-        )}
-
-        {/* Mobile Bottom Sheet */}
-        {isMobile && (
-          <BottomSheet
-            isOpen={bottomSheetOpen}
-            onClose={() => setBottomSheetOpen(false)}
-            snapPoint={bottomSheetSnap}
-            onSnapChange={setBottomSheetSnap}
-            title={mode === "build" ? "Properties" : "Progress"}
-          >
-            {mode === "build" ? (
-              <PropertiesPanel
-                selectedField={selectedFieldData}
+              <FieldSettingsPopover
+                open={propertiesPopoverOpen}
+                onOpenChange={setPropertiesPopoverOpen}
+                field={selectedFieldData}
+                getAnchorRect={measureSelectedFieldRect}
                 onUpdateField={updateBuildModeField}
-                onDeleteField={deleteBuildModeField}
-                onClose={() => setBottomSheetOpen(false)}
-                participants={assignableParticipants}
-                allParticipants={participants}
-              />
-            ) : (
-              <ProgressPanel
-                activeParticipantId={activeParticipantId}
-                participants={assignableParticipants}
-                fieldAssignments={resolveEffectiveFieldAssignments(
-                  fieldAssignments,
-                  extractedMetadata.current.fieldAssignments
-                )}
-                formFields={progressData.formFields}
-                totalFields={progressData.totalFields}
-                completedFields={progressData.completedFields}
-                mode={mode}
-                onFieldFocus={handleFieldFocus}
-                onFinish={handleSaveClick}
-                renderedFieldNames={getRenderedFieldNames()}
-                fieldLabels={fieldLabels}
+                onEditOptions={() => {
+                  // Step the popover aside while the options dialog is
+                  // up (Chakra stacks the portaled dialog above it; this
+                  // just keeps one panel in focus). Reopened by the
+                  // options dialog's onClose below.
+                  setPropertiesPopoverOpen(false);
+                  setOptionsModalOpen(true);
+                }}
+                anchorRect={contextToolbarTarget}
               />
             )}
-          </BottomSheet>
-        )}
-
-        {/* Mobile Host Panel Sheet - generic slot, own sheet so it never
-            fights the Properties/Progress sheet above for the same surface */}
-        {isMobile && showSidebarPanel && (
-          <BottomSheet
-            isOpen={hostPanelSheetOpen}
-            onClose={() => setHostPanelSheetOpen(false)}
-            snapPoint={hostPanelSheetSnap}
-            onSnapChange={setHostPanelSheetSnap}
-            title={sidebarPanel!.title}
-          >
-            {sidebarPanel!.content}
-          </BottomSheet>
-        )}
-
-        {/* Mobile Parties Sheet - own sheet, own open/snap state pair, so
-            it never fights the Properties/Progress or Host Panel sheets
-            above for the same surface */}
-        {isMobile && showPartiesPanel && partiesConfigForPanel && (
-          <BottomSheet
-            isOpen={partiesSheetOpen}
-            onClose={() => setPartiesSheetOpen(false)}
-            snapPoint={partiesSheetSnap}
-            onSnapChange={setPartiesSheetSnap}
-            title={parties!.title ?? "Recipients"}
-          >
-            <PartiesPanel
-              config={partiesConfigForPanel}
-              participants={participants ?? []}
+          </>
+        }
+        rightSidebar={
+          !isMobile ? (
+            <RightSidebar
+              variant={sidebarVariant}
+              collapsed={isTabletLayout ? false : !desktopRightOpen}
+              progress={
+                mode === "edit" && isRightSectionOpen("progress")
+                  ? buildProgressPanelProps()
+                  : undefined
+              }
+              hostPanel={
+                hostPanelSectionOpen
+                  ? {
+                      title: sidebarPanel!.title,
+                      content: sidebarPanel!.content,
+                    }
+                  : undefined
+              }
+              parties={
+                partiesSectionOpen && partiesConfigForPanel
+                  ? {
+                      title: partiesTitle,
+                      config: partiesConfigForPanel,
+                      participants: participants ?? [],
+                      assignMode: assignModeForParties,
+                    }
+                  : undefined
+              }
             />
-          </BottomSheet>
-        )}
-
-        {/* Mobile FAB - Build mode only */}
-        {isMobile && mode === "build" && (
-          <FloatingActionButton
-            onFieldSelect={handleFABFieldSelect}
-            bottomOffset={bottomSheetOpen ? 100 : 24}
-          />
-        )}
-
-        {/* Signature adoption -- one shared modal instance for every
-            signature field's click-to-sign button (see the fields render
-            above). savedSignature/onSignatureAdopted are the pinned host
-            props; storage is entirely the host's responsibility. The host
-            prop wins when present; `lastAdoptedSignature` (this session's
-            own cache, see its declaration) fills in for hosts that don't
-            persist one, so signing field #2 offers field #1's signature
-            as a one-click reuse without asking the signer to redo it. */}
-        <SignatureAdoptionModal
-          isOpen={!!signingFieldId}
-          onClose={() => setSigningFieldId(null)}
-          signerName={
-            participants?.find((p) => p.id === activeParticipantId)?.label
-          }
-          savedSignature={savedSignature || lastAdoptedSignature || undefined}
-          onAdopt={(dataUrl) => {
-            if (signingFieldId) {
-              fieldValues.setValue(signingFieldId, dataUrl);
-              setIsDirty(true);
-            }
-            setLastAdoptedSignature(dataUrl);
-            onSignatureAdopted?.(dataUrl);
-            setSigningFieldId(null);
-          }}
-        />
-
-        {/* Unsaved-changes close guard. The library's own close affordance
-            (HeaderBar's X, wired to requestClose above) opens this instead
-            of calling the host's onClose straight through whenever the
-            session is dirty -- see requestClose's comment for why the
-            guard lives here rather than in each host. */}
-        <Modal
-          isOpen={showUnsavedGuard}
-          onClose={handleKeepEditing}
-          title="Save your changes?"
-          size="sm"
-          footer={
-            <>
-              <button
-                type="button"
-                className={styles.unsavedGuardSecondaryButton}
-                onClick={handleDiscardAndClose}
-              >
-                Discard
-              </button>
-              <button
-                type="button"
-                className={styles.unsavedGuardSecondaryButton}
-                onClick={handleKeepEditing}
-              >
-                Keep editing
-              </button>
-              <button
-                type="button"
-                className={styles.unsavedGuardPrimaryButton}
-                onClick={handleSaveAndClose}
-                disabled={isSaving}
-              >
-                Save
-              </button>
-            </>
-          }
-        >
-          <p className={styles.unsavedGuardBody}>
-            You have changes that haven&apos;t been saved yet. Save them
-            before closing, or discard them and close anyway.
-          </p>
-        </Modal>
-
-        {/* Prepare -> Fill & Sign guard: blocking, because the passive
-            in-canvas notice alone is missable, and unsaved prepared fields
-            being invisible in Fill & Sign reads as data loss. */}
-        <Modal
-          isOpen={showUnsavedPrepareDialog}
-          onClose={handleStayInPrepare}
-          title="Save your fields first?"
-          // md, not sm: three full-word actions belong on ONE row, and 400px
-          // cannot hold them (the footer's wrap fallback is for narrow
-          // screens, not the default presentation).
-          size="md"
-          footer={
-            <>
-              <button
-                type="button"
-                className={styles.unsavedGuardSecondaryButton}
-                onClick={handleFillWithoutSaving}
-              >
-                Continue without saving
-              </button>
-              <button
-                type="button"
-                className={styles.unsavedGuardSecondaryButton}
-                onClick={handleStayInPrepare}
-              >
-                Stay in Prepare
-              </button>
-              <button
-                type="button"
-                className={styles.unsavedGuardPrimaryButton}
-                onClick={handleSavePreparedAndFill}
-                disabled={isSaving}
-              >
-                Save and continue
-              </button>
-            </>
-          }
-        >
-          <p className={styles.unsavedGuardBody}>
-            The fields you added in Prepare are not saved yet, so they cannot
-            be filled. Save them now, or continue without saving and they
-            will stay hidden until you save in Prepare.
-          </p>
-        </Modal>
-
-        {/* Decline-to-sign confirm, opened by the header's decline button
-            (rendered only when `onDecline` is provided -- see HeaderBar). */}
-        <Modal
-          isOpen={showDeclineConfirm}
-          onClose={handleCancelDecline}
-          title="Decline to sign?"
-          size="sm"
-          footer={
-            <>
-              <button
-                type="button"
-                className={styles.unsavedGuardSecondaryButton}
-                onClick={handleCancelDecline}
-                disabled={isDeclining}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className={styles.declineDangerButton}
-                onClick={handleConfirmDecline}
-                disabled={isDeclining}
-              >
-                {isDeclining ? (
-                  <Spinner size={16} className={styles.spinning} />
-                ) : (
-                  "Decline"
-                )}
-              </button>
-            </>
-          }
-        >
-          <p className={styles.unsavedGuardBody}>
-            The sender will be notified and this document will be closed for
-            signing.
-          </p>
-        </Modal>
-
-        {/* SIGNER COMPLETION save gate: opened by the header Save button
-            (and Finish-and-save) instead of saving straight away when the
-            active participant still has incomplete required fields. */}
-        <Modal
-          isOpen={showIncompleteSaveDialog}
-          onClose={handleKeepSigning}
-          title={`You still have ${incompleteFieldCount} field${
-            incompleteFieldCount === 1 ? "" : "s"
-          } to complete`}
-          size="sm"
-          footer={
-            <>
-              <button
-                type="button"
-                className={styles.unsavedGuardSecondaryButton}
-                onClick={handleKeepSigning}
-              >
-                Keep signing
-              </button>
-              <button
-                type="button"
-                className={styles.unsavedGuardPrimaryButton}
-                onClick={handleSaveAnyway}
-                disabled={isSaving}
-              >
-                Save anyway
-              </button>
-            </>
-          }
-        >
-          <p className={styles.unsavedGuardBody}>
-            You can save what you have now and finish the rest later, or keep
-            signing until every field is complete.
-          </p>
-        </Modal>
-
-        {/* Edit options - desktop, build mode: opened from the field
-            Popover's "Edit options..." button for dropdown/radio fields.
-            Mobile keeps its options editor inline in the bottom sheet (see
-            PropertiesPanel above), so this never renders there. */}
-        {!isMobile && mode === "build" && selectedFieldData && (
-          <Modal
-            isOpen={optionsModalOpen}
-            onClose={() => {
-              setOptionsModalOpen(false);
-              // Return to the field Popover the options modal was opened
-              // from -- see its "Edit options..." button for why the two
-              // never show at once.
-              setPropertiesPopoverOpen(true);
-            }}
-            title="Edit options"
-            size="sm"
-          >
-            <OptionsEditor
-              options={selectedFieldData.properties.options || []}
-              onAddOption={handleFieldPopoverAddOption}
-              onRemoveOption={handleFieldPopoverRemoveOption}
+          ) : undefined
+        }
+        mobileChrome={
+          isMobile ? (
+            <MobileChrome
+              openDrawer={openDrawer}
+              onOpenDrawerChange={setOpenDrawer}
+              activePage={activePage}
+              totalPages={pages?.length ?? 0}
+              onPageSelect={handlePageSelect}
+              pageThumbnailsProps={
+                pages
+                  ? { pages, activePage, onPageSelect: handlePageSelect }
+                  : undefined
+              }
+              properties={
+                mode === "build"
+                  ? {
+                      selectedField: selectedFieldData,
+                      onUpdateField: updateBuildModeField,
+                      onDeleteField: deleteBuildModeField,
+                      onClose: () => setOpenDrawer(null),
+                      participants: assignableParticipants,
+                      allParticipants: participants,
+                    }
+                  : undefined
+              }
+              progress={
+                mode !== "build" ? buildProgressPanelProps() : undefined
+              }
+              hostPanel={
+                showSidebarPanel
+                  ? {
+                      title: sidebarPanel!.title,
+                      content: sidebarPanel!.content,
+                    }
+                  : undefined
+              }
+              parties={
+                showPartiesPanel && partiesConfigForPanel
+                  ? {
+                      title: partiesTitle,
+                      config: partiesConfigForPanel,
+                      participants: participants ?? [],
+                    }
+                  : undefined
+              }
+              fieldActions={
+                mode === "build" && selectedFieldData
+                  ? {
+                      fieldName: selectedFieldData.name,
+                      fieldType: selectedFieldData.type,
+                      isRequired: !!selectedFieldData.properties.required,
+                      onToggleRequired: () =>
+                        updateBuildModeField(selectedFieldData.id, {
+                          properties: {
+                            ...selectedFieldData.properties,
+                            required: !selectedFieldData.properties.required,
+                          },
+                        }),
+                      onEdit: () => setOpenDrawer("properties"),
+                      onDuplicate: () => duplicateField(selectedFieldData.id),
+                      onDelete: () =>
+                        deleteBuildModeField(selectedFieldData.id),
+                      onDismiss: () => setSelectedField(null),
+                    }
+                  : undefined
+              }
+              showAddField={mode === "build"}
+              onAddField={handleFABFieldSelect}
             />
-          </Modal>
-        )}
-      </div>
+          ) : undefined
+        }
+        overlays={
+          <>
+            {/* Signature adoption -- one shared modal instance for every
+                signature field's click-to-sign button (see the fields render
+                above). savedSignature/onSignatureAdopted are the pinned host
+                props; storage is entirely the host's responsibility. The host
+                prop wins when present; `lastAdoptedSignature` (this session's
+                own cache, see its declaration) fills in for hosts that don't
+                persist one, so signing field #2 offers field #1's signature
+                as a one-click reuse without asking the signer to redo it. */}
+            <SignatureAdoptionModal
+              isOpen={!!signingFieldId}
+              onClose={() => setSigningFieldId(null)}
+              signerName={
+                participants?.find((p) => p.id === activeParticipantId)?.label
+              }
+              savedSignature={
+                savedSignature || lastAdoptedSignature || undefined
+              }
+              onAdopt={(dataUrl) => {
+                if (signingFieldId) {
+                  fieldValues.setValue(signingFieldId, dataUrl);
+                  setIsDirty(true);
+                }
+                setLastAdoptedSignature(dataUrl);
+                onSignatureAdopted?.(dataUrl);
+                setSigningFieldId(null);
+              }}
+            />
+
+            <ConfirmDialogs
+              unsaved={{
+                open: showUnsavedGuard,
+                isSaving,
+                onKeepEditing: handleKeepEditing,
+                onDiscard: handleDiscardAndClose,
+                onSave: handleSaveAndClose,
+              }}
+              prepare={{
+                open: showUnsavedPrepareDialog,
+                isSaving,
+                onStay: handleStayInPrepare,
+                onContinueWithoutSaving: handleFillWithoutSaving,
+                onSaveAndContinue: handleSavePreparedAndFill,
+              }}
+              decline={{
+                open: showDeclineConfirm,
+                isDeclining,
+                onCancel: handleCancelDecline,
+                onConfirm: handleConfirmDecline,
+              }}
+              incomplete={{
+                open: showIncompleteSaveDialog,
+                count: incompleteFieldCount,
+                isSaving,
+                onKeepSigning: handleKeepSigning,
+                onSaveAnyway: handleSaveAnyway,
+              }}
+            />
+
+            {/* Edit options - desktop, build mode: opened from the field
+                settings popover for dropdown/radio fields. Mobile keeps
+                its options editor inline in the Properties sheet. */}
+            {!isMobile && mode === "build" && selectedFieldData && (
+              <OptionsEditorDialog
+                open={optionsModalOpen}
+                onClose={() => {
+                  setOptionsModalOpen(false);
+                  // Return to the field settings popover the options
+                  // dialog was opened from (see onEditOptions above).
+                  setPropertiesPopoverOpen(true);
+                }}
+                options={selectedFieldData.properties.options || []}
+                onAddOption={handleFieldPopoverAddOption}
+                onRemoveOption={handleFieldPopoverRemoveOption}
+                showEmptyWarning={isFieldMissingOptions(selectedFieldData)}
+              />
+            )}
+          </>
+        }
+      />
     );
   }
 );

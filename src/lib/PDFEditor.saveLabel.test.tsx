@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, waitFor } from "@testing-library/react";
+import { waitFor } from "@testing-library/react";
+import { renderWithChakra } from "./testUtils";
 
 import PDFEditor from "./PDFEditor";
 
@@ -91,7 +92,7 @@ describe("PDFEditor saveLabel", () => {
   });
 
   it("defaults to 'Save' when no saveLabel is given", async () => {
-    const { getByRole } = render(
+    const { getByRole } = renderWithChakra(
       <PDFEditor src="fake://document.pdf" mode="edit" />
     );
 
@@ -100,7 +101,7 @@ describe("PDFEditor saveLabel", () => {
   });
 
   it("renders a custom saveLabel in the button text and aria-label", async () => {
-    const { getByRole } = render(
+    const { getByRole } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
         mode="edit"

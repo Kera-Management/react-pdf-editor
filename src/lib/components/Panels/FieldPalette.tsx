@@ -1,17 +1,17 @@
 import React, { useCallback, useRef, useState } from "react";
-import { BuildModeField, BuildModeFieldType } from "../../PDFEditor";
-import styles from "./FieldPalette.module.css";
+import { Box, Center, HStack, Icon, Stack, Text } from "@chakra-ui/react";
 import {
-  CheckSquare,
-  RadioButton,
-  RowsPlusBottom,
-  Signature,
-  TextAa,
-  TextAlignJustify,
-  DotsSixVertical,
+  CheckSquareIcon,
+  DotsSixVerticalIcon,
+  RadioButtonIcon,
+  RowsPlusBottomIcon,
+  SignatureIcon,
+  TextAaIcon,
+  TextAlignJustifyIcon,
 } from "@phosphor-icons/react";
+import { BuildModeField, BuildModeFieldType } from "../../PDFEditor";
 
-interface FieldPaletteProps {
+export interface FieldPaletteProps {
   onFieldDragStart: (fieldType: BuildModeFieldType) => void;
   onFieldDragEnd: () => void;
   onTouchDrop?: (
@@ -27,54 +27,34 @@ interface FieldPaletteProps {
   onFieldAdd?: (fieldType: BuildModeFieldType) => void;
   selectedField: BuildModeField | null;
   onCloseEditor: () => void;
-  isCollapsed?: boolean;
 }
 
 interface FieldTypeConfig {
   type: BuildModeFieldType;
   label: string;
-  icon: React.ReactNode;
+  icon: React.ReactElement;
 }
 
 const fieldTypes: FieldTypeConfig[] = [
-  {
-    type: "text",
-    label: "Text",
-    icon: <TextAa weight="duotone" size={20} />,
-  },
-  {
-    type: "multiline",
-    label: "Text Area",
-    icon: <TextAlignJustify weight="duotone" size={20} />,
-  },
-  {
-    type: "checkbox",
-    label: "Checkbox",
-    icon: <CheckSquare weight="duotone" size={20} />,
-  },
-  {
-    type: "dropdown",
-    label: "Dropdown",
-    icon: <RowsPlusBottom weight="duotone" size={20} />,
-  },
-  {
-    type: "radio",
-    label: "Radio",
-    icon: <RadioButton weight="duotone" size={20} />,
-  },
-  {
-    type: "signature",
-    label: "Signature",
-    icon: <Signature weight="duotone" size={20} />,
-  },
+  { type: "text", label: "Text", icon: <TextAaIcon /> },
+  { type: "multiline", label: "Text Area", icon: <TextAlignJustifyIcon /> },
+  { type: "checkbox", label: "Checkbox", icon: <CheckSquareIcon /> },
+  { type: "dropdown", label: "Dropdown", icon: <RowsPlusBottomIcon /> },
+  { type: "radio", label: "Radio", icon: <RadioButtonIcon /> },
+  { type: "signature", label: "Signature", icon: <SignatureIcon /> },
 ];
 
+/**
+ * Prepare-mode field palette (spec §3.3). Rows are bordered cards with an
+ * always-visible grip, so they read as draggable. They stay `div role="button"` rather than `<button>`
+ * so native HTML5 drag works in every browser, with Enter/Space wired by
+ * hand. Drag (HTML5 + touch) and click-to-add logic is unchanged.
+ */
 export const FieldPalette: React.FC<FieldPaletteProps> = ({
   onFieldDragStart,
   onFieldDragEnd,
   onTouchDrop,
   onFieldAdd,
-  isCollapsed = false,
 }) => {
   const [activeType, setActiveType] = useState<BuildModeFieldType | null>(null);
   const isDraggingTouch = useRef(false);
@@ -130,49 +110,85 @@ export const FieldPalette: React.FC<FieldPaletteProps> = ({
     [onFieldDragEnd, onTouchDrop]
   );
 
-  if (isCollapsed) return null;
-
   return (
-    <div className={styles.palette}>
-      <div className={styles.fieldList}>
-        {fieldTypes.map((field) => (
-          <div
-            key={field.type}
-            className={`${styles.fieldItem} ${activeType === field.type ? styles.active : ""}`}
-            draggable
-            onDragStart={(e) => handleDragStart(e, field.type)}
-            onDragEnd={handleDragEnd}
-            onTouchStart={(e) => handleTouchStart(e, field.type)}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-            onClick={() => onFieldAdd?.(field.type)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                onFieldAdd?.(field.type);
+    <Stack gap={3}>
+      <Stack gap={2}>
+        {fieldTypes.map((field) => {
+          const isActive = activeType === field.type;
+          return (
+            <Box
+              key={field.type}
+              role="button"
+              tabIndex={0}
+              aria-label={`Add ${field.label} field`}
+              draggable
+              data-field-type={field.type}
+              data-dragging={isActive ? "" : undefined}
+              display="flex"
+              alignItems="center"
+              w="full"
+              h="12"
+              ps="2"
+              pe="2"
+              gap={3}
+              rounded="l2"
+              borderWidth="1px"
+              borderColor={isActive ? "border.emphasized" : "border"}
+              color="fg"
+              bg={isActive ? "bg.muted" : "bg.panel"}
+              shadow="xs"
+              cursor={isActive ? "grabbing" : "grab"}
+              userSelect="none"
+              transition="background 0.15s, border-color 0.15s"
+              focusRing="outside"
+              _hover={{ bg: "bg.muted", borderColor: "border.emphasized" }}
+              onDragStart={(e: React.DragEvent) =>
+                handleDragStart(e, field.type)
               }
-            }}
-            role="button"
-            tabIndex={0}
-            aria-label={`Add ${field.label} field`}
-          >
-            <div className={styles.dragIndicator}>
-              <DotsSixVertical weight="bold" size={12} />
-            </div>
-            <div className={styles.fieldIcon}>{field.icon}</div>
-            <span className={styles.fieldLabel}>{field.label}</span>
-          </div>
-        ))}
-      </div>
+              onDragEnd={handleDragEnd}
+              onTouchStart={(e: React.TouchEvent) =>
+                handleTouchStart(e, field.type)
+              }
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              onClick={() => onFieldAdd?.(field.type)}
+              onKeyDown={(e: React.KeyboardEvent) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onFieldAdd?.(field.type);
+                }
+              }}
+            >
+              <HStack gap={3} flex="1" minW={0} color="inherit">
+                <Center
+                  boxSize="8"
+                  flexShrink={0}
+                  rounded="md"
+                  bg="bg.muted"
+                  color="fg"
+                >
+                  <Icon boxSize="5">{field.icon}</Icon>
+                </Center>
+                <Text truncate>{field.label}</Text>
+              </HStack>
+              <Icon
+                data-grip=""
+                aria-hidden
+                boxSize="4"
+                color="fg.muted"
+              >
+                <DotsSixVerticalIcon weight="bold" />
+              </Icon>
+            </Box>
+          );
+        })}
+      </Stack>
 
-      <div className={styles.hint}>
-        <span>Drag fields onto the document</span>
-      </div>
-    </div>
+      <Text color="fg.muted" textAlign="center">
+        Drag onto the page or click to add
+      </Text>
+    </Stack>
   );
 };
 
 export default FieldPalette;
-
-
-
