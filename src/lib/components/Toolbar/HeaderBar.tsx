@@ -59,6 +59,11 @@ export interface HeaderBarProps {
   onFitZoom?: () => void;
   /** Callback to reset zoom back to 100%. */
   onResetZoom?: () => void;
+  /**
+   * Hides zoom in/out, the zoom level, Fit to width and Reset zoom: the
+   * mobile friendly view is reflowed text, with nothing to zoom.
+   */
+  zoomControlsHidden?: boolean;
   /** Callback for save action */
   onSave: () => void;
   /** Whether save is in progress */
@@ -309,6 +314,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   zoomOutDisabled,
   onFitZoom,
   onResetZoom,
+  zoomControlsHidden,
   onSave,
   isSaving,
   isDirty,
@@ -397,7 +403,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         disabled: isDownloading,
       });
     }
-    if (mobile && onFitZoom) {
+    if (mobile && onFitZoom && !zoomControlsHidden) {
       overflowItems.push({
         value: "fit",
         label: "Fit to width",
@@ -584,38 +590,42 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             {currentPage} of {totalPages}
           </Text>
         )}
-        <ZoomButton
-          label="Zoom out"
-          tooltip="Zoom out · Ctrl -"
-          onClick={onZoomOut}
-          disabled={zoomOutDisabled}
-        >
-          <MagnifyingGlassMinusIcon />
-        </ZoomButton>
-        <Text minW="10" textAlign="center" color="fg.muted">
-          {zoomPercentage}%
-        </Text>
-        <ZoomButton
-          label="Zoom in"
-          tooltip="Zoom in · Ctrl +"
-          onClick={onZoomIn}
-          disabled={zoomInDisabled}
-        >
-          <MagnifyingGlassPlusIcon />
-        </ZoomButton>
-        {onFitZoom && (
-          <ZoomButton label="Fit to width" tooltip="Fit to width" onClick={onFitZoom}>
-            <FrameCornersIcon />
-          </ZoomButton>
-        )}
-        {onResetZoom && (
-          <ZoomButton
-            label="Reset zoom to 100%"
-            tooltip="Reset zoom to 100% · Ctrl 0"
-            onClick={onResetZoom}
-          >
-            <ArrowCounterClockwiseIcon />
-          </ZoomButton>
+        {!zoomControlsHidden && (
+          <>
+            <ZoomButton
+              label="Zoom out"
+              tooltip="Zoom out · Ctrl -"
+              onClick={onZoomOut}
+              disabled={zoomOutDisabled}
+            >
+              <MagnifyingGlassMinusIcon />
+            </ZoomButton>
+            <Text minW="10" textAlign="center" color="fg.muted">
+              {zoomPercentage}%
+            </Text>
+            <ZoomButton
+              label="Zoom in"
+              tooltip="Zoom in · Ctrl +"
+              onClick={onZoomIn}
+              disabled={zoomInDisabled}
+            >
+              <MagnifyingGlassPlusIcon />
+            </ZoomButton>
+            {onFitZoom && (
+              <ZoomButton label="Fit to width" tooltip="Fit to width" onClick={onFitZoom}>
+                <FrameCornersIcon />
+              </ZoomButton>
+            )}
+            {onResetZoom && (
+              <ZoomButton
+                label="Reset zoom to 100%"
+                tooltip="Reset zoom to 100% · Ctrl 0"
+                onClick={onResetZoom}
+              >
+                <ArrowCounterClockwiseIcon />
+              </ZoomButton>
+            )}
+          </>
         )}
       </HStack>
 

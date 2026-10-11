@@ -24,6 +24,12 @@ export interface EditorLayoutProps {
   /** In-canvas banner rendered above the scroller (spec §3.14). */
   canvasBanner?: React.ReactNode;
   /**
+   * Bar docked under the scroller, inside the canvas area (the mobile
+   * friendly view's guided and review bars). Mobile and tablet both get it
+   * in the flow, so it never covers the document.
+   */
+  canvasFooter?: React.ReactNode;
+  /**
    * Floating chrome anchored to the canvas area (context toolbar, field
    * settings popover). Rendered inside the canvas area, after the scroller.
    */
@@ -119,6 +125,7 @@ export const EditorLayout: React.FC<EditorLayoutProps> = ({
   rightSidebar,
   canvas,
   canvasBanner,
+  canvasFooter,
   canvasOverlays,
   mobileChrome,
   overlays,
@@ -181,6 +188,7 @@ export const EditorLayout: React.FC<EditorLayoutProps> = ({
         >
           {canvasBanner}
           {canvas}
+          {canvasFooter}
           {canvasOverlays}
         </Flex>
 

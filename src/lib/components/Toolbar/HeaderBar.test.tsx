@@ -439,4 +439,31 @@ describe("HeaderBar: tablet", () => {
     await userEvent.click(button);
     expect(onOpenProgress).toHaveBeenCalledTimes(1);
   });
+
+  it("mobile friendly view: zoomControlsHidden drops the zoom cluster and Fit to width", async () => {
+    const { rerender } = renderHeader({
+      layout: "tablet",
+      onFitZoom: vi.fn(),
+      onResetZoom: vi.fn(),
+      zoomControlsHidden: true,
+    });
+    expect(screen.queryByRole("button", { name: "Zoom in" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Fit to width" })).toBeNull();
+    expect(screen.queryByText("100%")).toBeNull();
+
+    rerender(
+      <HeaderBar
+        {...baseProps}
+        layout="mobile"
+        onFitZoom={vi.fn()}
+        onDownload={vi.fn()}
+        zoomControlsHidden
+      />
+    );
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    const menu = await screen.findByRole("menu");
+    expect(
+      within(menu).queryByRole("menuitem", { name: "Fit to width" })
+    ).toBeNull();
+  });
 });

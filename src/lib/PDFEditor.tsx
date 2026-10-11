@@ -39,6 +39,7 @@ import {
   calculateParticipantCompletion,
   createEditorMetadata,
   extractEditorMetadata,
+  getRequiredAssignedFieldNames,
   normalizeParticipantId,
   resolveEffectiveFieldAssignments,
   serializeEditorMetadata,
@@ -77,6 +78,45 @@ import { ConfirmDialogs, OptionsEditorDialog } from "./shell/ConfirmDialogs";
 import { MobileChrome, type MobileDrawer } from "./shell/MobileChrome";
 import { FIELD_ACTION_BAR_CLEARANCE } from "./components/Mobile/FieldActionBar";
 import { StatusStates } from "./shell/StatusStates";
+// Mobile friendly view (spec PDF_EDITOR_MOBILE_FRIENDLY_VIEW_SPEC). The
+// converter is reached only through its public entry point.
+import { convertDocument, extractPage } from "./mobileView/convert";
+import { DEFAULT_MAX_PAGES as MOBILE_VIEW_MAX_PAGES } from "./mobileView/convert/constants";
+import type {
+  MobileConversionResult,
+  MobileDocument,
+  SourceOrigin,
+  SourcePage,
+} from "./mobileView/types";
+import { MobileFriendlyView } from "./mobileView/MobileFriendlyView";
+import {
+  MobileViewToggle,
+  type MobileViewChoice,
+} from "./mobileView/MobileViewToggle";
+import { GuidedBar } from "./mobileView/GuidedBar";
+import { ReviewBar } from "./mobileView/ReviewBar";
+import { FallbackNotice, MobileViewHint } from "./mobileView/FallbackNotice";
+import type { FieldControlModel } from "./mobileView/view/fieldControlModel";
+import {
+  buildSourceWidgets,
+  conversionCacheKey,
+  conversionErrorResult,
+  readHintSeen,
+  readWidgetExtras,
+  widgetKind,
+  writeHintSeen,
+} from "./mobileView/view/integration";
+import { fieldIdsInOrder } from "./mobileView/view/documentModel";
+import { setCheckBoxValue } from "./utils/checkBoxValue";
+import {
+  documentPositions,
+  guidedAnchor,
+  guidedPosition,
+  nextIncompleteName,
+  orderNamesByDocument,
+  previousName,
+  type DocumentPositions,
+} from "./mobileView/view/guided";
 
 export interface PDFFormFields {
   [x: string]: string;
@@ -121,6 +161,9 @@ interface PDFFormRawField {
   exportValues?: string;
   /** Max characters for a text field (AcroForm /MaxLen), 0/undefined = no cap. */
   charLimit?: number;
+  /** Comb text field (one character per cell), from pdf.js. Read only by
+   * the mobile friendly view's converter input. */
+  comb?: boolean;
   // TBD: actions, combo, fillColor, rotation, strokeColor
 }
 
@@ -453,6 +496,20 @@ export interface PDFEditorProps {
    * Omitting this prop leaves every existing consumer unchanged.
    */
   fieldLabels?: Record<string, string>;
+  /**
+   * Offer a reflowed, readable "Mobile friendly" view of the document on
+   * phones and small tablets (layouts below 1024px), in Fill & Sign and View
+   * modes only. The original layout is always one tap away, and documents
+   * that can't be converted faithfully stay in the original layout. Off by
+   * default.
+   *
+   * Phones open in the mobile friendly view, tablets in the original. In
+   * Fill & Sign, Finish (and the header Save) from the mobile friendly view
+   * first shows the original with the signer's values for review; the save
+   * runs from that review step. `ref.save()` is host-initiated and is NOT
+   * routed through the review.
+   */
+  mobileFriendlyView?: boolean;
 }
 
 // Use worker from the installed pdfjs-dist package to ensure version matching
@@ -520,6 +577,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       // referencing itself before assignment would throw).
       signatureFieldNames: signatureFieldNamesProp,
       fieldLabels,
+      mobileFriendlyView = false,
     } = props;
 
     // Determine the effective initial mode - must be in allowedModes
@@ -713,6 +771,110 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // New UI state
     const { isMobile, isTablet } = useResponsive();
     const { togglePanel, isPanelOpen } = usePanelState();
+
+    // MOBILE FRIENDLY VIEW (opt-in `mobileFriendlyView`, spec §5). The
+    // reflowed view only exists in Fill & Sign and View below the desktop
+    // layout (S4, S5). `mobileViewChoiceState` is null until the signer
+    // picks a view: the default then follows the layout (phones open
+    // reflowed, tablets in the original, where a page reads at ~90%).
+    const [mobileViewChoiceState, setMobileViewChoiceState] =
+      useState<MobileViewChoice | null>(null);
+    const [conversion, setConversion] = useState<
+      { status: "idle" | "running" } | MobileConversionResult
+    >({ status: "idle" });
+    // S3: the original is showing for review before Finish.
+    const [reviewing, setReviewing] = useState(false);
+    const [fallbackNoticeDismissed, setFallbackNoticeDismissed] =
+      useState(false);
+    const [mobileHintSeen, setMobileHintSeen] = useState(readHintSeen);
+    // The reflow control that last had focus: the guided bar's position
+    // and where "Back to edit" returns to.
+    const [currentReflowFieldId, setCurrentReflowFieldId] = useState<
+      string | null
+    >(null);
+    // Results per document + field set, so mode switches and reloads of
+    // the same bytes never reconvert.
+    const conversionCacheRef = useRef(
+      new Map<string, MobileConversionResult>()
+    );
+    // Bumped to abandon an in-flight conversion (new document, unmount).
+    const conversionTokenRef = useRef(0);
+    const reflowRootRef = useRef<HTMLDivElement>(null);
+    const reflowIdsCacheRef = useRef<{
+      doc: MobileDocument | null;
+      ids: string[];
+    }>({ doc: null, ids: [] });
+    // Field lookups by id and by name, rebuilt only when `pages` changes
+    // (never on a keystroke). A ref, not useMemo: read below the early
+    // returns.
+    const fieldIndexCacheRef = useRef<{
+      pages: unknown;
+      fieldById: Map<string, PDFFormRawField>;
+      idsByName: Map<string, string[]>;
+    }>({ pages: null, fieldById: new Map(), idsByName: new Map() });
+    // The guided bar's required-name order, rebuilt only when one of its
+    // inputs changes.
+    const guidedOrderCacheRef = useRef<{
+      key: unknown[];
+      order: string[];
+      firstIdByName: Map<string, string>;
+      positions: DocumentPositions;
+    } | null>(null);
+    // Set when the unsaved-changes guard's "Save and close" opened the
+    // review: the review's save then closes the editor too.
+    const closeAfterReviewSaveRef = useRef(false);
+    // The field that most recently lost focus, and when. Tapping the toggle
+    // moves focus to it first, so "the field the signer was on" is the one
+    // that blurred a moment before the tap.
+    const lastFieldBlurRef = useRef<{ fieldId: string; at: number } | null>(
+      null
+    );
+    // A view switch waiting for its target view to render: where to put
+    // the reader (spec §8.1, "switching keeps your place").
+    const pendingPlaceRef = useRef<
+      | { kind: "field"; fieldId: string; target: MobileViewChoice }
+      | { kind: "origin"; pageIndex: number; top: number }
+      | { kind: "point"; pageIndex: number; y: number }
+      | { kind: "top"; target: MobileViewChoice }
+      | null
+    >(null);
+
+    const mobileViewAvailable =
+      mobileFriendlyView && mode !== "build" && (isMobile || isTablet);
+    // A document that fell back is pinned to the original.
+    const mobileViewChoice: MobileViewChoice =
+      conversion.status === "fallback"
+        ? "original"
+        : (mobileViewChoiceState ?? (isMobile ? "mobileFriendly" : "original"));
+    // The reflow surface (document, or its loading skeleton) is up.
+    const reflowSurface =
+      mobileViewAvailable && mobileViewChoice === "mobileFriendly" && !reviewing;
+    const showReflow = reflowSurface && conversion.status === "ok";
+    // Read by stable callbacks (focus, page select) that must target the
+    // view actually showing.
+    const showReflowRef = useRef(showReflow);
+    showReflowRef.current = showReflow;
+
+    useEffect(
+      () => () => {
+        conversionTokenRef.current += 1;
+      },
+      []
+    );
+
+    // Leaving the phone/tablet layouts (rotate or resize to desktop) ends
+    // the review, so coming back lands in the view's default, not a review
+    // whose bar was hidden meanwhile.
+    // A review opened by the guard's "Save and close" brings the guard back
+    // instead, so the signer's choice to close isn't silently dropped.
+    useEffect(() => {
+      if (mobileViewAvailable) return;
+      setReviewing(false);
+      if (closeAfterReviewSaveRef.current) {
+        closeAfterReviewSaveRef.current = false;
+        setShowUnsavedGuard(true);
+      }
+    }, [mobileViewAvailable]);
 
     // Active page tracking
     const [activePage, setActivePage] = useState(1);
@@ -914,6 +1076,14 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         hasFitOnOpenRef.current = false;
         userZoomedRef.current = false;
         autoScrolledRef.current = false;
+        // Mobile friendly view: a new document gets its own conversion and
+        // starts in the layout's default view.
+        conversionTokenRef.current += 1;
+        setConversion({ status: "idle" });
+        setMobileViewChoiceState(null);
+        setReviewing(false);
+        setFallbackNoticeDismissed(false);
+        setCurrentReflowFieldId(null);
         try {
           const doc = await getDocument(
             // pdf.js may transfer the buffer to its worker -- hand it a
@@ -1517,6 +1687,126 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       };
     }, []);
 
+    // MOBILE FRIENDLY VIEW conversion (spec §5.2): lazily, once pages are
+    // ready, and only while the mobile friendly view is wanted. A tablet
+    // signer who never taps the toggle pays nothing; with the prop off this
+    // never runs. Pages are extracted one at a time (yielding between
+    // them), then converted once. Keyed on `wantConversion` alone and with
+    // no cleanup: flipping the toggle back mid-run keeps the result for
+    // next time. A new document (or unmount) abandons the run through
+    // conversionTokenRef instead.
+    const wantConversion =
+      mobileViewAvailable &&
+      docReady &&
+      pagesReady &&
+      !!pages &&
+      mobileViewChoice === "mobileFriendly" &&
+      conversion.status === "idle";
+    // `pages` only changes when a document (re)loads: anything converted
+    // or converting belongs to the previous field set.
+    const convertedPagesRef = useRef(pages);
+    useEffect(() => {
+      if (convertedPagesRef.current === pages) return;
+      convertedPagesRef.current = pages;
+      conversionTokenRef.current += 1;
+      setConversion({ status: "idle" });
+    }, [pages]);
+    // Which fields are signatures shapes the conversion (a signature is laid
+    // out as its own block), and can change after it ran (host prop, or
+    // metadata read later): start over when it does. It is also part of the
+    // cache key below.
+    const signatureNamesKey = Array.from(getEffectiveSignatureFieldNames())
+      .sort()
+      .join("|");
+    const convertedSignatureKeyRef = useRef(signatureNamesKey);
+    useEffect(() => {
+      if (convertedSignatureKeyRef.current === signatureNamesKey) return;
+      convertedSignatureKeyRef.current = signatureNamesKey;
+      conversionTokenRef.current += 1;
+      setConversion({ status: "idle" });
+    }, [signatureNamesKey]);
+    useEffect(() => {
+      if (!wantConversion || !pages) return;
+      const fieldIds = pages.flatMap(
+        (page) => page.fields?.map((field) => field.id) ?? []
+      );
+      const cacheKey = `${conversionCacheKey(
+        pdfDoc?.fingerprints?.[0] ?? String(lastSrcRef.current),
+        fieldIds
+      )}::${signatureNamesKey}`;
+      const cached = conversionCacheRef.current.get(cacheKey);
+      if (cached) {
+        setConversion(cached);
+        return;
+      }
+      const token = ++conversionTokenRef.current;
+      const isCurrent = () => token === conversionTokenRef.current;
+      setConversion({ status: "running" });
+      const signatureNames = getEffectiveSignatureFieldNames();
+      void (async () => {
+        let result: MobileConversionResult;
+        try {
+          const sourcePages: SourcePage[] = [];
+          // Past the page limit the converter falls back on the page count
+          // alone ("tooManyPages"), so don't extract anything: empty pages
+          // give it the count.
+          const tooManyPages = pages.length > MOBILE_VIEW_MAX_PAGES;
+          for (let index = 0; index < pages.length; index++) {
+            const page = pages[index];
+            if (tooManyPages) {
+              const [x0 = 0, y0 = 0, x1 = 0, y1 = 0] = page.proxy.view ?? [];
+              sourcePages.push({
+                pageIndex: index,
+                width: x1 - x0,
+                height: y1 - y0,
+                rotation: 0,
+                items: [],
+                widgets: [],
+                structure: null,
+              });
+              continue;
+            }
+            // extractPage reads real font names from the page's commonObjs,
+            // which exist only once the page has rendered: let an in-flight
+            // render finish (or fail) first. A zoom change cancels a render
+            // and starts a new one, so wait until none is left (bounded).
+            for (let wait = 0; wait < 5; wait++) {
+              const task = renderTasksRef.current.get(page.proxy.pageNumber);
+              if (!task) break;
+              await task.promise.catch(() => undefined);
+              if (!isCurrent()) return;
+            }
+            if (!isCurrent()) return;
+            const extras = await readWidgetExtras(page.proxy);
+            if (!isCurrent()) return;
+            const widgets = buildSourceWidgets(
+              page.fields,
+              page.proxy.view,
+              signatureNames,
+              extras
+            );
+            sourcePages.push(await extractPage(page.proxy, index, widgets));
+            if (!isCurrent()) return;
+          }
+          result = convertDocument(sourcePages);
+        } catch (error) {
+          result = conversionErrorResult(error);
+        }
+        if (!isCurrent()) return;
+        conversionCacheRef.current.set(cacheKey, result);
+        if (result.status === "fallback") {
+          // Developer detail only; the signer just sees the notice (§8.5).
+          console.debug(
+            "rpe:mobileView fallback",
+            result.report.reasons.map((r) => `${r.code}: ${r.detail}`)
+          );
+        }
+        setConversion(result);
+      })();
+      // Everything else it reads is fixed for the document `pages` holds.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [wantConversion]);
+
     // LIVE PAGE TRACKING: drives activePage from what's actually visible in
     // the scroll container -- "most visible" = the page with the highest
     // intersection ratio among the ones currently intersecting -- instead
@@ -1579,6 +1869,44 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
 
       return () => observer.disconnect();
     }, [pages]);
+
+    // The same tracking for the mobile friendly view (spec §8.6): a page
+    // section is "the" page while it crosses a line 40% down the scroller.
+    // Sections are far taller than the viewport, so a visibility ratio
+    // can't pick one. While the reflow shows, the original pages are
+    // display:none and report nothing, so the two never compete.
+    useEffect(() => {
+      if (!showReflow) return undefined;
+      const container = divRef.current;
+      const root = reflowRootRef.current;
+      if (!container || !root) return undefined;
+      const crossing = new Set<number>();
+      const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            const pageIndex = Number(
+              (entry.target as HTMLElement).dataset.mfPage
+            );
+            if (Number.isNaN(pageIndex)) return;
+            if (entry.isIntersecting) crossing.add(pageIndex);
+            else crossing.delete(pageIndex);
+          });
+          if (crossing.size === 0) return;
+          const pageNumber = Math.min(...Array.from(crossing)) + 1;
+          const target = pageJumpTargetRef.current;
+          if (target !== null) {
+            if (pageNumber !== target) return;
+            pageJumpTargetRef.current = null;
+          }
+          setActivePage(pageNumber);
+        },
+        { root: container, rootMargin: "-40% 0px -59% 0px", threshold: 0 }
+      );
+      root
+        .querySelectorAll<HTMLElement>("[data-mf-page]")
+        .forEach((el) => observer.observe(el));
+      return () => observer.disconnect();
+    }, [showReflow, conversion]);
 
     // Fit-to-width (B7/C4): the LARGEST predefined zoom step that still
     // fits the available width, falling back to the smallest step when even
@@ -1738,6 +2066,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       if (!container) return;
 
       const handleTouchMove = (e: TouchEvent) => {
+        // The mobile friendly view is text: leave pinch to the browser.
+        if (showReflowRef.current) return;
         if (e.touches.length === 2) {
           e.preventDefault();
           handlePinchZoom(e);
@@ -1777,6 +2107,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       let lastWheelAt = -Infinity;
       const handleWheel = (e: WheelEvent) => {
         if (!(e.ctrlKey || e.metaKey)) return;
+        // Mobile friendly view: browser zoom, not the hidden page's.
+        if (showReflowRef.current) return;
         e.preventDefault();
         if (e.deltaY === 0) return;
         // deltaMode 1 = lines (Firefox mouse wheel), 2 = pages: each event
@@ -1842,6 +2174,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       const handleKeyDown = (e: KeyboardEvent) => {
         if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
         if (isEditableTarget(e.target)) return;
+        // Mobile friendly view: browser zoom, not the hidden page's.
+        if (showReflowRef.current) return;
         const root = divRef.current?.closest(".pdf-editor-root");
         if (!root) return;
         const target = e.target as Node | null;
@@ -1874,13 +2208,23 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
 
       const formFields: PDFFormFields = {};
 
+      // Copies of a name normally hold the same value (writes go to every
+      // copy). Where they differ -- a checkbox group whose boxes have their
+      // own export values, only one of them on -- the name's value is the
+      // copy that is filled in, not whichever copy happens to come last.
       pages.forEach((page) => {
         page.fields?.forEach((field) => {
           if (field.name) {
-            formFields[field.name] = fieldValues.getValue(
+            const value = fieldValues.getValue(
               field.id,
               field.value || field.defaultValue || ""
             );
+            const existing = formFields[field.name];
+            const existingFilled =
+              existing !== undefined &&
+              existing.trim() !== "" &&
+              existing !== "Off";
+            if (!existingFilled) formFields[field.name] = value;
           }
         });
       });
@@ -2406,48 +2750,70 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     ]);
 
     // Handle field focus from progress panel
-    const handleFieldFocus = useCallback((fieldName: string) => {
-      // Every renderable field kind must be findable here: text/checkbox/
-      // radio inputs, dropdown selects, multiline textareas, and signature
-      // fields, which render as a BUTTON with data-field-name (no `name`
-      // attribute) -- the original input/select-only selector made guided
-      // navigation silently no-op on exactly those.
-      const escaped = CSS.escape(fieldName);
-      const input = document.querySelector(
-        `input[name="${escaped}"], select[name="${escaped}"], textarea[name="${escaped}"], button[data-field-name="${escaped}"]`
-      ) as HTMLElement | null;
+    // `focus: false` scrolls to the field without taking focus: for a stop
+    // that opens the signature modal, which owns focus while it is open.
+    const handleFieldFocus = useCallback(
+      (fieldName: string, options?: { focus?: boolean }) => {
+        // Every renderable field kind must be findable here: text/checkbox/
+        // radio inputs, dropdown selects, multiline textareas, and signature
+        // fields, which render as a BUTTON with data-field-name (no `name`
+        // attribute) -- the original input/select-only selector made guided
+        // navigation silently no-op on exactly those.
+        const escaped = CSS.escape(fieldName);
+        // Search only the view that is showing: with the mobile friendly view
+        // on, both views hold a control for the same field, and the hidden
+        // one can't take focus. Reflow controls carry data-field-name on
+        // every kind (they have no AcroForm `name`).
+        const reflow = showReflowRef.current ? reflowRootRef.current : null;
+        const input = (
+          reflow
+            ? reflow.querySelector(
+                `input[data-field-name="${escaped}"]:not([disabled]), select[data-field-name="${escaped}"]:not([disabled]), textarea[data-field-name="${escaped}"]:not([disabled]), button[data-field-name="${escaped}"]:not([disabled]), [data-mf-field][data-field-name="${escaped}"]`
+              )
+            : (pageWrapperRef.current ?? document).querySelector(
+                `input[name="${escaped}"], select[name="${escaped}"], textarea[name="${escaped}"], button[data-field-name="${escaped}"]`
+              )
+        ) as HTMLElement | null;
 
-      if (input && divRef.current) {
-        // Get the PDF container
-        const pdfContainer = divRef.current;
-        const inputRect = input.getBoundingClientRect();
-        const containerRect = pdfContainer.getBoundingClientRect();
+        if (input && divRef.current) {
+          // Get the PDF container
+          const pdfContainer = divRef.current;
+          const inputRect = input.getBoundingClientRect();
+          const containerRect = pdfContainer.getBoundingClientRect();
 
-        // Calculate the scroll position to center the input in the PDF container
-        const scrollTop =
-          pdfContainer.scrollTop +
-          (inputRect.top - containerRect.top) -
-          containerRect.height / 2 +
-          inputRect.height / 2;
+          // Calculate the scroll position to center the input in the PDF
+          // container. The mobile friendly view lands it about 30% down
+          // instead, clear of the guided bar and the on-screen keyboard.
+          const scrollTop = reflow
+            ? pdfContainer.scrollTop +
+              (inputRect.top - containerRect.top) -
+              containerRect.height * 0.3
+            : pdfContainer.scrollTop +
+              (inputRect.top - containerRect.top) -
+              containerRect.height / 2 +
+              inputRect.height / 2;
 
-        // Smooth scroll within the PDF container
-        pdfContainer.scrollTo({
-          top: scrollTop,
-          behavior: "smooth",
-        });
+          // Smooth scroll within the PDF container
+          pdfContainer.scrollTo({
+            top: scrollTop,
+            behavior: "smooth",
+          });
 
-        // Focus on the input after a short delay to ensure scroll completes
-        setTimeout(() => {
-          input.focus();
-          // Flash it briefly (C6): a data attribute read by token CSS
-          // (`[data-flash]` in PDFEditor.module.css), not an inline colour.
-          input.setAttribute("data-flash", "true");
+          if (options?.focus === false) return;
+          // Focus on the input after a short delay to ensure scroll completes
           setTimeout(() => {
-            input.removeAttribute("data-flash");
-          }, FIELD_FLASH_MS);
-        }, 300);
-      }
-    }, []);
+            input.focus();
+            // Flash it briefly (C6): a data attribute read by token CSS
+            // (`[data-flash]` in PDFEditor.module.css), not an inline colour.
+            input.setAttribute("data-flash", "true");
+            setTimeout(() => {
+              input.removeAttribute("data-flash");
+            }, FIELD_FLASH_MS);
+          }, 300);
+        }
+      },
+      []
+    );
 
     // SIGNER COMPLETION auto-scroll: once per document load, land an
     // edit-mode signer directly on their first incomplete required field
@@ -2458,8 +2824,12 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // set is wider than its required set the two can land differently --
     // deliberate, since the point of the auto-jump is the work the signer
     // cannot skip.
+    // With the mobile friendly view coming up, wait for it: the jump must
+    // land in the view the signer will actually see (spec §9.3).
+    const reflowPending = reflowSurface && conversion.status !== "ok";
     useEffect(() => {
       if (mode !== "edit" || !pagesReady || !activeParticipantId) return;
+      if (reflowPending) return;
       if (autoScrolledRef.current) return;
       autoScrolledRef.current = true;
       const completion = calculateParticipantCompletion({
@@ -2476,7 +2846,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         handleFieldFocus(firstIncomplete);
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [mode, pagesReady, activeParticipantId]);
+    }, [mode, pagesReady, activeParticipantId, reflowPending]);
 
     // Handle page navigation from thumbnails
     const handlePageSelect = useCallback((pageNumber: number) => {
@@ -2490,6 +2860,15 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         pageJumpTargetRef.current = null;
         pageJumpTimerRef.current = null;
       }, 1000);
+      // Mobile friendly view: each page starts at its "Page n of N"
+      // divider (spec §9.3).
+      const reflow = showReflowRef.current ? reflowRootRef.current : null;
+      if (reflow) {
+        reflow
+          .querySelector(`#mf_page_${pageNumber - 1}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
       const pageContainer = document.querySelector(
         `#page_div_container_${pageNumber}`
       );
@@ -2520,6 +2899,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           setShowUnsavedPrepareDialog(true);
           return;
         }
+        // A mode switch starts the mobile friendly view over in the
+        // layout's default view (spec §5.2); the conversion is kept.
+        setMobileViewChoiceState(null);
+        setReviewing(false);
         setMode(newMode);
       },
       [allowedModes, mode, hasUnsavedBuildChanges]
@@ -2966,12 +3349,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           if (field instanceof PDFTextField) {
             (field as PDFTextField).setText(value || "");
           } else if (field instanceof PDFCheckBox) {
-            // "Off" is a truthy string, so guard on it explicitly.
-            if (value && value !== "Off") {
-              (field as PDFCheckBox).check();
-            } else {
-              (field as PDFCheckBox).uncheck();
-            }
+            // Ticks the box whose export value was chosen, not just the
+            // first widget of a same-name group.
+            setCheckBoxValue(field as PDFCheckBox, value);
           } else if (field instanceof PDFDropdown) {
             if (value) {
               (field as PDFDropdown).select(value);
@@ -3011,11 +3391,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             if (field instanceof PDFTextField) {
               (field as PDFTextField).setText(value || "");
             } else if (field instanceof PDFCheckBox) {
-              if (value === "On" || value) {
-                (field as PDFCheckBox).check();
-              } else {
-                (field as PDFCheckBox).uncheck();
-              }
+              setCheckBoxValue(field as PDFCheckBox, value);
             } else if (field instanceof PDFDropdown) {
               if (value) {
                 (field as PDFDropdown).select(value);
@@ -3149,12 +3525,48 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           return;
         }
       }
-      onSaveAs();
+      // A rejected host save reports itself and leaves the editor dirty;
+      // there is nothing more to do here.
+      onSaveAs().catch(() => {});
     };
 
-    const handleKeepSigning = useCallback(() => {
+    // Deliberately not memoized: it reads the current review state.
+    const handleKeepSigning = () => {
       setShowIncompleteSaveDialog(false);
-    }, []);
+      // Asked from the review of the original on a phone: go back to the
+      // mobile friendly view at the first required field still open,
+      // rather than leaving the signer in the small original layout.
+      if (mode === "edit" && reviewing && reflowDocument) {
+        const { order, isComplete, firstIdByName } = guidedOrder(
+          reflowDocument
+        );
+        const name = nextIncompleteName(order, null, isComplete);
+        const fieldId = name ? firstIdByName.get(name) : undefined;
+        pendingPlaceRef.current = fieldId
+          ? { kind: "field", fieldId, target: "mobileFriendly" }
+          : { kind: "top", target: "mobileFriendly" };
+        if (fieldId) setCurrentReflowFieldId(fieldId);
+        setReviewing(false);
+        setMobileViewChoiceState("mobileFriendly");
+        // Like guided Next: a signature stop opens the adoption modal, once
+        // the closing dialog has handed focus back (or it would take focus
+        // from the modal).
+        if (fieldId && name && effectiveSignatureFieldNames.has(name)) {
+          window.setTimeout(() => setSigningFieldId(fieldId), 0);
+        } else if (fieldId) {
+          // pendingPlaceRef scrolls to the field and focuses it. The
+          // closing dialog then hands focus back to its trigger, so take it
+          // back once more, without scrolling again.
+          window.setTimeout(() => {
+            reflowRootRef.current
+              ?.querySelector<HTMLElement>(
+                `[data-mf-field][data-field-id="${CSS.escape(fieldId)}"]`
+              )
+              ?.focus({ preventScroll: true });
+          }, 0);
+        }
+      }
+    };
 
     const handleSaveAnyway = async () => {
       setShowIncompleteSaveDialog(false);
@@ -3236,8 +3648,32 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     };
 
     const handleSaveAndClose = async () => {
+      // From the mobile friendly view in Fill & Sign, saving goes through
+      // the review of the original first (S3), like every other Finish:
+      // the guard closes and the review opens; its bar saves.
+      if (mode === "edit" && reflowSurface) {
+        setShowUnsavedGuard(false);
+        enterReview();
+        // The signer asked to close: the review's save finishes the job.
+        closeAfterReviewSaveRef.current = true;
+        return;
+      }
       if (!(await trySaveForGuardAction())) return;
       setShowUnsavedGuard(false);
+      onClose?.();
+    };
+
+    // The review bar's save. Normally the regular save (with its
+    // incomplete-fields check). After "Save and close" in the guard it is
+    // that action's save: no second prompt, and close once it lands, like
+    // the guard does everywhere else.
+    const handleReviewSave = async () => {
+      if (!closeAfterReviewSaveRef.current) {
+        handleSaveClick();
+        return;
+      }
+      if (!(await trySaveForGuardAction())) return;
+      closeAfterReviewSaveRef.current = false;
       onClose?.();
     };
 
@@ -3251,6 +3687,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       // and no indication anything failed -- same reasoning as
       // handleSaveAndClose, which also leaves its guard open on failure.
       if (!(await trySaveForGuardAction())) return;
+      // Like handleModeChange: Fill & Sign starts over in the layout's
+      // default view (spec §5.2).
+      setMobileViewChoiceState(null);
+      setReviewing(false);
       setMode("edit");
       setShowUnsavedPrepareDialog(false);
     };
@@ -3258,12 +3698,100 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     const handleFillWithoutSaving = useCallback(() => {
       // The in-canvas notice stays up in Fill & Sign as the reminder.
       setShowUnsavedPrepareDialog(false);
+      setMobileViewChoiceState(null);
+      setReviewing(false);
       setMode("edit");
     }, []);
 
     const handleStayInPrepare = useCallback(() => {
       setShowUnsavedPrepareDialog(false);
     }, []);
+
+    // MOBILE FRIENDLY VIEW review step (S3): the original comes up fitted
+    // to width and scrolled to the top, so the signer reads it from the
+    // start. Only when the review was just requested, never on a re-render.
+    const pendingReviewFitRef = useRef(false);
+    useIsomorphicLayoutEffect(() => {
+      if (!reviewing || !pendingReviewFitRef.current) return;
+      pendingReviewFitRef.current = false;
+      handleFitZoom();
+      if (divRef.current) divRef.current.scrollTop = 0;
+    }, [reviewing]);
+
+    // MOBILE FRIENDLY VIEW place keeping (spec §8.1): once the view a
+    // switch asked for has rendered, put the reader back where they were --
+    // on the same field, or at the same spot of the same page. The two
+    // views share one scroller, so its scrollTop means nothing across a
+    // switch on its own.
+    useIsomorphicLayoutEffect(() => {
+      const pending = pendingPlaceRef.current;
+      const scroller = divRef.current;
+      if (!pending || !scroller) return;
+      const target: MobileViewChoice =
+        pending.kind === "origin"
+          ? "original"
+          : pending.kind === "point"
+            ? "mobileFriendly"
+            : pending.target;
+      if (target === "mobileFriendly" && !showReflow) {
+        // Still converting: wait. Gone (fallback, mode change): drop it.
+        if (!reflowSurface) pendingPlaceRef.current = null;
+        return;
+      }
+      if (target === "original" && reflowSurface) return;
+      pendingPlaceRef.current = null;
+      const scrollToElement = (el: Element, fraction: number) => {
+        const view = scroller.getBoundingClientRect();
+        scroller.scrollTop +=
+          el.getBoundingClientRect().top - view.top - view.height * fraction;
+      };
+      const reflow = reflowRootRef.current;
+      if (pending.kind === "top") {
+        scroller.scrollTop = 0;
+        return;
+      }
+      if (pending.kind === "field") {
+        const id = CSS.escape(pending.fieldId);
+        const el =
+          target === "mobileFriendly"
+            ? reflow?.querySelector<HTMLElement>(
+                `[data-mf-field][data-field-id="${id}"]`
+              )
+            : pageWrapperRef.current?.querySelector<HTMLElement>(
+                `[data-field-id="${id}"]`
+              );
+        if (!el) return;
+        scrollToElement(el, target === "mobileFriendly" ? 0.3 : 0.5);
+        el.focus?.({ preventScroll: true });
+        return;
+      }
+      if (pending.kind === "origin") {
+        const pageContainer = scroller.querySelector(
+          `#page_div_container_${pending.pageIndex + 1}`
+        );
+        if (!pageContainer) return;
+        const view = scroller.getBoundingClientRect();
+        scroller.scrollTop +=
+          pageContainer.getBoundingClientRect().top -
+          view.top +
+          pending.top * zoomLevels[zoomLevel] -
+          16;
+        return;
+      }
+      // "point": the first block at or below that spot of that page.
+      const blocks = reflow?.querySelectorAll<HTMLElement>(
+        "[data-mf-block][data-mf-origin-page]"
+      );
+      const match = Array.from(blocks ?? []).find((el) => {
+        const page = Number(el.dataset.mfOriginPage);
+        const top = Number(el.dataset.mfOriginTop);
+        return (
+          page > pending.pageIndex ||
+          (page === pending.pageIndex && top >= pending.y - 1)
+        );
+      });
+      if (match) scrollToElement(match, 0);
+    }, [showReflow, reflowSurface, reviewing]);
 
     // Native "close the tab/window while dirty" guard. Browsers ignore the
     // custom message text and show their own generic prompt, but a
@@ -3488,6 +4016,393 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     const isFieldValueComplete = (value?: string): boolean =>
       !!value && value.trim() !== "" && value !== "Off";
 
+    // Every field record by id, and every id by name (radio groups and
+    // same-name copies span pages). Cached on `pages`.
+    if (fieldIndexCacheRef.current.pages !== pages) {
+      const byId = new Map<string, PDFFormRawField>();
+      const byName = new Map<string, string[]>();
+      pages?.forEach((page) =>
+        page.fields?.forEach((field) => {
+          byId.set(field.id, field);
+          const ids = byName.get(field.name);
+          if (ids) ids.push(field.id);
+          else byName.set(field.name, [field.id]);
+        })
+      );
+      fieldIndexCacheRef.current = {
+        pages,
+        fieldById: byId,
+        idsByName: byName,
+      };
+    }
+    const { fieldById, idsByName } = fieldIndexCacheRef.current;
+
+    // A checkbox name whose boxes export different values (a group like
+    // "deposit: A / B"). pdf.js gives every box the group's one value, so
+    // each box is ticked only when that value is its own export value.
+    const hasDistinctCheckboxExports = (field: PDFFormRawField): boolean => {
+      const ids = idsByName.get(field.name);
+      if (!ids || ids.length < 2) return false;
+      const exports = new Set(
+        ids.map((id) => fieldById.get(id)?.exportValues || "On")
+      );
+      return exports.size > 1;
+    };
+
+    // Ids of every field sharing `field`'s name, optionally only of the
+    // given types.
+    const idsSharingName = (
+      field: PDFFormRawField,
+      types?: PDFFormRawField["type"][]
+    ): string[] => {
+      const ids = idsByName.get(field.name) ?? [field.id];
+      return types
+        ? ids.filter((id) => {
+            const type = fieldById.get(id)?.type;
+            return type !== undefined && types.includes(type);
+          })
+        : ids;
+    };
+
+    /**
+     * SHARED FIELD-CONTROL MODEL (spec §9.1): one place that decides a
+     * field's value, how a change is written, and its required, complete,
+     * read-only and gated state. The original overlays below and the mobile
+     * friendly view both render from it, so the two views can never apply
+     * different rules. Every write marks the session dirty.
+     */
+    const getFieldControlModel = (
+      field: PDFFormRawField
+    ): FieldControlModel => {
+      const value = fieldValues.getValue(
+        field.id,
+        field.value || field.defaultValue
+      );
+      const kind = widgetKind(field, effectiveSignatureFieldNames);
+      const gatedLabel = gatedLabelById.get(field.id) ?? null;
+      const isSignature = kind === "signature";
+      return {
+        id: field.id,
+        name: field.name,
+        kind,
+        value,
+        checked:
+          field.type === "radio" ||
+          (field.type === "checkbox" && hasDistinctCheckboxExports(field))
+            ? value === field.exportValues
+            : !!value && value !== "Off",
+        // Same-name widgets are one field in the PDF with one value, so a
+        // write goes to every copy, in every view and at every width. The
+        // save keeps one value per name; writing a single copy let a stale
+        // copy elsewhere win (§9.4).
+        setValue: (newValue) => {
+          setIsDirty(true);
+          fieldValues.setValueForIds(
+            idsSharingName(field, ["text", "combobox", "list"]),
+            newValue
+          );
+        },
+        setChecked: (on) => {
+          setIsDirty(true);
+          if (field.type === "radio") {
+            // Selecting one option deselects the rest of its group, on
+            // every page.
+            fieldValues.setValueForIds(
+              idsSharingName(field),
+              field.exportValues || ""
+            );
+            return;
+          }
+          // Same-name checkboxes share one value: boxes with this export
+          // value turn on together, the group's other boxes turn off. One
+          // write per target value.
+          const onValue = field.exportValues || "On";
+          const ids = idsSharingName(field, ["checkbox"]);
+          const matching = on
+            ? ids.filter(
+                (id) => (fieldById.get(id)?.exportValues || "On") === onValue
+              )
+            : [];
+          const others = ids.filter((id) => !matching.includes(id));
+          if (matching.length) fieldValues.setValueForIds(matching, onValue);
+          if (others.length) fieldValues.setValueForIds(others, "Off");
+        },
+        maxLength:
+          field.charLimit && field.charLimit > 0 ? field.charLimit : undefined,
+        options: field.items,
+        ...(field.type === "checkbox" || field.type === "radio"
+          ? { exportValue: field.exportValues || undefined }
+          : {}),
+        required: extractedMetadata.current.requiredFields.includes(field.name),
+        complete: isSignature
+          ? !!value && value.startsWith("data:image")
+          : isFieldValueComplete(value),
+        readOnly: mode === "view" || !!gatedLabel,
+        gatedLabel,
+        hidden: !!gatedLabel && unassignedVisibility === "hidden",
+      };
+    };
+
+    const getReflowFieldControl = (fieldId: string) => {
+      const field = fieldById.get(fieldId);
+      return field ? getFieldControlModel(field) : null;
+    };
+
+    // ---- Mobile friendly view: toggle, guided bar, review (spec §8) ----
+    const reflowDocument =
+      conversion.status === "ok" ? conversion.document : null;
+
+    // The review of the original (S3). A drawer (mobile progress, tablet
+    // panels) that asked for it closes, or it would cover the review and
+    // its own Finish would save from behind it.
+    const enterReview = () => {
+      closeAfterReviewSaveRef.current = false;
+      pendingReviewFitRef.current = true;
+      setOpenDrawer(null);
+      setTabletRightOpen(false);
+      setReviewing(true);
+    };
+
+    // Finish, the header Save and the progress panel's finish all come
+    // here. From the reflow in Fill & Sign they open the review of the
+    // original (S3); everywhere else they are the existing save, unchanged.
+    const requestFinish = () => {
+      if (mode === "edit" && reflowSurface) {
+        enterReview();
+        return;
+      }
+      // During the review the header Save is the review's own save
+      // (including "Save and close" from the guard).
+      if (mode === "edit" && reviewing) {
+        void handleReviewSave();
+        return;
+      }
+      handleSaveClick();
+    };
+
+    const handleBackToEdit = () => {
+      pendingPlaceRef.current = currentReflowFieldId
+        ? {
+            kind: "field",
+            fieldId: currentReflowFieldId,
+            target: "mobileFriendly",
+          }
+        : { kind: "top", target: "mobileFriendly" };
+      // Going back to edit cancels a pending "Save and close".
+      closeAfterReviewSaveRef.current = false;
+      setReviewing(false);
+      setMobileViewChoiceState("mobileFriendly");
+    };
+
+    const handleMobileViewChange = (next: MobileViewChoice) => {
+      if (next === "mobileFriendly" && conversion.status === "fallback") return;
+      // Already on the original (reviewing included): nothing to do.
+      if (next === "original" && !reflowSurface) return;
+      if (next === "mobileFriendly" && reflowSurface) return;
+      const scroller = divRef.current;
+      const active = document.activeElement as HTMLElement | null;
+      const recentBlur = lastFieldBlurRef.current;
+      const focusedFieldId =
+        active && scroller?.contains(active) && active.dataset?.fieldId
+          ? active.dataset.fieldId
+          : recentBlur && Date.now() - recentBlur.at < 1500
+            ? recentBlur.fieldId
+            : undefined;
+      if (focusedFieldId) {
+        pendingPlaceRef.current = {
+          kind: "field",
+          fieldId: focusedFieldId,
+          target: next,
+        };
+      } else if (next === "original" && showReflow && scroller) {
+        // The first block still on screen, at its source position.
+        const top = scroller.getBoundingClientRect().top;
+        const first = Array.from(
+          reflowRootRef.current?.querySelectorAll<HTMLElement>(
+            "[data-mf-block][data-mf-origin-page]"
+          ) ?? []
+        ).find((el) => el.getBoundingClientRect().bottom > top + 1);
+        pendingPlaceRef.current = first
+          ? {
+              kind: "origin",
+              pageIndex: Number(first.dataset.mfOriginPage),
+              top: Number(first.dataset.mfOriginTop),
+            }
+          : { kind: "top", target: next };
+      } else if (next === "mobileFriendly" && scroller) {
+        // The spot of the visible page at the top of the scroller.
+        const pageContainer = scroller.querySelector(
+          `#page_div_container_${activePage}`
+        );
+        const y = pageContainer
+          ? (scroller.getBoundingClientRect().top -
+              pageContainer.getBoundingClientRect().top) /
+            zoomLevels[zoomLevel]
+          : 0;
+        pendingPlaceRef.current = {
+          kind: "point",
+          pageIndex: activePage - 1,
+          y: Math.max(y, 0),
+        };
+      } else {
+        pendingPlaceRef.current = { kind: "top", target: next };
+      }
+      closeAfterReviewSaveRef.current = false;
+      setReviewing(false);
+      setMobileViewChoiceState(next);
+    };
+
+    const handleShowOriginalAt = (origin: SourceOrigin | null) => {
+      pendingPlaceRef.current = origin
+        ? { kind: "origin", pageIndex: origin.pageIndex, top: origin.box.top }
+        : { kind: "top", target: "original" };
+      setMobileViewChoiceState("original");
+    };
+
+    // The reflow's field ids in reading order: fixed for a document, so
+    // worked out once per document rather than on every keystroke. (A ref,
+    // not useMemo: this runs below the loading/error early returns.)
+    if (reflowIdsCacheRef.current.doc !== reflowDocument) {
+      reflowIdsCacheRef.current = {
+        doc: reflowDocument,
+        ids: reflowDocument ? fieldIdsInOrder(reflowDocument) : [],
+      };
+    }
+    const reflowIds = reflowIdsCacheRef.current.ids;
+
+    // The active participant's required fields, in the reflow's reading
+    // order (spec §8.4). The bar's counts use this same list, so "X left"
+    // and Next always agree. No gated filter is needed: the required set
+    // already uses the gate's own assignment test, so a gated field is
+    // never in it. Cached on its inputs, not rebuilt per keystroke.
+    const guidedOrder = (doc: MobileDocument) => {
+      const ids = doc === reflowDocument ? reflowIds : fieldIdsInOrder(doc);
+      const key = [
+        ids,
+        pages,
+        gatingInputs,
+        activeParticipantId,
+        extractedMetadata.current,
+      ];
+      const cached = guidedOrderCacheRef.current;
+      let order: string[];
+      let firstIdByName: Map<string, string>;
+      let positions: DocumentPositions;
+      if (cached && cached.key.every((part, i) => part === key[i])) {
+        ({ order, firstIdByName, positions } = cached);
+      } else {
+        const renderedNames = getRenderedFieldNames();
+        const requiredNames = getRequiredAssignedFieldNames({
+          metadata: {
+            ...extractedMetadata.current,
+            fieldAssignments: gatingInputs.effectiveAssignments,
+          },
+          participantId: activeParticipantId,
+        }).filter((name) => !renderedNames || renderedNames.has(name));
+        firstIdByName = new Map<string, string>();
+        ids.forEach((id) => {
+          const name = fieldById.get(id)?.name;
+          if (name !== undefined && !firstIdByName.has(name)) {
+            firstIdByName.set(name, id);
+          }
+        });
+        order = orderNamesByDocument(requiredNames, ids, (id) =>
+          fieldById.get(id)?.name
+        );
+        positions = documentPositions(ids, (id) => fieldById.get(id)?.name);
+        guidedOrderCacheRef.current = { key, order, firstIdByName, positions };
+      }
+      const isComplete = (name: string) =>
+        isFieldValueComplete(progressData.formFields[name]);
+      return { order, isComplete, firstIdByName, ids, positions };
+    };
+
+    // One guided stop: mark it current and bring it into view. A signature
+    // stop opens the shared adoption modal instead of focusing the field
+    // behind it (the modal owns focus while it is open).
+    const goToGuidedField = (
+      name: string | null,
+      firstIdByName: Map<string, string>
+    ) => {
+      if (!name) return;
+      const fieldId = firstIdByName.get(name);
+      if (fieldId) setCurrentReflowFieldId(fieldId);
+      const signatureId =
+        fieldId && effectiveSignatureFieldNames.has(name) ? fieldId : null;
+      handleFieldFocus(name, { focus: !signatureId });
+      if (signatureId) setSigningFieldId(signatureId);
+    };
+
+    // Guided Next/Previous over the active participant's required fields.
+    const guidedBar = (() => {
+      if (mode !== "edit" || !showReflow || !reflowDocument) return null;
+      const { order, isComplete, firstIdByName, ids, positions } =
+        guidedOrder(reflowDocument);
+      // On an optional field, the place between the required fields
+      // around it, so Next carries on from there.
+      const at = guidedAnchor(
+        order,
+        currentReflowFieldId,
+        ids,
+        (id) => fieldById.get(id)?.name,
+        positions
+      );
+      const goTo = (name: string | null) =>
+        goToGuidedField(name, firstIdByName);
+      const previous = previousName(order, at);
+      return (
+        <GuidedBar
+          position={guidedPosition(order, at, isComplete)}
+          total={order.length}
+          remaining={order.filter((name) => !isComplete(name)).length}
+          onPrevious={() => goTo(previous)}
+          previousDisabled={!previous}
+          onNext={() => goTo(nextIncompleteName(order, at, isComplete))}
+          onFinish={requestFinish}
+        />
+      );
+    })();
+    const reviewBar =
+      mode === "edit" && mobileViewAvailable && reviewing ? (
+        <ReviewBar
+          saveLabel={saveLabel}
+          isSaving={isSaving}
+          onSave={handleReviewSave}
+          onBack={handleBackToEdit}
+        />
+      ) : null;
+    const canvasFooter = reviewBar ?? guidedBar;
+
+    const showFallbackNotice =
+      mobileViewAvailable &&
+      conversion.status === "fallback" &&
+      !fallbackNoticeDismissed;
+    const showMobileHint = showReflow && !mobileHintSeen && !showFallbackNotice;
+    // Toggle, then the fallback notice or the first-run hint (spec §8.1
+    // banner order). Nothing at all unless the view is available (S4).
+    const mobileViewBanner = mobileViewAvailable ? (
+      <>
+        <MobileViewToggle
+          value={reflowSurface ? "mobileFriendly" : "original"}
+          onChange={handleMobileViewChange}
+          loading={reflowSurface && conversion.status !== "ok"}
+          unavailable={conversion.status === "fallback"}
+          onUnavailableTap={() => setFallbackNoticeDismissed(false)}
+        />
+        {showFallbackNotice && (
+          <FallbackNotice onDismiss={() => setFallbackNoticeDismissed(true)} />
+        )}
+        {showMobileHint && (
+          <MobileViewHint
+            onDismiss={() => {
+              writeHintSeen();
+              setMobileHintSeen(true);
+            }}
+          />
+        )}
+      </>
+    ) : undefined;
+
     // Lazily built: only computed for the surface that renders it.
     const buildProgressPanelProps = (): ProgressPanelProps => ({
       activeParticipantId,
@@ -3498,7 +4413,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       completedFields: progressData.completedFields,
       mode,
       onFieldFocus: handleFieldFocus,
-      onFinish: handleSaveClick,
+      onFinish: requestFinish,
       renderedFieldNames: getRenderedFieldNames(),
       fieldLabels,
     });
@@ -3697,7 +4612,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             zoomOutDisabled={zoomLevel <= 0}
             onFitZoom={handleFitZoom}
             onResetZoom={handleResetZoom}
-            onSave={handleSaveClick}
+            zoomControlsHidden={reflowSurface}
+            onSave={requestFinish}
             isSaving={isSaving}
             isDirty={isDirty}
             saveLabel={saveLabel}
@@ -3732,7 +4648,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 : undefined
             }
             onOpenProgress={
-              mode === "edit" && layout !== "desktop"
+              // The mobile friendly view's bottom bar shows progress itself.
+              mode === "edit" && layout !== "desktop" && !reflowSurface
                 ? () => openRightPanel("progress")
                 : undefined
             }
@@ -3763,33 +4680,38 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           ) : undefined
         }
         canvasBanner={
-          /* Prepared-but-unsaved fields are invisible in Fill & Sign
-             (fields render from the PDF; only a Prepare save writes them
-             in). Without this, they look like they vanished. */
           mode === "edit" && hasUnsavedBuildChanges ? (
-            <Alert.Root
-              status="warning"
-              size="sm"
-              role="status"
-              mx={4}
-              mt={3}
-              w="auto"
-              flexShrink={0}
-              // Above the canvas grid pseudo-element.
-              position="relative"
-              zIndex={1}
-            >
-              <Alert.Indicator>
-                <WarningIcon weight="bold" />
-              </Alert.Indicator>
-              <Alert.Content>
-                <Alert.Description>
-                  Fields added in Prepare are not saved yet, so they cannot be
-                  filled here. Switch back to Prepare and select Save first.
-                </Alert.Description>
-              </Alert.Content>
-            </Alert.Root>
-          ) : undefined
+            <>
+              {/* Prepared-but-unsaved fields are invisible in Fill & Sign
+                 (fields render from the PDF; only a Prepare save writes
+                 them in). Without this, they look like they vanished. */}
+              <Alert.Root
+                status="warning"
+                size="sm"
+                role="status"
+                mx={4}
+                mt={3}
+                w="auto"
+                flexShrink={0}
+                // Above the canvas grid pseudo-element.
+                position="relative"
+                zIndex={1}
+              >
+                <Alert.Indicator>
+                  <WarningIcon weight="bold" />
+                </Alert.Indicator>
+                <Alert.Content>
+                  <Alert.Description>
+                    Fields added in Prepare are not saved yet, so they cannot be
+                    filled here. Switch back to Prepare and select Save first.
+                  </Alert.Description>
+                </Alert.Content>
+              </Alert.Root>
+              {mobileViewBanner}
+            </>
+          ) : (
+            mobileViewBanner
+          )
         }
         canvas={
           <div
@@ -3803,13 +4725,25 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 ? { paddingBottom: FIELD_ACTION_BAR_CLEARANCE }
                 : undefined
             }
+            data-mobile-view={reflowSurface ? "reflow" : undefined}
             // Focusable (not tabbable) so a click on the canvas gives it
             // focus: Ctrl/Cmd zoom keys (C5) and Esc-to-clear (A6) then
             // reach the editor, and arrow keys scroll the document.
             tabIndex={-1}
             onClick={handleCanvasClick}
+            onBlurCapture={(e) => {
+              const fieldId = (e.target as HTMLElement).dataset?.fieldId;
+              if (fieldId) lastFieldBlurRef.current = { fieldId, at: Date.now() };
+            }}
           >
-            <div ref={pageWrapperRef} className={styles.pageWrapper}>
+            <div
+              ref={pageWrapperRef}
+              className={styles.pageWrapper}
+              // Mobile friendly view showing: the original stays mounted
+              // (canvases, render tasks and imperative gating survive, and
+              // the scroller's width doesn't change, so nothing refits).
+              style={reflowSurface ? { display: "none" } : undefined}
+            >
               {pages &&
                 pages.length > 0 &&
                 pages
@@ -3852,6 +4786,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                               width: rectScaled[2] - rectScaled[0],
                               height: rectScaled[3] - rectScaled[1],
                             };
+                            // Value, writes and state all come from the
+                            // shared model (spec §9.1); the mobile friendly
+                            // view renders from the same one.
+                            const control = getFieldControlModel(field);
                             if (field.type === "combobox")
                               return (
                                 <select
@@ -3859,26 +4797,14 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                   title={field.name}
                                   key={field.id}
                                   data-field-id={field.id}
-                                  data-complete={isFieldValueComplete(
-                                    fieldValues.getValue(
-                                      field.id,
-                                      field.value || field.defaultValue
-                                    )
-                                  )}
-                                  value={fieldValues.getValue(
-                                    field.id,
-                                    field.value || field.defaultValue
-                                  )}
+                                  data-complete={control.complete}
+                                  value={control.value}
                                   className={styles.pdfSelect}
                                   style={style}
                                   disabled={mode === "view"}
                                   onChange={(e) => {
                                     if (mode !== "view") {
-                                      fieldValues.setValue(
-                                        field.id,
-                                        e.target.value
-                                      );
-                                      setIsDirty(true);
+                                      control.setValue(e.target.value);
                                     }
                                   }}
                                 >
@@ -3892,40 +4818,16 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                   ))}
                                 </select>
                               );
-                            // Update this field's value in the fieldValues
-                            // map -- never `pages` (see the invariant comment
-                            // on renderPages above for why). `byName` also
-                            // updates every field sharing the name — needed
-                            // for radio groups, where selecting one option
-                            // deselects the rest, spanning every page since a
-                            // radio group's options aren't guaranteed to sit
-                            // on the same page.
-                            const updateFieldValue = (
-                              newValue: string,
-                              byName: boolean
-                            ) => {
-                              setIsDirty(true);
-                              if (!byName) {
-                                fieldValues.setValue(field.id, newValue);
-                                return;
-                              }
-                              const idsWithSameName: string[] = [];
-                              pages?.forEach((p) =>
-                                p.fields?.forEach((f) => {
-                                  if (f.name === field.name) {
-                                    idsWithSameName.push(f.id);
-                                  }
-                                })
-                              );
-                              fieldValues.setValueForIds(
-                                idsWithSameName,
-                                newValue
-                              );
-                            };
-                            const currentValue = fieldValues.getValue(
-                              field.id,
-                              field.value || field.defaultValue
-                            );
+                            // Writes go to the fieldValues map -- never
+                            // `pages` (see the invariant comment on
+                            // renderPages above for why). A radio option
+                            // writes its whole group (every field sharing
+                            // the name, on every page, since a radio group's
+                            // options aren't guaranteed to sit on the same
+                            // page); text, select and checkbox writes go to
+                            // every copy of the name (one PDF field, one
+                            // value; see getFieldControlModel).
+                            const currentValue = control.value;
 
                             // Signature fields are plain PDFTextFields under
                             // the hood (see onSaveAs) -- the only way to
@@ -3936,10 +4838,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                             // Rendered as a click-to-sign button instead of
                             // a text input; data-field-id keeps it inside
                             // the exact same gating loop above.
-                            if (effectiveSignatureFieldNames.has(field.name)) {
-                              const isSigned =
-                                !!currentValue &&
-                                currentValue.startsWith("data:image");
+                            if (control.kind === "signature") {
+                              const isSigned = control.complete;
                               return (
                                 <button
                                   type="button"
@@ -3978,28 +4878,20 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                             }
 
                             if (field.type === "checkbox") {
-                              const onValue = field.exportValues || "On";
                               return (
                                 <input
                                   type="checkbox"
                                   name={field.name}
                                   key={field.id}
                                   data-field-id={field.id}
-                                  data-complete={isFieldValueComplete(
-                                    currentValue
-                                  )}
+                                  data-complete={control.complete}
                                   className={styles.pdfInput}
                                   style={style}
                                   disabled={mode === "view"}
-                                  checked={
-                                    !!currentValue && currentValue !== "Off"
-                                  }
+                                  checked={control.checked}
                                   onChange={(e) => {
                                     if (mode !== "view") {
-                                      updateFieldValue(
-                                        e.target.checked ? onValue : "Off",
-                                        false
-                                      );
+                                      control.setChecked(e.target.checked);
                                     }
                                   }}
                                 />
@@ -4013,29 +4905,21 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                   name={field.name}
                                   key={field.id}
                                   data-field-id={field.id}
-                                  data-complete={isFieldValueComplete(
-                                    currentValue
-                                  )}
+                                  data-complete={control.complete}
                                   className={styles.pdfInput}
                                   style={style}
                                   disabled={mode === "view"}
-                                  checked={currentValue === field.exportValues}
+                                  checked={control.checked}
                                   onChange={() => {
                                     if (mode !== "view") {
-                                      updateFieldValue(
-                                        field.exportValues || "",
-                                        true
-                                      );
+                                      control.setChecked(true);
                                     }
                                   }}
                                 />
                               );
                             }
 
-                            const maxLength =
-                              field.charLimit && field.charLimit > 0
-                                ? field.charLimit
-                                : undefined;
+                            const maxLength = control.maxLength;
 
                             // Multiline text field → <textarea> so line breaks
                             // and wrapping render like Acrobat.
@@ -4045,9 +4929,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                   name={field.name}
                                   key={field.id}
                                   data-field-id={field.id}
-                                  data-complete={isFieldValueComplete(
-                                    currentValue
-                                  )}
+                                  data-complete={control.complete}
                                   className={styles.pdfInput}
                                   style={style}
                                   readOnly={mode === "view"}
@@ -4055,7 +4937,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                   value={currentValue}
                                   onChange={(e) => {
                                     if (mode !== "view") {
-                                      updateFieldValue(e.target.value, false);
+                                      control.setValue(e.target.value);
                                     }
                                   }}
                                 />
@@ -4068,9 +4950,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                 name={field.name}
                                 key={field.id}
                                 data-field-id={field.id}
-                                data-complete={isFieldValueComplete(
-                                  currentValue
-                                )}
+                                data-complete={control.complete}
                                 className={styles.pdfInput}
                                 style={style}
                                 readOnly={mode === "view"}
@@ -4078,7 +4958,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                 value={currentValue}
                                 onChange={(e) => {
                                   if (mode !== "view") {
-                                    updateFieldValue(e.target.value, false);
+                                    control.setValue(e.target.value);
                                   }
                                 }}
                               />
@@ -4172,8 +5052,23 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                     </div>
                   ))}
             </div>
+            {reflowSurface && (mode === "edit" || mode === "view") && (
+              <MobileFriendlyView
+                ref={reflowRootRef}
+                status={reflowDocument ? "ready" : "loading"}
+                document={reflowDocument}
+                mode={mode}
+                getFieldControl={getReflowFieldControl}
+                onOpenSignature={(fieldId) => {
+                  if (mode === "edit") setSigningFieldId(fieldId);
+                }}
+                onFieldFocus={setCurrentReflowFieldId}
+                onShowOriginal={handleShowOriginalAt}
+              />
+            )}
           </div>
         }
+        canvasFooter={canvasFooter ?? undefined}
         canvasOverlays={
           <>
             {/* Context Toolbar - Desktop */}
@@ -4296,6 +5191,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
               activePage={activePage}
               totalPages={pages?.length ?? 0}
               onPageSelect={handlePageSelect}
+              // The guided or review bar takes the pill's place.
+              showPagePill={!canvasFooter}
               pageThumbnailsProps={
                 pages
                   ? { pages, activePage, onPageSelect: handlePageSelect }
@@ -4380,7 +5277,14 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
               }
               onAdopt={(dataUrl) => {
                 if (signingFieldId) {
-                  fieldValues.setValue(signingFieldId, dataUrl);
+                  // Every copy of the signature's name: one field, one value.
+                  const name = fieldById.get(signingFieldId)?.name;
+                  fieldValues.setValueForIds(
+                    name !== undefined
+                      ? (idsByName.get(name) ?? [signingFieldId])
+                      : [signingFieldId],
+                    dataUrl
+                  );
                   setIsDirty(true);
                 }
                 setLastAdoptedSignature(dataUrl);
