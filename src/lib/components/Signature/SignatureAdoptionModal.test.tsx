@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
@@ -59,8 +59,12 @@ describe("SignatureAdoptionModal - capture flow", () => {
 
     await user.click(screen.getByRole("tab", { name: "Type" }));
 
-    const adoptButton = screen.getByRole("button", { name: "Adopt" });
-    expect(adoptButton).toBeEnabled(); // pre-filled from signerName
+    // Pre-filled from signerName; drawn after the font loads (async).
+    const adoptButton = await waitFor(() => {
+      const button = screen.getByRole("button", { name: "Adopt" });
+      expect(button).toBeEnabled();
+      return button;
+    });
 
     await user.click(adoptButton);
 
