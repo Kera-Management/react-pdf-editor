@@ -181,8 +181,7 @@ const waitForStep = (title: string) =>
 // (otherwise a slow run can click before anything is listening).
 const settle = () =>
   act(() => new Promise((resolve) => setTimeout(resolve, 150)));
-// The intro's Start tour button. Found by its text: Ark labels every
-// "next" action with the Next translation.
+// The intro's Start tour button.
 const startButton = async () =>
   within(await tourDialog())
     .getByText("Start tour")
@@ -524,6 +523,9 @@ describe("sign tour: how it ends", () => {
       allowedModes: ["edit", "view"],
     });
     await startTour();
+    // Ark arms its outside-press tracking a frame after the step shows;
+    // a press before that is missed (seen on slower CI runners).
+    await settle();
     // A real click lands away from the spotlight (jsdom rects are all 0).
     await user.pointer({
       keys: "[MouseLeft]",
