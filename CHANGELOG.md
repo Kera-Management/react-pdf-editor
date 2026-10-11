@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 4.2.0
 
 ### Fixed
 
@@ -60,6 +60,24 @@
   guided bar's Finish. Spec §5.2.
 - New peer dependency `@ark-ui/react` `^5.37.2` (the version Chakra
   3.36 depends on; hosts on Chakra already have it).
+- **Tour intro card.** Every tour opens on a centred card ("Quick tour",
+  a title, one line on what it covers, Start tour / Skip) before anything
+  is highlighted. "1 of N" counts only the steps after it, step 1 has no
+  Back, and `meta.lastStep` is 0 when a run ends on the intro.
+- **The editor is blocked while a tour runs.** Presses on the highlighted
+  control do nothing (elsewhere they end the tour, as on the backdrop),
+  and mode switches are ignored, so a mid-tour switch can no longer start
+  the other mode's tour.
+- **No second automatic tour after a skip.** Once a tour ends as
+  dismissed, no other tour starts on its own in that mounted editor;
+  "Show tour" still replays. Finishing a tour (Done) still lets the next
+  mode's tour start.
+
+### Fixed (tour)
+
+- The tour popover could render under the dimmed backdrop (Ark copies the
+  content's z-index onto the positioner, and the content had none).
+- Spotlight corners are rounded (16px) to follow the cards they frame.
 
 ## 4.1.0
 
