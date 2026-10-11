@@ -3860,6 +3860,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // GUIDED TOURS (guided tour spec §5.3). The host says which tours are
     // unseen; the hook decides when one runs. Steps are built when a tour
     // starts, from what is on screen then.
+    // Held open by the Prepare tour's first step (the real mode cards).
+    const [tourModeMenuOpen, setTourModeMenuOpen] = useState(false);
     const editorTour = useEditorTour({
       mode,
       tours,
@@ -3882,6 +3884,12 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         canDecline: !!onDecline,
         hasSavedSignature: !!savedSignature,
         signVariant: showReflowRef.current ? "mobileFriendly" : "original",
+        mode,
+        // The header's switcher order (Prepare, Fill & Sign, View).
+        modes: (["build", "edit", "view"] as PDFEditorMode[]).filter((m) =>
+          allowedModes.includes(m)
+        ),
+        openModeMenu: setTourModeMenuOpen,
       }),
       onEnded: (run) => {
         // The mobile friendly variant's first step replaces the view's
@@ -3895,6 +3903,11 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         }
       },
     });
+    // However a run ends, the mode menu goes back to the user. (Ark closes
+    // it through the step's cleanup; this covers the tour unmounting.)
+    useEffect(() => {
+      if (!editorTour.active) setTourModeMenuOpen(false);
+    }, [editorTour.active]);
     // The sign tour may still start (or is running): it covers what the
     // hint says, so the hint waits.
     const signTourHoldsHint =
@@ -4743,6 +4756,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             // Prepare save only in Prepare.
             hasUnsavedBuildChanges={mode === "build" && hasUnsavedBuildChanges}
             onShowTour={editorTour.canReplay ? editorTour.replay : undefined}
+            modeMenuOpen={tourModeMenuOpen}
             progressSummary={
               mode === "edit"
                 ? {

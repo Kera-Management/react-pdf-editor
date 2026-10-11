@@ -154,6 +154,10 @@ const highlighted = () =>
   document.querySelector<HTMLElement>("[data-tour-highlighted]");
 const waitForStep = (title: string) =>
   waitFor(async () => expect(await stepTitle()).toBe(title));
+// The tour attaches its outside-click and step-action handling a moment
+// after a step shows; give it that moment before a test clicks around it
+// (otherwise a slow run can click before anything is listening).
+const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 150)));
 
 describe("sign tour: when it starts", () => {
   it("starts in Fill & Sign once the document has rendered", async () => {
@@ -337,6 +341,7 @@ describe("sign tour: how it ends", () => {
     const onTourEnd = vi.fn();
     await mount({ tours: { sign: true }, onTourEnd });
     await waitForStep("Your fields are highlighted");
+    await settle();
     const backdrop = document.querySelector<HTMLElement>('[data-scope="tour"][data-part="backdrop"]')!;
     await user.pointer({
       keys: "[MouseLeft]",
@@ -369,7 +374,8 @@ describe("sign tour: how it ends", () => {
     await user.click(
       within(await screen.findByRole("menu")).getByRole("menuitemradio", { name: /^view/i })
     );
-    await user.click(screen.getByRole("button", { name: /^view/i }));
+    // The switch re-renders the header; a slow run needs a moment.
+    await user.click(await screen.findByRole("button", { name: /^view/i }));
     await user.click(
       within(await screen.findByRole("menu")).getByRole("menuitemradio", { name: /fill & sign/i })
     );
@@ -409,6 +415,7 @@ describe("Show tour", () => {
     await user.click(screen.getByRole("button", { name: "More actions" }));
     await user.click(await screen.findByRole("menuitem", { name: "Show tour" }));
     await waitForStep("Your fields are highlighted");
+    await settle();
     await clickTour(user, "Skip");
     await waitFor(() => expect(onTourEnd).toHaveBeenCalledTimes(1));
     expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", {

@@ -37,4 +37,8 @@ export interface EditorTourStep {
    * target is missing when the tour starts is left out. */
   target: () => HTMLElement | null;
   placement?: TourStepDetails["placement"];
+  /** Gets the screen ready before the step shows (the Prepare tour's first
+   * step opens the mode menu). Call `show` when ready; the returned undo
+   * runs when the step ends, however it ends. */
+  prepare?: (show: () => void) => () => void;
 }

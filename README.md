@@ -125,7 +125,7 @@ Short first-run tours that explain the editor before a user runs into it. The li
 <PDFEditor
   src="/lease.pdf"
   mode="edit"
-  tours={{ sign: !hasSeen("pdf_sign") }}
+  tours={{ prepare: !hasSeen("pdf_prepare"), sign: !hasSeen("pdf_sign") }}
   onTourEnd={(tourId, reason, { replay, lastStep }) => {
     if (!replay) markSeen(tourId);
   }}
@@ -134,11 +134,11 @@ Short first-run tours that explain the editor before a user runs into it. The li
 
 - **Tours follow the mode, never the account type.** `build` (Prepare) maps to `prepare` / `"pdf_prepare"`, `edit` (Fill & Sign) to `sign` / `"pdf_sign"`, and `view` has none. Pass what is unseen, not who the person is.
 - **When a tour starts.** Automatically for the current mode's tour when `tours` says it is unseen, once per mounted editor, after the document has rendered (and, with `mobileFriendlyView`, after the conversion has settled). Never over the review step, a confirm dialog or a drawer. Omitting `tours` means no tour ever starts on its own.
-- **Steps adapt to the screen.** A step whose target isn't showing is skipped (no signature field of yours, no progress panel). The sign tour has two variants: the original layout (4 steps: your fields, Start / Next, tap to sign, `saveLabel`) and, on a phone showing the mobile friendly view, 3 steps (the view toggle, the guided bar, Finish then review). The decline sentence appears only with `onDecline`; the saved-signature wording only with `savedSignature`.
+- **Steps adapt to the screen.** A step whose target isn't showing is skipped (no signature field of yours, no progress panel, no parties panel). The Prepare tour has up to 5 steps: the modes (with the real mode menu opened, naming the mode you're in and only the modes offered), adding fields (the Fields panel on desktop, the Add field pill on a phone), choosing who fills each field, saving before switching, then Fill & Sign. With a single mode it is just the middle three, and the last step needs Fill & Sign among `allowedModes`. Prepare has no mobile friendly variant. The sign tour has two variants: the original layout (4 steps: your fields, Start / Next, tap to sign, `saveLabel`) and, on a phone showing the mobile friendly view, 3 steps (the view toggle, the guided bar, Finish then review). The decline sentence appears only with `onDecline`; the saved-signature wording only with `savedSignature`.
 - **How it ends.** Next / Back / Skip, plus a close button. `reason` is `"completed"` only for Done on the last step. Skip, close, Esc, a click on the dimmed background, a mode switch, the Mobile friendly / Original toggle, Finish, a dialog or drawer opening, or the editor closing mid-tour are `"dismissed"`. `meta.lastStep` is the 1-based step showing when it ended.
 - **Show tour.** When `tours` is passed and the current mode has a tour, "More actions" offers **Show tour** (on desktop it is that menu's only item). A replay reports `meta.replay: true`; hosts shouldn't record it.
 - **The mobile friendly hint.** While the sign tour may still start (or is running), the view's "Showing a mobile friendly version..." hint is held back. The phone variant's first step says the same thing, and when that variant ends the hint is marked seen (`rpe.mobileFriendlyHintSeen`), so it never follows the tour. With `tours` omitted or the sign tour already seen, the hint behaves as before.
-- Prepare tour: not yet; `tours.prepare` is accepted and does nothing until it ships.
+- **The unsaved-fields guard stays.** Completing or skipping the Prepare tour never affects the "Save your fields first?" dialog: any switch out of Prepare with unsaved fields still opens it, including picking a mode from the menu the tour opened.
 
 ## Ref
 

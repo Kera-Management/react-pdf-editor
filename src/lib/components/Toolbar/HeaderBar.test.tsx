@@ -590,4 +590,28 @@ describe("HeaderBar: Show tour (guided tour spec §3.3)", () => {
     expect(anchor("decline")).toHaveAccessibleName("I can't sign this");
     expect(anchor("progress")).toHaveTextContent("Progress");
   });
+
+  it.each(["desktop", "mobile"] as const)(
+    "%s: modeMenuOpen holds the mode menu open, then hands it back closed",
+    async (layout) => {
+      const user = userEvent.setup();
+      const props: Partial<HeaderBarProps> = {
+        layout,
+        mode: "build",
+        allowedModes: ["build", "edit", "view"],
+      };
+      const { rerender } = renderHeader({ ...props, modeMenuOpen: true });
+      const menu = await screen.findByRole("menu");
+      expect(menu).toHaveAttribute("data-pdfe-tour", "mode-menu-content");
+      expect(within(menu).getAllByRole("menuitemradio")).toHaveLength(3);
+      // A click elsewhere doesn't close it while it is held.
+      await user.click(document.body);
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+      rerender(<HeaderBar {...baseProps} {...props} modeMenuOpen={false} />);
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+      // The user's own open/close still works afterwards.
+      await user.click(screen.getByRole("button", { name: /prepare/i }));
+      expect(await screen.findByRole("menu")).toBeInTheDocument();
+    }
+  );
 });

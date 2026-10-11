@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, renderHook } from "@testing-library/react";
+import { act, render, renderHook } from "@testing-library/react";
 import type { PDFEditorMode } from "../PDFEditor";
 import { useEditorTour, type UseEditorTourOptions } from "./useEditorTour";
 import { TOUR_FOR_MODE, presentSteps, type EditorTourContext } from "./steps";
@@ -36,6 +36,9 @@ const context = (overrides: Partial<EditorTourContext> = {}): EditorTourContext 
   canDecline: false,
   hasSavedSignature: false,
   signVariant: "original",
+  mode: "edit",
+  modes: ["build", "edit", "view"],
+  openModeMenu: () => {},
   ...overrides,
 });
 
@@ -63,13 +66,20 @@ describe("mode to tour", () => {
     expect(TOUR_FOR_MODE).toEqual({ build: "pdf_prepare", edit: "pdf_sign", view: null });
   });
 
-  it("has no tour in View, and no Prepare tour yet", () => {
+  it("has no tour in View", () => {
     const view = setup({ mode: "view", tours: { sign: true, prepare: true } });
     expect(view.result.current.active).toBeNull();
     expect(view.result.current.canReplay).toBe(false);
-    const build = setup({ mode: "build", tours: { sign: true, prepare: true } });
-    expect(build.result.current.active).toBeNull();
-    expect(build.result.current.canReplay).toBe(false);
+  });
+
+  it("runs the Prepare tour in Prepare, and only when `prepare` is unseen", () => {
+    root.innerHTML += `<button data-pdfe-tour="mode-menu">Prepare</button>`;
+    const build = setup({ mode: "build", tours: { prepare: true } });
+    expect(build.result.current.active?.tourId).toBe("pdf_prepare");
+    expect(build.result.current.isPending("pdf_sign")).toBe(false);
+    // `sign` unseen says nothing about the Prepare tour.
+    expect(setup({ mode: "build", tours: { sign: true } }).result.current.active).toBeNull();
+    expect(setup({ mode: "build", tours: {} }).result.current.canReplay).toBe(true);
   });
 });
 
@@ -219,5 +229,87 @@ describe("sign tour steps (Variant A)", () => {
     root.querySelectorAll("[data-field-id]").forEach((el) => el.setAttribute("disabled", ""));
     const [first] = presentSteps("pdf_sign", context());
     expect(first.target()?.dataset.pdfeTour).toBe("canvas");
+  });
+});
+
+describe("Prepare tour steps", () => {
+  beforeEach(() => {
+    root.innerHTML = `
+      <button data-pdfe-tour="mode-menu">Prepare</button>
+      <div data-pdfe-tour="mode-menu-content" hidden></div>
+      <section data-pdfe-tour="field-palette"></section>
+      <section data-pdfe-tour="parties"></section>
+      <button data-pdfe-tour="save">Save</button>
+    `;
+  });
+
+  const steps = (overrides: Partial<EditorTourContext> = {}) =>
+    presentSteps("pdf_prepare", context({ mode: "build", ...overrides }));
+  const ids = (overrides: Partial<EditorTourContext> = {}) =>
+    steps(overrides).map((s) => s.id);
+
+  it("has five steps when the mode switcher shows", () => {
+    expect(ids()).toEqual([
+      "prepare-modes",
+      "prepare-fields",
+      "prepare-parties",
+      "prepare-save",
+      "prepare-fill-sign",
+    ]);
+  });
+
+  it("drops the mode steps (1 and 5) with a single mode", () => {
+    expect(ids({ modes: ["build"] })).toEqual([
+      "prepare-fields",
+      "prepare-parties",
+      "prepare-save",
+    ]);
+  });
+
+  it("drops step 5 when Fill & Sign isn't offered", () => {
+    expect(ids({ modes: ["build", "view"] })).toEqual([
+      "prepare-modes",
+      "prepare-fields",
+      "prepare-parties",
+      "prepare-save",
+    ]);
+  });
+
+  it("skips the parties step when its panel isn't showing", () => {
+    root.querySelector("[data-pdfe-tour='parties']")!.remove();
+    expect(ids()).not.toContain("prepare-parties");
+  });
+
+  it("points step 2 at the palette, else the mobile Add field pill", () => {
+    expect(steps()[1].target()?.dataset.pdfeTour).toBe("field-palette");
+    (root.querySelector("[data-pdfe-tour='field-palette']") as HTMLElement).hidden = true;
+    root.innerHTML += `<button data-pdfe-tour="add-field">Add field</button>`;
+    const fields = steps().find((s) => s.id === "prepare-fields")!;
+    expect(fields.target()?.dataset.pdfeTour).toBe("add-field");
+  });
+
+  it("step 1 opens the mode menu, shows once it is open, and closes it after", async () => {
+    const openModeMenu = vi.fn((open: boolean) => {
+      (root.querySelector("[data-pdfe-tour='mode-menu-content']") as HTMLElement).hidden =
+        !open;
+    });
+    const [first] = steps({ openModeMenu });
+    // Closed menu: the step still has the button to point at.
+    expect(first.target()?.dataset.pdfeTour).toBe("mode-menu");
+    const show = vi.fn();
+    const undo = first.prepare!(show);
+    expect(openModeMenu).toHaveBeenLastCalledWith(true);
+    await vi.waitFor(() => expect(show).toHaveBeenCalledTimes(1));
+    expect(first.target()?.dataset.pdfeTour).toBe("mode-menu-content");
+    undo();
+    expect(openModeMenu).toHaveBeenLastCalledWith(false);
+  });
+
+  it("names the mode the editor is in and only the modes offered", () => {
+    const { container } = render(<>{steps({ modes: ["build", "edit"] })[0].body}</>);
+    expect(steps({ modes: ["build", "edit"] })[0].title).toBe("Two modes");
+    expect(container.textContent).toBe(
+      "You're in Prepare. Prepare places fields and picks signers. Fill & Sign completes your own fields. Switch here."
+    );
   });
 });

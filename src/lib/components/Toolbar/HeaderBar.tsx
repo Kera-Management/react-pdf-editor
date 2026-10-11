@@ -37,6 +37,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { PDFEditorMode } from "../../PDFEditor";
+import { modeLabels } from "./modeLabels";
 import { Tooltip } from "./Tooltip";
 
 export type HeaderBarLayout = "mobile" | "tablet" | "desktop";
@@ -151,15 +152,12 @@ export interface HeaderBarProps {
    * opted into tours. On desktop it is the More actions menu's only item.
    */
   onShowTour?: () => void;
+  /**
+   * Holds the mode menu open while true, whatever the user does with it.
+   * The Prepare tour's first step uses it to show the real mode cards.
+   */
+  modeMenuOpen?: boolean;
 }
-
-// API values (build/edit/view) are unchanged; only the UI-facing labels
-// are renamed.
-const modeLabels: Record<PDFEditorMode, string> = {
-  build: "Prepare",
-  edit: "Fill & Sign",
-  view: "View",
-};
 
 const modeDescriptions: Record<PDFEditorMode, string> = {
   build: "Place fields and choose who signs",
@@ -191,6 +189,8 @@ interface ModeMenuProps {
   hasUnsavedBuildChanges?: boolean;
   onSave?: () => void;
   isSaving?: boolean;
+  /** Holds the menu open (see HeaderBarProps.modeMenuOpen). */
+  forceOpen?: boolean;
 }
 
 const ModeMenu: React.FC<ModeMenuProps> = ({
@@ -200,8 +200,15 @@ const ModeMenu: React.FC<ModeMenuProps> = ({
   hasUnsavedBuildChanges,
   onSave,
   isSaving,
+  forceOpen = false,
 }) => (
-  <Menu.Root positioning={{ strategy: "fixed", placement: "bottom-start" }}>
+  <Menu.Root
+    positioning={{ strategy: "fixed", placement: "bottom-start" }}
+    // Controlled only while held open: the menu ignores its own close
+    // requests then, and closes when released. Otherwise it is left to
+    // manage itself, exactly as before.
+    open={forceOpen || undefined}
+  >
     <Menu.Trigger asChild>
       <Button
         type="button"
@@ -217,7 +224,12 @@ const ModeMenu: React.FC<ModeMenuProps> = ({
       </Button>
     </Menu.Trigger>
     <Menu.Positioner>
-      <Menu.Content minW="72" rounded="xl" p="2">
+      <Menu.Content
+        minW="72"
+        rounded="xl"
+        p="2"
+        data-pdfe-tour="mode-menu-content"
+      >
         {/* Warns before the user picks a mode, rather than only after (the
             dialog). Width 0 + minW full: the note wraps to the cards'
             width instead of stretching the menu. */}
@@ -421,6 +433,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   onOpenProgress,
   hasUnsavedBuildChanges,
   onShowTour,
+  modeMenuOpen,
 }) => {
   const layout: HeaderBarLayout = layoutProp ?? (isMobile ? "mobile" : "desktop");
   const mobile = layout === "mobile";
@@ -625,6 +638,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
               hasUnsavedBuildChanges={hasUnsavedBuildChanges}
               onSave={onSave}
               isSaving={isSaving}
+              forceOpen={modeMenuOpen}
             />
           )}
         </HStack>
@@ -678,6 +692,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             hasUnsavedBuildChanges={hasUnsavedBuildChanges}
             onSave={onSave}
             isSaving={isSaving}
+            forceOpen={modeMenuOpen}
           />
         )}
         {title && (

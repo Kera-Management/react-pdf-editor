@@ -37,10 +37,20 @@
   place of the view's first-run hint and marks it seen when it ends.
   "Show tour" in More actions replays the current mode's tour (on desktop
   the menu appears for it). Built on Ark UI's tour, styled with Chakra
-  tokens. Omitting `tours` leaves existing hosts unchanged. The Prepare
-  tour follows. Spec: `agent-docs/specs/PDF_EDITOR_GUIDED_TOUR_SPEC.md`
-  §3.2, §3.3, §5.
-- `data-pdfe-tour` anchors on the mode menu, Save, Decline, Progress
+  tokens. Omitting `tours` leaves existing hosts unchanged. Spec:
+  `agent-docs/specs/PDF_EDITOR_GUIDED_TOUR_SPEC.md` §3.2, §3.3, §5.
+- **Guided Prepare tour** (`build` -> `pdf_prepare`, `tours.prepare`).
+  Up to 5 steps: the three modes (the real mode menu opens for this step
+  and closes when it ends; the copy names the current mode and only the
+  modes offered), adding fields (Fields panel on desktop, Add field pill
+  on phones), choosing who fills each field, saving before switching, then
+  Fill & Sign. The mode steps appear only with more than one mode, the
+  last only when Fill & Sign is offered, and the parties step only when
+  the parties panel is showing. Same start and end rules as the sign
+  tour; "Show tour" replays it in Prepare. It never bypasses the "Save
+  your fields first?" dialog, completed or skipped. Spec §3.1.
+  `HeaderBar`: `modeMenuOpen` prop (internal) holds the mode menu open.
+- `data-pdfe-tour` anchors on the mode menu (button and open menu), Save, Decline, Progress
   (rail section and header button), field palette, mobile Add field,
   parties (rail section and mobile drawer), the document area and the
   guided bar's Finish. Spec §5.2.

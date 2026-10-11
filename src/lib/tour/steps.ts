@@ -1,4 +1,5 @@
 import type { PDFEditorMode } from "../PDFEditor";
+import { prepareTourSteps } from "./prepareTour";
 import { signTourSteps, type SignTourVariant } from "./signTour";
 import type { EditorTourId, EditorTourStep, PDFEditorTours } from "./types";
 
@@ -27,13 +28,20 @@ export interface EditorTourContext {
   hasSavedSignature: boolean;
   /** The sign tour's layout: the mobile friendly view, or the original. */
   signVariant: SignTourVariant;
+  /** The mode the editor is in (the Prepare tour's first step names it). */
+  mode: PDFEditorMode;
+  /** The modes the header's mode switcher offers, in menu order. */
+  modes: PDFEditorMode[];
+  /** Opens or closes the header's mode menu (Prepare tour step 1). */
+  openModeMenu: (open: boolean) => void;
 }
 
 type StepBuilder = (context: EditorTourContext) => EditorTourStep[];
 
-// A tour exists for a mode only once it has a builder here. The Prepare
-// tour (`pdf_prepare`) slots in next to the sign tour.
+// A tour exists for a mode only once it has a builder here.
 const STEP_BUILDERS: Partial<Record<EditorTourId, StepBuilder>> = {
+  pdf_prepare: ({ mode, modes, openModeMenu, root }) =>
+    prepareTourSteps({ mode, modes, openModeMenu, root }),
   pdf_sign: ({ signVariant, ...context }) =>
     signTourSteps({ ...context, variant: signVariant }),
 };

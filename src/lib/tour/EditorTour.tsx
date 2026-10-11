@@ -59,6 +59,11 @@ export const EditorTour: React.FC<EditorTourProps> = ({
         placement: step.placement,
         backdrop: true,
         arrow: true,
+        // Ark runs a step's effect before showing it and its cleanup when
+        // the step ends (Next, Back, Skip, Esc, unmount).
+        ...(step.prepare && {
+          effect: ({ show }: { show: () => void }) => step.prepare!(show),
+        }),
       })),
     [steps]
   );
