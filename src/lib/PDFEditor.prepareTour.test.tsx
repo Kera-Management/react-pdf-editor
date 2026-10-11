@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Dialog, Portal } from "@chakra-ui/react";
 import { renderWithChakra } from "./testUtils";
 import type { PDFEditorProps } from "./PDFEditor";
 import PDFEditor from "./PDFEditor";
@@ -403,5 +404,51 @@ describe("Prepare tour never weakens the unsaved-fields guard (spec §6)", () =>
     );
     await waitFor(() => expect(modeMenu()).toBeNull());
     expect(screen.getByRole("button", { name: /prepare/i })).toBeInTheDocument();
+  });
+});
+
+// The manager's editor is a modal Chakra Dialog in the app (DocumentSignEditor).
+describe("Prepare tour inside a host's modal Dialog", () => {
+  async function mountInDialog(props: Partial<PDFEditorProps> = {}) {
+    const onOpenChange = vi.fn();
+    renderWithChakra(
+      <Dialog.Root open onOpenChange={onOpenChange} size="full">
+        <Portal>
+          <Dialog.Backdrop />
+          <Dialog.Positioner>
+            <Dialog.Content>
+              <PDFEditor src="fake://document.pdf" mode="build" {...preparer} {...props} />
+            </Dialog.Content>
+          </Dialog.Positioner>
+        </Portal>
+      </Dialog.Root>
+    );
+    await waitFor(() => {
+      if (!document.querySelector('[id^="page_div_container_"] canvas'))
+        throw new Error("not mounted");
+    });
+    return { onOpenChange };
+  }
+
+  it("takes clicks, and Esc on step 1 closes the tour and the menu but not the dialog", async () => {
+    const user = userEvent.setup();
+    const onTourEnd = vi.fn();
+    const { onOpenChange } = await mountInDialog({ tours: { prepare: true }, onTourEnd });
+    await waitForStep("Three modes");
+    await settle();
+    await clickTour(user, "Next");
+    await waitForStep("Add fields");
+    await clickTour(user, "Back");
+    await waitForStep("Three modes");
+    await screen.findByRole("menu");
+    await settle();
+    await user.keyboard("{Escape}");
+    await waitForTourEnd();
+    await waitFor(() => expect(modeMenu()).toBeNull());
+    expect(onTourEnd).toHaveBeenCalledWith("pdf_prepare", "dismissed", {
+      replay: false,
+      lastStep: 1,
+    });
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 });

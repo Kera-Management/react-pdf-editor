@@ -1,12 +1,5 @@
 import React, { useEffect, useMemo, useRef } from "react";
-import {
-  Box,
-  Button,
-  CloseButton,
-  HStack,
-  Portal,
-  Text,
-} from "@chakra-ui/react";
+import { Box, Button, CloseButton, HStack, Text } from "@chakra-ui/react";
 import { Tour, useTour, type TourStepDetails } from "@ark-ui/react/tour";
 import type { EditorTourEndReason, EditorTourStep } from "./types";
 
@@ -37,6 +30,11 @@ const TRANSLATIONS = {
  * Next / Back / Skip only. Skip, the close button, Esc and a click on the
  * dimmed background all end the run as "dismissed"; Done on the last step
  * is the only "completed".
+ *
+ * Not portaled: hosts mount the editor inside a modal Chakra Dialog, which
+ * sets `pointer-events: none` on <body> and treats anything outside its
+ * content as outside. The tour renders in place, inside the editor's root
+ * (so inside the host's dialog), on a fixed full-viewport layer.
  */
 export const EditorTour: React.FC<EditorTourProps> = ({
   steps,
@@ -89,6 +87,23 @@ export const EditorTour: React.FC<EditorTourProps> = ({
     },
   });
 
+  // Esc ends the run, and only the run. A host Dialog listens for Esc on
+  // the document in the capture phase too, and registered first, so the
+  // tour's own handler would come too late to keep the host from closing.
+  // A window capture listener runs before any document listener.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.isComposing) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (endedRef.current) return;
+      endedRef.current = true;
+      latest.current.onEnd("dismissed");
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, []);
+
   // `tour` changes identity every render; start once per mount.
   const startRef = useRef(tour.start);
   startRef.current = tour.start;
@@ -100,9 +115,18 @@ export const EditorTour: React.FC<EditorTourProps> = ({
 
   return (
     <Tour.Root tour={tour}>
-      <Portal>
+      {/* Ark positions the backdrop, spotlight and popover absolutely
+          against their offset parent: this layer, pinned to the viewport.
+          The layer itself lets clicks through; its parts take them. */}
+      <Box
+        data-part="tour-layer"
+        position="fixed"
+        inset="0"
+        zIndex="popover"
+        pointerEvents="none"
+      >
         <Tour.Backdrop asChild>
-          <Box bg="blackAlpha.600" zIndex="popover" />
+          <Box bg="blackAlpha.600" zIndex="popover" pointerEvents="auto" />
         </Tour.Backdrop>
         <Tour.Spotlight asChild>
           <Box
@@ -112,7 +136,7 @@ export const EditorTour: React.FC<EditorTourProps> = ({
           />
         </Tour.Spotlight>
         <Tour.Positioner asChild>
-          <Box zIndex="popover">
+          <Box zIndex="popover" pointerEvents="auto">
             <Tour.Content asChild>
               <Box
                 data-part="tour-popover"
@@ -213,7 +237,7 @@ export const EditorTour: React.FC<EditorTourProps> = ({
             </Tour.Content>
           </Box>
         </Tour.Positioner>
-      </Portal>
+      </Box>
     </Tour.Root>
   );
 };

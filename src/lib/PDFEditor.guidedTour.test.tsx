@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Dialog, Portal } from "@chakra-ui/react";
 import { renderWithChakra } from "./testUtils";
 import type { PDFEditorProps } from "./PDFEditor";
 import PDFEditor from "./PDFEditor";
@@ -427,5 +428,93 @@ describe("Show tour", () => {
   it("is not offered in a mode without a tour", async () => {
     await mount({ mode: "view", allowedModes: ["edit", "view"], tours: {} });
     expect(screen.queryByRole("button", { name: "More actions" })).toBeNull();
+  });
+});
+
+// Both Kera hosts that open Prepare mount the editor inside a modal Chakra
+// Dialog, which blocks pointer events on <body> and closes on Esc or on a
+// click outside its content. The tour has to live inside that dialog.
+describe("inside a host's modal Dialog", () => {
+  async function mountInDialog(props: Partial<PDFEditorProps> = {}) {
+    const onOpenChange = vi.fn();
+    renderWithChakra(
+      <Dialog.Root open onOpenChange={onOpenChange} size="full">
+        <Portal>
+          <Dialog.Backdrop />
+          <Dialog.Positioner>
+            <Dialog.Content>
+              <PDFEditor src="fake://document.pdf" mode="edit" {...signer} {...props} />
+            </Dialog.Content>
+          </Dialog.Positioner>
+        </Portal>
+      </Dialog.Root>
+    );
+    await waitFor(() => {
+      if (!fieldEl(document.body, "f_name")) throw new Error("not mounted");
+    });
+    return { onOpenChange };
+  }
+
+  it("renders inside the dialog, so its buttons take clicks", async () => {
+    // user-event refuses to click anything with `pointer-events: none`.
+    const user = userEvent.setup();
+    const onTourEnd = vi.fn();
+    await mountInDialog({ tours: { sign: true }, onTourEnd });
+    await waitForStep("Your fields are highlighted");
+    await settle();
+    expect(document.body.style.pointerEvents).toBe("none");
+    expect(popover()!.closest(".pdf-editor-root")).not.toBeNull();
+    await clickTour(user, "Next");
+    await waitForStep("Go field by field");
+    await clickTour(user, "Back");
+    await waitForStep("Your fields are highlighted");
+    await clickTour(user, "Skip");
+    await waitFor(() => expect(onTourEnd).toHaveBeenCalledTimes(1));
+    expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", {
+      replay: false,
+      lastStep: 1,
+    });
+  });
+
+  it("Esc ends the tour without closing the host dialog", async () => {
+    const user = userEvent.setup();
+    const onTourEnd = vi.fn();
+    const { onOpenChange } = await mountInDialog({ tours: { sign: true }, onTourEnd });
+    await waitForStep("Your fields are highlighted");
+    await settle();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(onTourEnd).toHaveBeenCalledTimes(1));
+    expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", {
+      replay: false,
+      lastStep: 1,
+    });
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(onOpenChange).not.toHaveBeenCalled();
+    // With the tour gone, Esc is the host's again.
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(onOpenChange).toHaveBeenCalledWith(expect.objectContaining({ open: false }))
+    );
+  });
+
+  it("a click on the dimmed background ends the tour, not the host dialog", async () => {
+    const user = userEvent.setup();
+    const onTourEnd = vi.fn();
+    const { onOpenChange } = await mountInDialog({ tours: { sign: true }, onTourEnd });
+    await waitForStep("Your fields are highlighted");
+    await settle();
+    const backdrop = document.querySelector<HTMLElement>('[data-scope="tour"][data-part="backdrop"]')!;
+    await user.pointer({
+      keys: "[MouseLeft]",
+      target: backdrop,
+      coords: { clientX: 400, clientY: 400 },
+    });
+    await waitFor(() => expect(onTourEnd).toHaveBeenCalledTimes(1));
+    expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", {
+      replay: false,
+      lastStep: 1,
+    });
+    await settle();
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 });
