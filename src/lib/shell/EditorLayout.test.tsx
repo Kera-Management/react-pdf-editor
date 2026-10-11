@@ -167,4 +167,19 @@ describe("EditorLayout", () => {
     expect(container).toHaveClass("dark");
     expect(container.querySelector(".pdf-editor-root")).not.toBeNull();
   });
+
+  it("canvasFooter docks under the scroller inside the canvas area", () => {
+    renderWithChakra(
+      <EditorLayout
+        {...base({
+          layout: "mobile",
+          canvasFooter: <div data-testid="guided-bar">Bar</div>,
+        })}
+      />
+    );
+    const scroller = screen.getByTestId("scroller");
+    const footer = screen.getByTestId("guided-bar");
+    expect(footer.parentElement).toBe(scroller.parentElement);
+    expect(scroller.nextElementSibling).toBe(footer);
+  });
 });

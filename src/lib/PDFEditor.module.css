@@ -23,6 +23,14 @@
   position: relative;
 }
 
+/* Mobile friendly view: the reflowed document runs edge to edge. The
+   scroller keeps its own padding (pulled back with a negative margin here),
+   so the original layout's fit-to-width maths never changes. */
+.documentContainer > [data-part="mobile-friendly-view"] {
+  margin: calc(-1 * var(--chakra-spacing-8, 2rem));
+  flex: 1 0 auto;
+}
+
 .documentContainer::-webkit-scrollbar {
   width: 12px;
   height: 12px;
@@ -312,6 +320,10 @@
 @media (max-width: 639.98px) {
   .documentContainer {
     padding: var(--chakra-spacing-4, 1rem);
+  }
+
+  .documentContainer > [data-part="mobile-friendly-view"] {
+    margin: calc(-1 * var(--chakra-spacing-4, 1rem));
   }
 
   .pdfInput,

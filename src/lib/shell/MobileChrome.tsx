@@ -48,6 +48,11 @@ export interface MobileChromeProps {
   totalPages: number;
   /** PDFEditor's `handlePageSelect` (scrolls to the page). */
   onPageSelect: (pageNumber: number) => void;
+  /**
+   * False while a docked canvas bar (the mobile friendly view's guided or
+   * review bar) takes the page pill's place. Defaults to true.
+   */
+  showPagePill?: boolean;
   /** Pages drawer body. Omitted until pages exist. */
   pageThumbnailsProps?: PageThumbnailsProps;
   /** Progress drawer body (edit mode). */
@@ -80,6 +85,7 @@ export const MobileChrome: React.FC<MobileChromeProps> = ({
   activePage,
   totalPages,
   onPageSelect,
+  showPagePill = true,
   pageThumbnailsProps,
   progress,
   properties,
@@ -90,7 +96,7 @@ export const MobileChrome: React.FC<MobileChromeProps> = ({
   fieldActions,
 }) => {
   const close = () => onOpenDrawerChange(null);
-  const showPill = totalPages > 1;
+  const showPill = showPagePill && totalPages > 1;
   // Hidden while any drawer is open: the drawer covers the bottom of the
   // screen, so there is no offset juggling (C6).
   const showActionBar = !!fieldActions && openDrawer === null;

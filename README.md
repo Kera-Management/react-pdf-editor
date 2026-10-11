@@ -92,7 +92,25 @@ The `theme` prop is **deprecated** and ignored since 4.0.0. It is kept only so e
 | `initialFieldValues`   | `Record<string, string>`                                                                                | Values seeded once per document load, keyed by field name. |
 | `signatureFieldNames`  | `string[]`                                                                                              | Extra field names to treat as signature fields. |
 | `fieldLabels`          | `Record<string, string>`                                                                                | Friendly names for the progress list. |
+| `mobileFriendlyView`   | `boolean`                                                                                               | Default `false`. Offers a reflowed, readable "Mobile friendly" view below 1024px in Fill & Sign and View. See [Mobile friendly view](#mobile-friendly-view). |
 | `theme`                | `"light" \| "dark"`                                                                                     | **Deprecated, ignored.** Colour mode follows the host `.dark` class. |
+
+## Mobile friendly view
+
+On a phone a Letter page fits at about 55% zoom, which is too small to read or fill comfortably. With `mobileFriendlyView` on, the editor can show the document reflowed as readable text (16px, real headings, paragraphs and lists), with each fillable field as a full-width native control where it sits in the text. Values are shared with the original layout, so switching views never loses anything.
+
+```tsx
+<PDFEditor src="/lease.pdf" mode="edit" activeParticipantId="tenant1" mobileFriendlyView />
+```
+
+- **Where it shows.** Fill & Sign and View only; Prepare always uses the original layout. Layouts below 1024px only. Phones (< 640px) open in the mobile friendly view; tablets (640 to 1023px) open in the original and convert only when the signer picks Mobile friendly.
+- **Original is always one tap away.** A "Mobile friendly | Original" toggle sits under the header whenever the view is available.
+- **Fallback.** Before showing a converted document the editor checks that every character of the source text appears in it, unaltered and in order, and that every fillable field appears exactly once, next to its label. A document that fails the check (or has no text layer, a page with almost no text such as a scanned schedule, a large picture or a picture over text, an invisible OCR text layer, rotated text, more than 50 pages, and so on) stays in the original layout with the notice "This document can't be shown in mobile-friendly view." The reasons go to `console.debug` under `rpe:mobileView`.
+- **Review before finishing.** In Fill & Sign, Finish (and the header Save, and the progress panel's finish) from the mobile friendly view first shows the original layout with the signer's values and a review bar. The save runs from that bar, through the normal save (the incomplete-fields confirm and `onSave` are unchanged). The unsaved-changes prompt's Save (header close, or `ref.requestClose()`) opens the same review instead of saving straight away.
+- **`ref.save()` is not routed through the review.** It is host-initiated, so a host that drives saving itself owns showing the original first.
+- **Guided signing.** A bottom bar shows "{i} of {total} · {n} remaining" with Previous, Next (to the next incomplete required field; signature fields open the signature dialog) and Finish.
+- **Host forms.** The view's controls never add entries to a wrapping `<form>`'s `FormData`.
+- **Off by default.** With the prop off there is no new UI and no conversion work.
 
 ## Ref
 

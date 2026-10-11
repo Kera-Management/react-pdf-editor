@@ -224,5 +224,9 @@ describe("MobileChrome", () => {
     renderWithChakra(<Harness showAddField={false} />);
     expect(screen.queryByRole("button", { name: "Add field" })).toBeNull();
   });
-});
 
+  it("showPagePill={false} gives the pill's place to a docked canvas bar", () => {
+    renderWithChakra(<Harness showPagePill={false} />);
+    expect(screen.queryByTestId("mobile-page-pill")).toBeNull();
+  });
+});

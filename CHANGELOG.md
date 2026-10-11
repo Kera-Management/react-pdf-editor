@@ -1,5 +1,65 @@
 # Changelog
 
+## 4.1.0
+
+### Added
+
+- **Mobile friendly view** (opt-in `mobileFriendlyView` prop, default
+  `false`). Below 1024px, in Fill & Sign and View, the document can be shown
+  reflowed as readable text with each fillable field as a full-width native
+  control. Spec: `agent-docs/specs/PDF_EDITOR_MOBILE_FRIENDLY_VIEW_SPEC.md`.
+  - "Mobile friendly | Original" toggle under the header; phones open in the
+    mobile friendly view, tablets in the original. Switching keeps the
+    focused field (or the reading position).
+  - Legal text fidelity: a document that fails the converter's coverage
+    check stays in the original layout with the notice "This document can't
+    be shown in mobile-friendly view."
+  - Fill & Sign: a guided bar replaces the page pill: a filling progress
+    circle with the completed count, "{n} left" and "Field {i} of {total}",
+    then Previous, Next and Finish. Next and the counts use the same list of
+    the signer's required fields; on an optional field, Next carries on from
+    there. A signature stop opens the signature dialog.
+  - Finish shows the original with the signer's values for review before
+    the existing save runs. "Keep signing" from the incomplete-fields
+    prompt goes back to the mobile friendly view at the first open field.
+  - View mode renders every value read-only; the page pill follows the
+    reflowed pages.
+  - Both views share the same value store, assignment gating, required and
+    progress data and signature dialog. Reflow controls are dissociated from
+    a host `<form>`.
+  - With the mobile friendly view showing, the unsaved-changes prompt's
+    "Save and close" opens the review first; its save (the review bar or
+    the header Save) then closes the editor. Leaving the phone/tablet
+    layouts during that review brings the prompt back.
+- `HeaderBar`: `zoomControlsHidden` prop (hides the zoom cluster and Fit to
+  width while the reflowed view shows). `EditorLayout`: `canvasFooter` slot.
+  `MobileChrome`: `showPagePill` prop. All internal.
+
+### Changed
+
+- The original layout's field overlays now read and write values through a
+  shared field-control model (also used by the mobile friendly view).
+- **Same-name fields are one value everywhere** (with or without
+  `mobileFriendlyView`, at every width): editing one copy of a repeated
+  text, dropdown or list field writes every copy, and adopting a signature
+  fills every copy of that signature field. Before, only the edited copy
+  changed and a stale copy elsewhere could win on save.
+- **Same-name checkbox groups** (boxes sharing a name, each with its own
+  export value) behave like the PDF defines them: ticking one unticks the
+  others, a box shows ticked only when the group's value is its own export
+  value, and the save ticks that exact box (pdf-lib's `check()` always
+  ticked the first). The field's value for completion and `onSave` is the
+  ticked box's export value.
+- In the mobile header the Progress button no longer shows a "0 of 0" count
+  (any layout) and in the mobile friendly view leaves progress to the
+  guided bar.
+
+### Fixed
+
+- Prepare-mode saves no longer tick a checkbox whose value is "Off".
+- A host `onSave` that rejects from the header Save no longer surfaces as an
+  unhandled promise rejection.
+
 ## 4.0.0
 
 Chakra UI redesign. The editor chrome (header, toolbars, side panels, field
