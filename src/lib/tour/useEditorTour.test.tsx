@@ -1,0 +1,223 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+import type { PDFEditorMode } from "../PDFEditor";
+import { useEditorTour, type UseEditorTourOptions } from "./useEditorTour";
+import { TOUR_FOR_MODE, presentSteps, type EditorTourContext } from "./steps";
+
+/**
+ * Start/stop rules of the tour controller (guided tour spec §5.3), against
+ * a bare set of anchors rather than a whole editor.
+ */
+
+let root: HTMLDivElement;
+
+beforeEach(() => {
+  root = document.createElement("div");
+  root.innerHTML = `
+    <div data-pdfe-tour="canvas">
+      <div id="page_div_container_1">
+        <input data-field-id="f_name" />
+        <button data-field-id="f_sig" data-field-name="sig"></button>
+      </div>
+    </div>
+    <section data-pdfe-tour="progress"></section>
+    <button data-pdfe-tour="save">Save</button>
+  `;
+  document.body.appendChild(root);
+});
+
+afterEach(() => {
+  root.remove();
+});
+
+const context = (overrides: Partial<EditorTourContext> = {}): EditorTourContext => ({
+  root,
+  saveLabel: "Save",
+  canDecline: false,
+  hasSavedSignature: false,
+  signVariant: "original",
+  ...overrides,
+});
+
+type Props = Partial<UseEditorTourOptions> & { mode: PDFEditorMode };
+
+const setup = (initial: Props) => {
+  const onTourEnd = vi.fn();
+  const onEnded = vi.fn();
+  const hook = renderHook((props: Props) =>
+    useEditorTour({
+      ready: true,
+      blocked: false,
+      getContext: () => context(),
+      onTourEnd,
+      onEnded,
+      ...props,
+    }),
+    { initialProps: initial }
+  );
+  return { ...hook, onTourEnd, onEnded };
+};
+
+describe("mode to tour", () => {
+  it("maps modes to tours and nothing else", () => {
+    expect(TOUR_FOR_MODE).toEqual({ build: "pdf_prepare", edit: "pdf_sign", view: null });
+  });
+
+  it("has no tour in View, and no Prepare tour yet", () => {
+    const view = setup({ mode: "view", tours: { sign: true, prepare: true } });
+    expect(view.result.current.active).toBeNull();
+    expect(view.result.current.canReplay).toBe(false);
+    const build = setup({ mode: "build", tours: { sign: true, prepare: true } });
+    expect(build.result.current.active).toBeNull();
+    expect(build.result.current.canReplay).toBe(false);
+  });
+});
+
+describe("automatic start", () => {
+  it("starts the mode's tour when the host says it is unseen", () => {
+    const { result } = setup({ mode: "edit", tours: { sign: true } });
+    expect(result.current.active?.tourId).toBe("pdf_sign");
+    expect(result.current.active?.replay).toBe(false);
+    expect(result.current.active?.steps.map((s) => s.id)).toEqual([
+      "sign-fields",
+      "sign-progress",
+      "sign-signature",
+      "sign-finish",
+    ]);
+  });
+
+  it("does not start without `tours`, or with the tour marked seen", () => {
+    expect(setup({ mode: "edit" }).result.current.active).toBeNull();
+    expect(setup({ mode: "edit", tours: { sign: false } }).result.current.active).toBeNull();
+    // `prepare` unseen says nothing about the sign tour.
+    expect(setup({ mode: "edit", tours: { prepare: true } }).result.current.active).toBeNull();
+  });
+
+  it("waits until the editor is ready and nothing blocks it", () => {
+    const { result, rerender } = setup({
+      mode: "edit",
+      tours: { sign: true },
+      ready: false,
+    });
+    expect(result.current.active).toBeNull();
+    rerender({ mode: "edit", tours: { sign: true }, ready: true, blocked: true });
+    expect(result.current.active).toBeNull();
+    rerender({ mode: "edit", tours: { sign: true }, ready: true, blocked: false });
+    expect(result.current.active?.tourId).toBe("pdf_sign");
+  });
+
+  it("runs once per mounted editor, even if the host still says unseen", () => {
+    const { result, rerender, onTourEnd } = setup({ mode: "edit", tours: { sign: true } });
+    act(() => result.current.end("completed"));
+    expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "completed", {
+      replay: false,
+      lastStep: 1,
+    });
+    rerender({ mode: "view", tours: { sign: true } });
+    rerender({ mode: "edit", tours: { sign: true } });
+    expect(result.current.active).toBeNull();
+    expect(result.current.isPending("pdf_sign")).toBe(false);
+  });
+
+  it("starts nothing, and reports nothing, when no step has an anchor", () => {
+    root.innerHTML = "";
+    const { result, onTourEnd } = setup({ mode: "edit", tours: { sign: true } });
+    expect(result.current.active).toBeNull();
+    expect(onTourEnd).not.toHaveBeenCalled();
+  });
+});
+
+describe("ending", () => {
+  it("ends as dismissed on a mode switch, with the last step shown", () => {
+    const { result, rerender, onTourEnd } = setup({ mode: "edit", tours: { sign: true } });
+    act(() => result.current.onStepChange(3));
+    rerender({ mode: "view", tours: { sign: true } });
+    expect(result.current.active).toBeNull();
+    expect(onTourEnd).toHaveBeenCalledTimes(1);
+    expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", {
+      replay: false,
+      lastStep: 3,
+    });
+  });
+
+  it("ends as dismissed when a dialog, drawer or the review takes over", () => {
+    const { result, rerender, onTourEnd } = setup({ mode: "edit", tours: { sign: true } });
+    rerender({ mode: "edit", tours: { sign: true }, blocked: true });
+    expect(result.current.active).toBeNull();
+    expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", expect.anything());
+  });
+
+  it("reports a tour cut short by the editor closing", () => {
+    const { unmount, onTourEnd } = setup({ mode: "edit", tours: { sign: true } });
+    unmount();
+    expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", {
+      replay: false,
+      lastStep: 1,
+    });
+  });
+
+  it("reports each run once, and tells the editor which run ended", () => {
+    const { result, onTourEnd, onEnded } = setup({ mode: "edit", tours: { sign: true } });
+    const run = result.current.active;
+    act(() => {
+      result.current.dismiss();
+      result.current.dismiss();
+    });
+    expect(onTourEnd).toHaveBeenCalledTimes(1);
+    expect(onEnded).toHaveBeenCalledWith(run);
+  });
+});
+
+describe("replay", () => {
+  it("is offered only when the host opted into tours and the mode has one", () => {
+    expect(setup({ mode: "edit" }).result.current.canReplay).toBe(false);
+    expect(setup({ mode: "edit", tours: {} }).result.current.canReplay).toBe(true);
+    expect(setup({ mode: "view", tours: {} }).result.current.canReplay).toBe(false);
+  });
+
+  it("replays a seen tour with replay: true", () => {
+    const { result, onTourEnd } = setup({ mode: "edit", tours: { sign: false } });
+    act(() => result.current.replay());
+    expect(result.current.active?.replay).toBe(true);
+    act(() => result.current.end("dismissed"));
+    expect(onTourEnd).toHaveBeenCalledWith("pdf_sign", "dismissed", {
+      replay: true,
+      lastStep: 1,
+    });
+  });
+
+  it("can replay after the automatic run in the same editor", () => {
+    const { result } = setup({ mode: "edit", tours: { sign: true } });
+    act(() => result.current.end("completed"));
+    act(() => result.current.replay());
+    expect(result.current.active?.replay).toBe(true);
+  });
+});
+
+describe("sign tour steps (Variant A)", () => {
+  const ids = (overrides: Partial<EditorTourContext> = {}) =>
+    presentSteps("pdf_sign", context(overrides)).map((s) => s.id);
+
+  it("skips the signature step when there is no signature field of yours", () => {
+    root.querySelector("[data-field-id='f_sig']")!.setAttribute("disabled", "");
+    expect(ids()).toEqual(["sign-fields", "sign-progress", "sign-finish"]);
+  });
+
+  it("skips the progress step when its panel isn't showing", () => {
+    (root.querySelector("[data-pdfe-tour='progress']") as HTMLElement).hidden = true;
+    expect(ids()).toEqual(["sign-fields", "sign-signature", "sign-finish"]);
+  });
+
+  it("points the first step at your first field, skipping others' fields", () => {
+    root.querySelector("input")!.setAttribute("data-pdfe-gated", "");
+    const [first] = presentSteps("pdf_sign", context());
+    // f_name is gated; the next fillable overlay is the signature.
+    expect(first.target()?.dataset.fieldId).toBe("f_sig");
+  });
+
+  it("falls back to the document when none of your fields can be filled", () => {
+    root.querySelectorAll("[data-field-id]").forEach((el) => el.setAttribute("disabled", ""));
+    const [first] = presentSteps("pdf_sign", context());
+    expect(first.target()?.dataset.pdfeTour).toBe("canvas");
+  });
+});

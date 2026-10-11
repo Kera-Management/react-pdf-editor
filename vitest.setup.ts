@@ -59,3 +59,15 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   globalThis.ResizeObserver =
     InertResizeObserver as unknown as typeof ResizeObserver;
 }
+
+// jsdom has no window.visualViewport. Ark UI's tour (Zag) reads the bare
+// global `visualViewport?.width` to size its backdrop, which throws a
+// ReferenceError when the name isn't defined at all; browsers always have
+// it. Defined as null, the tour falls back to window.innerWidth.
+if (!("visualViewport" in globalThis)) {
+  Object.defineProperty(globalThis, "visualViewport", {
+    configurable: true,
+    writable: true,
+    value: null,
+  });
+}

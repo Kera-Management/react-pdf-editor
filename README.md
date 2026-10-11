@@ -28,12 +28,15 @@ Install these in the host app (4.0.0 moved Chakra, Emotion and Phosphor to peers
 
 | Package                 | Version   |
 | ----------------------- | --------- |
+| `@ark-ui/react`         | `^5.37.2` |
 | `@chakra-ui/react`      | `^3.33.0` |
 | `@emotion/react`        | `^11.0.0` |
 | `@phosphor-icons/react` | `^2.1.10` |
 | `pdf-lib`               | `^1.17.1` |
 | `pdfjs-dist`            | `^5.4.0`  |
 | `react`, `react-dom`    | `^18.0.0` |
+
+`@ark-ui/react` (the guided tours) is the package Chakra itself is built on, so a host on Chakra 3.36 already has 5.37.2 installed. Use the version your Chakra resolves.
 
 ## Usage
 
@@ -93,6 +96,8 @@ The `theme` prop is **deprecated** and ignored since 4.0.0. It is kept only so e
 | `signatureFieldNames`  | `string[]`                                                                                              | Extra field names to treat as signature fields. |
 | `fieldLabels`          | `Record<string, string>`                                                                                | Friendly names for the progress list. |
 | `mobileFriendlyView`   | `boolean`                                                                                               | Default `false`. Offers a reflowed, readable "Mobile friendly" view below 1024px in Fill & Sign and View. See [Mobile friendly view](#mobile-friendly-view). |
+| `tours`                | `{ prepare?: boolean; sign?: boolean }`                                                                 | Guided tours this person hasn't seen yet. Omit it for no tours. See [Guided tours](#guided-tours). |
+| `onTourEnd`            | `(tourId, reason, meta) => void`                                                                        | Called once each time a tour ends. See [Guided tours](#guided-tours). |
 | `theme`                | `"light" \| "dark"`                                                                                     | **Deprecated, ignored.** Colour mode follows the host `.dark` class. |
 
 ## Mobile friendly view
@@ -111,6 +116,29 @@ On a phone a Letter page fits at about 55% zoom, which is too small to read or f
 - **Guided signing.** A bottom bar shows "{i} of {total} · {n} remaining" with Previous, Next (to the next incomplete required field; signature fields open the signature dialog) and Finish.
 - **Host forms.** The view's controls never add entries to a wrapping `<form>`'s `FormData`.
 - **Off by default.** With the prop off there is no new UI and no conversion work.
+
+## Guided tours
+
+Short first-run tours that explain the editor before a user runs into it. The library owns the steps and decides **when** a tour runs; the host says **which** tours the person hasn't seen and records it when one ends. The library never stores who has seen a tour.
+
+```tsx
+<PDFEditor
+  src="/lease.pdf"
+  mode="edit"
+  tours={{ sign: !hasSeen("pdf_sign") }}
+  onTourEnd={(tourId, reason, { replay, lastStep }) => {
+    if (!replay) markSeen(tourId);
+  }}
+/>
+```
+
+- **Tours follow the mode, never the account type.** `build` (Prepare) maps to `prepare` / `"pdf_prepare"`, `edit` (Fill & Sign) to `sign` / `"pdf_sign"`, and `view` has none. Pass what is unseen, not who the person is.
+- **When a tour starts.** Automatically for the current mode's tour when `tours` says it is unseen, once per mounted editor, after the document has rendered (and, with `mobileFriendlyView`, after the conversion has settled). Never over the review step, a confirm dialog or a drawer. Omitting `tours` means no tour ever starts on its own.
+- **Steps adapt to the screen.** A step whose target isn't showing is skipped (no signature field of yours, no progress panel). The sign tour has two variants: the original layout (4 steps: your fields, Start / Next, tap to sign, `saveLabel`) and, on a phone showing the mobile friendly view, 3 steps (the view toggle, the guided bar, Finish then review). The decline sentence appears only with `onDecline`; the saved-signature wording only with `savedSignature`.
+- **How it ends.** Next / Back / Skip, plus a close button. `reason` is `"completed"` only for Done on the last step. Skip, close, Esc, a click on the dimmed background, a mode switch, the Mobile friendly / Original toggle, Finish, a dialog or drawer opening, or the editor closing mid-tour are `"dismissed"`. `meta.lastStep` is the 1-based step showing when it ended.
+- **Show tour.** When `tours` is passed and the current mode has a tour, "More actions" offers **Show tour** (on desktop it is that menu's only item). A replay reports `meta.replay: true`; hosts shouldn't record it.
+- **The mobile friendly hint.** While the sign tour may still start (or is running), the view's "Showing a mobile friendly version..." hint is held back. The phone variant's first step says the same thing, and when that variant ends the hint is marked seen (`rpe.mobileFriendlyHintSeen`), so it never follows the tour. With `tours` omitted or the sign tour already seen, the hint behaves as before.
+- Prepare tour: not yet; `tours.prepare` is accepted and does nothing until it ships.
 
 ## Ref
 

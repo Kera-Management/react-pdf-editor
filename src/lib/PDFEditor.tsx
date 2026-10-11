@@ -107,6 +107,14 @@ import {
   writeHintSeen,
 } from "./mobileView/view/integration";
 import { fieldIdsInOrder } from "./mobileView/view/documentModel";
+import { EditorTour } from "./tour/EditorTour";
+import { useEditorTour } from "./tour/useEditorTour";
+import type {
+  EditorTourEndMeta,
+  EditorTourEndReason,
+  EditorTourId,
+  PDFEditorTours,
+} from "./tour/types";
 import { setCheckBoxValue } from "./utils/checkBoxValue";
 import {
   documentPositions,
@@ -510,6 +518,37 @@ export interface PDFEditorProps {
    * routed through the review.
    */
   mobileFriendlyView?: boolean;
+  /**
+   * Guided tours the host says this person hasn't seen yet. The editor
+   * decides WHEN: a tour starts automatically for the mode it teaches
+   * (`build` -> `prepare`, `edit` -> `sign`, `view` has none), once per
+   * mounted editor, after the document has rendered (and, with
+   * `mobileFriendlyView`, after its conversion settled), never over the
+   * review step, a dialog or a drawer. The mode is the only thing that
+   * picks a tour: pass what is unseen, not who the person is.
+   *
+   * Omitting it means no tour starts and "Show tour" isn't offered, so
+   * existing hosts are unaffected. The editor never stores who has seen a
+   * tour: the host records it from `onTourEnd`.
+   *
+   * While the sign tour may still start, the mobile friendly view's
+   * first-run hint is held back; the tour's mobile friendly variant says
+   * the same thing and marks the hint seen when it ends.
+   */
+  tours?: PDFEditorTours;
+  /**
+   * Called once each time a tour ends. `reason` is "completed" only for
+   * Done on the last step; Skip, close, Esc, a background click, a mode
+   * switch, the Mobile friendly / Original toggle, Finish, a dialog opening
+   * or the editor closing mid-tour are "dismissed". `meta.replay` is true
+   * for a run started from "Show tour" (hosts shouldn't record those);
+   * `meta.lastStep` is the 1-based step showing when it ended.
+   */
+  onTourEnd?: (
+    tourId: EditorTourId,
+    reason: EditorTourEndReason,
+    meta: EditorTourEndMeta
+  ) => void;
 }
 
 // Use worker from the installed pdfjs-dist package to ensure version matching
@@ -578,6 +617,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       signatureFieldNames: signatureFieldNamesProp,
       fieldLabels,
       mobileFriendlyView = false,
+      tours,
+      onTourEnd,
     } = props;
 
     // Determine the effective initial mode - must be in allowedModes
@@ -3816,6 +3857,50 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         window.removeEventListener("beforeunload", handleBeforeUnload);
     }, [isDirty]);
 
+    // GUIDED TOURS (guided tour spec §5.3). The host says which tours are
+    // unseen; the hook decides when one runs. Steps are built when a tour
+    // starts, from what is on screen then.
+    const editorTour = useEditorTour({
+      mode,
+      tours,
+      onTourEnd,
+      ready: docReady && pagesReady && !loadError && !reflowPending,
+      blocked:
+        reviewing ||
+        showUnsavedGuard ||
+        unsavedPrepareTarget !== null ||
+        showDeclineConfirm ||
+        showIncompleteSaveDialog ||
+        signingFieldId !== null ||
+        openDrawer !== null ||
+        tabletLeftOpen ||
+        tabletRightOpen ||
+        optionsModalOpen,
+      getContext: () => ({
+        root: divRef.current?.closest(".pdf-editor-root") ?? null,
+        saveLabel: saveLabel ?? "Save",
+        canDecline: !!onDecline,
+        hasSavedSignature: !!savedSignature,
+        signVariant: showReflowRef.current ? "mobileFriendly" : "original",
+      }),
+      onEnded: (run) => {
+        // The mobile friendly variant's first step replaces the view's
+        // first-run hint, so the hint never follows it.
+        if (
+          run.tourId === "pdf_sign" &&
+          run.context.signVariant === "mobileFriendly"
+        ) {
+          writeHintSeen();
+          setMobileHintSeen(true);
+        }
+      },
+    });
+    // The sign tour may still start (or is running): it covers what the
+    // hint says, so the hint waits.
+    const signTourHoldsHint =
+      editorTour.isPending("pdf_sign") ||
+      editorTour.active?.tourId === "pdf_sign";
+
     // Load failed, or still loading the document or its pages.
     if (loadError) {
       return (
@@ -4176,6 +4261,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // here. From the reflow in Fill & Sign they open the review of the
     // original (S3); everywhere else they are the existing save, unchanged.
     const requestFinish = () => {
+      // Finish (or Save) mid-tour: the user has moved on.
+      editorTour.dismiss();
       if (mode === "edit" && reflowSurface) {
         enterReview();
         return;
@@ -4208,6 +4295,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       // Already on the original (reviewing included): nothing to do.
       if (next === "original" && !reflowSurface) return;
       if (next === "mobileFriendly" && reflowSurface) return;
+      // The tour describes the view on screen; switching ends it.
+      editorTour.dismiss();
       const scroller = divRef.current;
       const active = document.activeElement as HTMLElement | null;
       const recentBlur = lastFieldBlurRef.current;
@@ -4262,6 +4351,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     };
 
     const handleShowOriginalAt = (origin: SourceOrigin | null) => {
+      editorTour.dismiss();
       pendingPlaceRef.current = origin
         ? { kind: "origin", pageIndex: origin.pageIndex, top: origin.box.top }
         : { kind: "top", target: "original" };
@@ -4386,7 +4476,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       mobileViewAvailable &&
       conversion.status === "fallback" &&
       !fallbackNoticeDismissed;
-    const showMobileHint = showReflow && !mobileHintSeen && !showFallbackNotice;
+    const showMobileHint =
+      showReflow && !mobileHintSeen && !showFallbackNotice && !signTourHoldsHint;
     // Toggle, then the fallback notice or the first-run hint (spec §8.1
     // banner order). Nothing at all unless the view is available (S4).
     const mobileViewBanner = mobileViewAvailable ? (
@@ -4651,6 +4742,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             // The mode-menu note's Save is the header Save, which is the
             // Prepare save only in Prepare.
             hasUnsavedBuildChanges={mode === "build" && hasUnsavedBuildChanges}
+            onShowTour={editorTour.canReplay ? editorTour.replay : undefined}
             progressSummary={
               mode === "edit"
                 ? {
@@ -4733,6 +4825,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             ref={divRef}
             className={styles.documentContainer}
             data-part="document-scroller"
+            data-pdfe-tour="canvas"
             // Mobile Prepare: room below the last page so any field can
             // scroll clear of the docked field action bar.
             style={
@@ -5307,6 +5400,15 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 setSigningFieldId(null);
               }}
             />
+
+            {editorTour.active && (
+              <EditorTour
+                key={editorTour.active.key}
+                steps={editorTour.active.steps}
+                onStepChange={editorTour.onStepChange}
+                onEnd={editorTour.end}
+              />
+            )}
 
             <ConfirmDialogs
               unsaved={{

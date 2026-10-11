@@ -556,3 +556,38 @@ describe("HeaderBar: tablet", () => {
     ).toBeNull();
   });
 });
+
+describe("HeaderBar: Show tour (guided tour spec §3.3)", () => {
+  it.each(["desktop", "tablet", "mobile"] as const)(
+    "%s: offers Show tour in More actions when given onShowTour",
+    async (layout) => {
+      const user = userEvent.setup();
+      const onShowTour = vi.fn();
+      renderHeader({ layout, onShowTour });
+      await user.click(screen.getByRole("button", { name: "More actions" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Show tour" }));
+      expect(onShowTour).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("desktop keeps no More actions menu without it", () => {
+    renderHeader({ layout: "desktop" });
+    expect(screen.queryByRole("button", { name: "More actions" })).toBeNull();
+  });
+
+  it("marks the tour anchors", () => {
+    renderHeader({
+      layout: "tablet",
+      allowedModes: ["edit", "view"],
+      onDecline: vi.fn(),
+      progressSummary: { completed: 0, total: 2 },
+      onOpenProgress: vi.fn(),
+    });
+    const anchor = (name: string) =>
+      document.querySelector(`[data-pdfe-tour="${name}"]`);
+    expect(anchor("mode-menu")).toHaveAccessibleName(/fill & sign/i);
+    expect(anchor("save")).toHaveAccessibleName("Save");
+    expect(anchor("decline")).toHaveAccessibleName("I can't sign this");
+    expect(anchor("progress")).toHaveTextContent("Progress");
+  });
+});

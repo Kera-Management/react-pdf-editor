@@ -33,6 +33,7 @@ export const FloatingActionButton: React.FC<FloatingActionButtonProps> = ({
       h="11"
       px={8}
       shadow="lg"
+      data-pdfe-tour="add-field"
     >
       <Icon asChild boxSize="4">
         <PlusIcon weight="bold" />

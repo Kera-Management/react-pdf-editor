@@ -168,10 +168,12 @@ export const MobileChrome: React.FC<MobileChromeProps> = ({
           onClose={close}
           title={parties.title}
         >
-          <PartiesPanel
-            config={parties.config}
-            participants={parties.participants}
-          />
+          <Box data-pdfe-tour="parties">
+            <PartiesPanel
+              config={parties.config}
+              participants={parties.participants}
+            />
+          </Box>
         </MobileDrawer>
       )}
 

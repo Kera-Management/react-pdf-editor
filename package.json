@@ -40,6 +40,7 @@
     "react-to-print": "^2.14.15"
   },
   "peerDependencies": {
+    "@ark-ui/react": "^5.37.2",
     "@chakra-ui/react": "^3.33.0",
     "@emotion/react": "^11.0.0",
     "@phosphor-icons/react": "^2.1.10",
@@ -49,6 +50,7 @@
     "react-dom": "^18.0.0"
   },
   "devDependencies": {
+    "@ark-ui/react": "5.37.2",
     "@chakra-ui/react": "3.36.0",
     "@emotion/react": "^11.14.0",
     "@phosphor-icons/react": "^2.1.10",

@@ -115,7 +115,13 @@ export const GuidedBar: React.FC<GuidedBarProps> = ({
             </Icon>
           </Button>
         )}
-        <Button type="button" size="md" ms="auto" onClick={onFinish}>
+        <Button
+          type="button"
+          size="md"
+          ms="auto"
+          onClick={onFinish}
+          data-pdfe-tour="finish"
+        >
           Finish
         </Button>
       </HStack>

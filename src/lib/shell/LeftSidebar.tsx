@@ -85,7 +85,12 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           and the remaining height goes to Pages, which grows with the
           document. */}
       {showFieldPalette && (
-        <Box as="section" aria-labelledby={fieldsTitleId} flex="none">
+        <Box
+          as="section"
+          aria-labelledby={fieldsTitleId}
+          flex="none"
+          data-pdfe-tour="field-palette"
+        >
           <RailSectionHeader title="Fields" titleId={fieldsTitleId} />
           <Box p={3}>
             <FieldPalette {...fieldPaletteProps} />

@@ -29,6 +29,7 @@ import {
   MagnifyingGlassMinusIcon,
   MagnifyingGlassPlusIcon,
   NotePencilIcon,
+  QuestionIcon,
   SidebarSimpleIcon,
   SignatureIcon,
   UsersIcon,
@@ -144,6 +145,12 @@ export interface HeaderBarProps {
    * still guards the switch itself.
    */
   hasUnsavedBuildChanges?: boolean;
+  /**
+   * Replays the guided tour for the current mode ("More actions" > Show
+   * tour). PDFEditor passes it only when the mode has a tour and the host
+   * opted into tours. On desktop it is the More actions menu's only item.
+   */
+  onShowTour?: () => void;
 }
 
 // API values (build/edit/view) are unchanged; only the UI-facing labels
@@ -196,7 +203,13 @@ const ModeMenu: React.FC<ModeMenuProps> = ({
 }) => (
   <Menu.Root positioning={{ strategy: "fixed", placement: "bottom-start" }}>
     <Menu.Trigger asChild>
-      <Button type="button" size="sm" variant="outline" flexShrink={0}>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        flexShrink={0}
+        data-pdfe-tour="mode-menu"
+      >
         {modeLabels[mode]}
         <Icon>
           <CaretDownIcon weight="bold" />
@@ -407,6 +420,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   progressSummary,
   onOpenProgress,
   hasUnsavedBuildChanges,
+  onShowTour,
 }) => {
   const layout: HeaderBarLayout = layoutProp ?? (isMobile ? "mobile" : "desktop");
   const mobile = layout === "mobile";
@@ -443,11 +457,11 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
     totalPages > 0;
 
   // Mobile and tablet put the secondary actions in "More actions" (§3.10,
-  // §3.13).
+  // §3.13). Desktop has the menu only for "Show tour".
   const partiesHandler = onOpenParties;
   const hostPanelHandler = onOpenHostPanel;
   const overflowItems: OverflowItem[] = [];
-  // Desktop shows everything inline, so it has no overflow menu.
+  // Desktop shows these inline.
   if (layout !== "desktop") {
     if (partiesHandler) {
       overflowItems.push({
@@ -483,6 +497,15 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
       });
     }
   }
+  // Every layout: the only way back into a tour once it has been seen.
+  if (onShowTour) {
+    overflowItems.push({
+      value: "show-tour",
+      label: "Show tour",
+      icon: <QuestionIcon />,
+      onSelect: onShowTour,
+    });
+  }
 
   const saveButton = (
     <Button
@@ -494,6 +517,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
       maxW={mobile ? "40vw" : undefined}
       onClick={onSave}
       loading={isSaving}
+      data-pdfe-tour="save"
       loadingText="Saving"
       aria-label={isDirty ? `${saveLabel} (unsaved changes)` : saveLabel}
     >
@@ -516,6 +540,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
       minW={0}
       maxW={mobile ? "32vw" : undefined}
       onClick={onDecline}
+      data-pdfe-tour="decline"
     >
       <Span truncate>{declineLabel}</Span>
     </Button>
@@ -557,6 +582,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
       variant="outline"
       flexShrink={0}
       onClick={onOpenProgress}
+      data-pdfe-tour="progress"
       // Mobile drops the word to leave room for the mode switch and Save.
       aria-label={
         mobile && progressSummary.total > 0

@@ -26,6 +26,26 @@
   open. It warns before a mode is picked; the dialog above still guards the
   switch itself. Spec §5.4. `HeaderBar`: `hasUnsavedBuildChanges` prop
   (internal).
+- **Guided sign tour** (minor: new props only). `tours?: { prepare?;
+  sign? }` says which tours the person hasn't seen; `onTourEnd(tourId,
+  reason, { replay, lastStep })` reports each end so the host can record
+  it. The library picks the tour from the mode alone (`edit` -> `pdf_sign`)
+  and decides when it runs: once per mounted editor, after the document
+  has rendered and the mobile friendly conversion has settled, never over
+  the review, a dialog or a drawer. Two variants: the original layout (4
+  steps) and phones in the mobile friendly view (3 steps), which takes the
+  place of the view's first-run hint and marks it seen when it ends.
+  "Show tour" in More actions replays the current mode's tour (on desktop
+  the menu appears for it). Built on Ark UI's tour, styled with Chakra
+  tokens. Omitting `tours` leaves existing hosts unchanged. The Prepare
+  tour follows. Spec: `agent-docs/specs/PDF_EDITOR_GUIDED_TOUR_SPEC.md`
+  §3.2, §3.3, §5.
+- `data-pdfe-tour` anchors on the mode menu, Save, Decline, Progress
+  (rail section and header button), field palette, mobile Add field,
+  parties (rail section and mobile drawer), the document area and the
+  guided bar's Finish. Spec §5.2.
+- New peer dependency `@ark-ui/react` `^5.37.2` (the version Chakra
+  3.36 depends on; hosts on Chakra already have it).
 
 ## 4.1.0
 
