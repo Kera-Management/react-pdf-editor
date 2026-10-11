@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Prepare -> View with unsaved fields is now guarded.** The "Save your
+  fields first?" dialog guarded only Prepare -> Fill & Sign; switching to
+  View left newly placed fields missing with no explanation. Any switch out
+  of Prepare while prepared fields are unsaved now opens the dialog, and
+  "Save and continue" / "Continue without saving" land on the mode the user
+  picked. The dialog copy is generic ("...so they won't appear in Fill &
+  Sign or View..."). The dialog stays the permanent guard: it fires every
+  time, whatever the user has seen before. Spec:
+  `agent-docs/specs/PDF_EDITOR_GUIDED_TOUR_SPEC.md` §6.
+- The in-canvas "Fields added in Prepare are not saved yet" notice now also
+  shows in View ("...cannot be shown here"), still first in the banner
+  stack, above the Mobile friendly / Original toggle.
+
+### Added
+
+- **Unsaved-fields note in the mode menu** (Prepare only). While prepared
+  fields are unsaved, the mode menu opens with a warning, "Your new fields
+  aren't saved yet. They won't appear in Fill & Sign or View until you
+  save.", and a Save action that runs the Prepare save and keeps the menu
+  open. It warns before a mode is picked; the dialog above still guards the
+  switch itself. Spec §5.4. `HeaderBar`: `hasUnsavedBuildChanges` prop
+  (internal).
+
 ## 4.1.0
 
 ### Added

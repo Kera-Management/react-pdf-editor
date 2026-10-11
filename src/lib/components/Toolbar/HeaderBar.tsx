@@ -1,5 +1,6 @@
 import React, { useId, useState } from "react";
 import {
+  Alert,
   Badge,
   Box,
   Button,
@@ -31,6 +32,7 @@ import {
   SidebarSimpleIcon,
   SignatureIcon,
   UsersIcon,
+  WarningIcon,
   XIcon,
 } from "@phosphor-icons/react";
 import { PDFEditorMode } from "../../PDFEditor";
@@ -134,6 +136,14 @@ export interface HeaderBarProps {
   progressSummary?: { completed: number; total: number };
   /** Opens the progress drawer. See `progressSummary`. */
   onOpenProgress?: () => void;
+  /**
+   * True while fields placed in Prepare are unsaved. Shows a note with a
+   * Save action at the top of the mode menu, so the user can save before
+   * choosing a mode. PDFEditor passes it in Prepare only: there `onSave`
+   * is the Prepare save. The blocking "Save your fields first?" dialog
+   * still guards the switch itself.
+   */
+  hasUnsavedBuildChanges?: boolean;
 }
 
 // API values (build/edit/view) are unchanged; only the UI-facing labels
@@ -170,9 +180,20 @@ interface ModeMenuProps {
   mode: PDFEditorMode;
   modes: PDFEditorMode[];
   onModeChange?: (mode: PDFEditorMode) => void;
+  /** Shows the unsaved-fields note (see HeaderBarProps). */
+  hasUnsavedBuildChanges?: boolean;
+  onSave?: () => void;
+  isSaving?: boolean;
 }
 
-const ModeMenu: React.FC<ModeMenuProps> = ({ mode, modes, onModeChange }) => (
+const ModeMenu: React.FC<ModeMenuProps> = ({
+  mode,
+  modes,
+  onModeChange,
+  hasUnsavedBuildChanges,
+  onSave,
+  isSaving,
+}) => (
   <Menu.Root positioning={{ strategy: "fixed", placement: "bottom-start" }}>
     <Menu.Trigger asChild>
       <Button type="button" size="sm" variant="outline" flexShrink={0}>
@@ -184,6 +205,55 @@ const ModeMenu: React.FC<ModeMenuProps> = ({ mode, modes, onModeChange }) => (
     </Menu.Trigger>
     <Menu.Positioner>
       <Menu.Content minW="72" rounded="xl" p="2">
+        {/* Warns before the user picks a mode, rather than only after (the
+            dialog). Width 0 + minW full: the note wraps to the cards'
+            width instead of stretching the menu. */}
+        {hasUnsavedBuildChanges && onSave && (
+          <Alert.Root
+            status="warning"
+            size="sm"
+            role="status"
+            w="0"
+            minW="full"
+            mb="2"
+          >
+            <Alert.Indicator>
+              <WarningIcon weight="bold" />
+            </Alert.Indicator>
+            <Alert.Content gap="2">
+              <Alert.Description>
+                Your new fields aren't saved yet. They won't appear in Fill
+                &amp; Sign or View until you save.
+              </Alert.Description>
+              {/* A menu item, not a plain button: arrow keys reach it, and
+                  Enter on it isn't taken by the menu as picking a mode.
+                  closeOnSelect off keeps the menu open after the save, so
+                  the user can choose their mode straight away. */}
+              <Menu.Item
+                value="save-prepared-fields"
+                closeOnSelect={false}
+                onSelect={onSave}
+                disabled={isSaving}
+                alignSelf="flex-start"
+                w="auto"
+                px="3"
+                py="1"
+                rounded="l2"
+                borderWidth="1px"
+                borderColor="border.emphasized"
+                bg="bg.panel"
+                fontWeight="medium"
+                cursor="pointer"
+                _highlighted={{ bg: "bg.muted" }}
+              >
+                <Icon boxSize="4">
+                  <FloppyDiskIcon />
+                </Icon>
+                {isSaving ? "Saving" : "Save"}
+              </Menu.Item>
+            </Alert.Content>
+          </Alert.Root>
+        )}
         {/* Each mode is a bordered option card (icon tile, label, hint),
             so the choices read as buttons rather than menu text. */}
         <Menu.RadioItemGroup
@@ -336,6 +406,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   hostPanelTitle,
   progressSummary,
   onOpenProgress,
+  hasUnsavedBuildChanges,
 }) => {
   const layout: HeaderBarLayout = layoutProp ?? (isMobile ? "mobile" : "desktop");
   const mobile = layout === "mobile";
@@ -525,6 +596,9 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
               mode={mode}
               modes={availableModes}
               onModeChange={onModeChange}
+              hasUnsavedBuildChanges={hasUnsavedBuildChanges}
+              onSave={onSave}
+              isSaving={isSaving}
             />
           )}
         </HStack>
@@ -575,6 +649,9 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             mode={mode}
             modes={availableModes}
             onModeChange={onModeChange}
+            hasUnsavedBuildChanges={hasUnsavedBuildChanges}
+            onSave={onSave}
+            isSaving={isSaving}
           />
         )}
         {title && (

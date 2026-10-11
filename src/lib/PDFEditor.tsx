@@ -711,10 +711,12 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // fields FROM the PDF -- so unsaved prepared fields are invisible
     // there, which reads as "my fields disappeared" without a notice.
     const [hasUnsavedBuildChanges, setHasUnsavedBuildChanges] = useState(false);
-    // The blocking dialog shown when switching Prepare -> Fill & Sign while
-    // prepared fields are unsaved (see handleModeChange).
-    const [showUnsavedPrepareDialog, setShowUnsavedPrepareDialog] =
-      useState(false);
+    // The mode the user picked while leaving Prepare with unsaved prepared
+    // fields. Non-null opens the blocking "Save your fields first?" dialog
+    // (see handleModeChange); its Save and continue / Continue without
+    // saving then land on THIS mode, Fill & Sign or View.
+    const [unsavedPrepareTarget, setUnsavedPrepareTarget] =
+      useState<PDFEditorMode | null>(null);
     // Bytes produced by the last Prepare-mode save. The editor reloads
     // ITSELF from these: rendered pages/fields come from the loaded PDF,
     // and hosts often keep `src` stable across saves -- without this,
@@ -2885,18 +2887,20 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     );
 
     // Handle mode change - only allow switching to allowed modes.
-    // Leaving Prepare for Fill & Sign with unsaved prepared fields gets a
-    // blocking dialog rather than only the passive notice: fields render
-    // FROM the PDF, so unsaved ones are invisible in Fill & Sign, and a
-    // banner the user doesn't read leaves them thinking their fields
-    // vanished (user feedback). The dialog can also just do the save.
+    // Leaving Prepare (for Fill & Sign or View) with unsaved prepared
+    // fields gets a blocking dialog rather than only the passive notice:
+    // every other mode renders fields FROM the PDF, so unsaved ones are
+    // invisible there, and a banner the user doesn't read leaves them
+    // thinking their fields vanished (user feedback). The dialog can also
+    // just do the save. It fires every time, whatever the user has seen
+    // before (tour, mode-menu note): it is the permanent guard.
     const handleModeChange = useCallback(
       (newMode: PDFEditorMode) => {
         if (!allowedModes.includes(newMode)) {
           return;
         }
-        if (mode === "build" && newMode === "edit" && hasUnsavedBuildChanges) {
-          setShowUnsavedPrepareDialog(true);
+        if (mode === "build" && newMode !== "build" && hasUnsavedBuildChanges) {
+          setUnsavedPrepareTarget(newMode);
           return;
         }
         // A mode switch starts the mobile friendly view over in the
@@ -3677,34 +3681,39 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       onClose?.();
     };
 
-    // Prepare -> Fill & Sign guard actions. The save runs while still in
-    // Prepare mode (that's the save path that writes fields into the PDF);
-    // only a save that didn't throw proceeds to the switch.
-    const handleSavePreparedAndFill = async () => {
+    // Leaving-Prepare guard actions. The save runs while still in Prepare
+    // mode (that's the save path that writes fields into the PDF); only a
+    // save that didn't throw proceeds to the switch, to the mode the user
+    // picked.
+    const handleSavePreparedAndContinue = async () => {
+      const target = unsavedPrepareTarget;
+      if (!target) return;
       // Only a save that actually landed closes the dialog and switches
       // modes. A `finally` here dismissed the guard even when onSaveAs
       // threw, dropping the signer back into Prepare with unsaved fields
       // and no indication anything failed -- same reasoning as
       // handleSaveAndClose, which also leaves its guard open on failure.
       if (!(await trySaveForGuardAction())) return;
-      // Like handleModeChange: Fill & Sign starts over in the layout's
+      // Like handleModeChange: the new mode starts over in the layout's
       // default view (spec §5.2).
       setMobileViewChoiceState(null);
       setReviewing(false);
-      setMode("edit");
-      setShowUnsavedPrepareDialog(false);
+      setMode(target);
+      setUnsavedPrepareTarget(null);
     };
 
-    const handleFillWithoutSaving = useCallback(() => {
-      // The in-canvas notice stays up in Fill & Sign as the reminder.
-      setShowUnsavedPrepareDialog(false);
+    const handleContinueWithoutSaving = useCallback(() => {
+      if (!unsavedPrepareTarget) return;
+      // The in-canvas notice stays up in Fill & Sign / View as the
+      // reminder.
+      setUnsavedPrepareTarget(null);
       setMobileViewChoiceState(null);
       setReviewing(false);
-      setMode("edit");
-    }, []);
+      setMode(unsavedPrepareTarget);
+    }, [unsavedPrepareTarget]);
 
     const handleStayInPrepare = useCallback(() => {
-      setShowUnsavedPrepareDialog(false);
+      setUnsavedPrepareTarget(null);
     }, []);
 
     // MOBILE FRIENDLY VIEW review step (S3): the original comes up fitted
@@ -4639,6 +4648,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 ? () => openRightPanel("parties")
                 : undefined
             }
+            // The mode-menu note's Save is the header Save, which is the
+            // Prepare save only in Prepare.
+            hasUnsavedBuildChanges={mode === "build" && hasUnsavedBuildChanges}
             progressSummary={
               mode === "edit"
                 ? {
@@ -4680,11 +4692,13 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           ) : undefined
         }
         canvasBanner={
-          mode === "edit" && hasUnsavedBuildChanges ? (
+          mode !== "build" && hasUnsavedBuildChanges ? (
             <>
               {/* Prepared-but-unsaved fields are invisible in Fill & Sign
-                 (fields render from the PDF; only a Prepare save writes
-                 them in). Without this, they look like they vanished. */}
+                 and View (fields render from the PDF; only a Prepare save
+                 writes them in). Without this, they look like they
+                 vanished. Stays first in the stack, above the mobile
+                 friendly toggle (mobile friendly view spec §8.1). */}
               <Alert.Root
                 status="warning"
                 size="sm"
@@ -4703,7 +4717,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 <Alert.Content>
                   <Alert.Description>
                     Fields added in Prepare are not saved yet, so they cannot be
-                    filled here. Switch back to Prepare and select Save first.
+                    {mode === "view" ? " shown" : " filled"} here. Switch back
+                    to Prepare and select Save first.
                   </Alert.Description>
                 </Alert.Content>
               </Alert.Root>
@@ -5302,11 +5317,11 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 onSave: handleSaveAndClose,
               }}
               prepare={{
-                open: showUnsavedPrepareDialog,
+                open: unsavedPrepareTarget !== null,
                 isSaving,
                 onStay: handleStayInPrepare,
-                onContinueWithoutSaving: handleFillWithoutSaving,
-                onSaveAndContinue: handleSavePreparedAndFill,
+                onContinueWithoutSaving: handleContinueWithoutSaving,
+                onSaveAndContinue: handleSavePreparedAndContinue,
               }}
               decline={{
                 open: showDeclineConfirm,

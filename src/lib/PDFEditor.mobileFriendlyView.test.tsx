@@ -306,6 +306,59 @@ describe("opt-in, layouts and modes (S4, S5)", () => {
   });
 });
 
+describe("unsaved Prepare fields notice (mobile friendly view spec §8.1)", () => {
+  it.each([
+    ["Fill & Sign", /fill & sign/i, "filled"],
+    ["View", /^view/i, "shown"],
+  ])(
+    "in %s it stays at the top of the banner stack, above the toggle",
+    async (_label, target, verb) => {
+      // Fields are placed on desktop (the palette), then the window
+      // narrows to a phone, where the mode opens mobile friendly.
+      setWidth(1280);
+      const user = userEvent.setup();
+      const { container, getByRole } = renderWithChakra(
+        <PDFEditor
+          src="fake://document.pdf"
+          mode="build"
+          allowedModes={["build", "edit", "view"]}
+          mobileFriendlyView
+        />
+      );
+      await user.click(
+        await waitFor(() => getByRole("button", { name: /add text field/i }))
+      );
+      await user.click(screen.getByRole("button", { name: /prepare/i }));
+      await user.click(
+        within(await screen.findByRole("menu")).getByRole("menuitemradio", {
+          name: target,
+        })
+      );
+      await user.click(
+        await screen.findByRole("button", { name: "Continue without saving" })
+      );
+
+      act(() => {
+        setWidth(390);
+        window.dispatchEvent(new Event("resize"));
+      });
+      await waitFor(() => {
+        if (!reflowRoot(container)?.querySelector("[data-mf-field]")) {
+          throw new Error("no reflow yet");
+        }
+      });
+
+      const notice = screen.getByText(
+        new RegExp(`not saved yet, so they cannot be ${verb} here`)
+      );
+      expect(
+        notice.compareDocumentPosition(toggle()) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+    }
+  );
+});
+
 describe("fallback (S2)", () => {
   it("keeps the original with the notice and a disabled segment", async () => {
     convertDocumentMock.mockImplementation(() => fallbackResult());
