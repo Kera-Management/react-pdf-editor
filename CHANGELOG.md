@@ -4,6 +4,19 @@
 
 ### Added
 
+- **`resetFieldValues?: { fields: string[]; nonce: number }`**: each time
+  `nonce` changes (not on first mount), the listed fields, fillable or
+  locked, in any mode, go back to their `initialFieldValues` value or to
+  empty (unticked), and no longer count as unsaved changes. The session
+  stays unsaved if anything else changed.
+- Defaults mode: when `initialFieldValues` is passed, locked fields follow
+  it live. A locked field (not a signature) always shows its current
+  value there, or empty when it has no entry, even over the PDF's value,
+  including a field that was typed into and then locked; its edit stops
+  counting as unsaved. Fillable fields still seed once per load.
+- Prepare: assigning a signature field to a participant makes it required
+  (saved in `requiredFields`). Unassigning leaves Required as it was.
+- `useFieldValues` gains `assign(entries, asSeed)`.
 - **Defaults mode** (`mode="defaults"`, passed as the only allowed mode).
   The person fills only the fields the host lists in `defaultableFields`;
   every other field renders locked with its value (a locked text box is
@@ -105,6 +118,11 @@
 
 ### Fixed
 
+- A Prepare save no longer drops top-level editor metadata keys it doesn't
+  know (a host's or server's own stamp, e.g. `"keraSignatures": "manual"`):
+  they are kept verbatim next to the rewritten known keys.
+  `serializeEditorMetadata(metadata, previousTitle?)` takes the previous
+  Title to do the same. Fill & Sign saves already kept them.
 - **The Progress panel's Remaining list matches its count.** The count and
   Finish have always measured the signer's REQUIRED fields, but Remaining
   listed every assigned field still empty, so a signer with an optional

@@ -515,8 +515,23 @@ export interface PDFEditorProps {
    * A boolean applies to checkboxes only: true ticks the box (its export
    * value), false leaves it unticked. A boolean for any other kind of
    * field is ignored. Strings work for every kind, as before.
+   *
+   * Defaults mode exception: when this prop is set, a LOCKED field (not in
+   * `defaultableFields`) follows it on every change. The field always
+   * shows its current value here, or empty (unticked) when the prop has no
+   * entry for it, including a field that becomes locked after the person
+   * typed into it. Signature fields are left alone. Editable fields still
+   * seed once, as above.
    */
   initialFieldValues?: Record<string, string | boolean>;
+  /**
+   * Host-driven reset of specific fields, by field NAME, in every mode.
+   * When `nonce` changes (not on first mount), each listed field, editable
+   * or locked, takes its `initialFieldValues` value, or empty (unticked)
+   * when there is none. A reset field no longer counts as an unsaved
+   * change; the session stays dirty only if something else changed.
+   */
+  resetFieldValues?: { fields: string[]; nonce: number };
   /**
    * Label for the Save button (and its aria-label/dirty-state announcement).
    * Defaults to "Save". Per-mount, not per-mode -- a host that wants
@@ -726,6 +741,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       savedSignature,
       onSignatureAdopted,
       initialFieldValues,
+      resetFieldValues,
       saveLabel: saveLabelProp,
       onDecline,
       declineLabel,
@@ -874,7 +890,33 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // reassign), edit mode counts value changes (typing, checking, signing).
     // Reset on save and on a fresh document load; never touched by mode
     // switches, which must never prompt for unsaved changes.
-    const [isDirty, setIsDirty] = useState(false);
+    const [isDirty, setIsDirtyState] = useState(false);
+    // Which field NAMES have value edits since the last clean point, and
+    // whether anything else (structure, a signature, ...) changed. Lets a
+    // host reset (`resetFieldValues`) or a locked field following
+    // `initialFieldValues` take those fields' edits back out of the dirty
+    // state without hiding any other unsaved change.
+    const dirtyFieldNamesRef = useRef<Set<string>>(new Set());
+    const otherDirtyRef = useRef(false);
+    const setIsDirty = useCallback((dirty: boolean) => {
+      if (dirty) {
+        otherDirtyRef.current = true;
+      } else {
+        otherDirtyRef.current = false;
+        dirtyFieldNamesRef.current.clear();
+      }
+      setIsDirtyState(dirty);
+    }, []);
+    const markFieldsDirty = (names: Iterable<string>) => {
+      for (const name of names) dirtyFieldNamesRef.current.add(name);
+      setIsDirtyState(true);
+    };
+    const clearFieldsDirty = (names: Iterable<string>) => {
+      for (const name of names) dirtyFieldNamesRef.current.delete(name);
+      if (!otherDirtyRef.current && dirtyFieldNamesRef.current.size === 0) {
+        setIsDirtyState(false);
+      }
+    };
     // True while Prepare-mode field changes (add/move/resize/delete/
     // reassign) have not been saved. Distinct from `isDirty` because ONLY a
     // Prepare-mode save writes fields into the PDF, and Fill & Sign renders
@@ -1552,6 +1594,91 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [pagesReady]);
+
+    // Host-driven values for the fields `include` picks: each takes its
+    // `initialFieldValues` entry (same translation as the seed above), or
+    // empty -- "" for text and choice fields, "Off" for checkboxes and
+    // radios -- when there is none. The host's values count as seeds, the
+    // blanks as plain session values (a Prepare save must write a blank,
+    // not skip it as an untouched seed). The fields' edits stop counting
+    // as unsaved changes.
+    const applyHostValues = (include: (field: PDFFormRawField) => boolean) => {
+      if (!pages) return;
+      const initial = initialFieldValuesRef.current ?? {};
+      const fromHost: FieldValueMap = {};
+      const blank: FieldValueMap = {};
+      const names = new Set<string>();
+      const firstExportByName = new Map<string, string>();
+      pages.forEach((page) =>
+        page.fields?.forEach((field) => {
+          if (field.type === "checkbox" && !firstExportByName.has(field.name)) {
+            firstExportByName.set(field.name, field.exportValues || "On");
+          }
+        })
+      );
+      pages.forEach((page) =>
+        page.fields?.forEach((field) => {
+          if (!field.name || !include(field)) return;
+          names.add(field.name);
+          const value = initial[field.name];
+          if (typeof value === "boolean" && field.type === "checkbox") {
+            fromHost[field.id] = value
+              ? (firstExportByName.get(field.name) ?? "On")
+              : "Off";
+          } else if (typeof value === "string") {
+            fromHost[field.id] = value;
+          } else {
+            blank[field.id] =
+              field.type === "checkbox" || field.type === "radio" ? "Off" : "";
+          }
+        })
+      );
+      fieldValues.assign(fromHost, true);
+      fieldValues.assign(blank, false);
+      clearFieldsDirty(names);
+    };
+
+    // DEFAULTS MODE: a locked field follows `initialFieldValues` whenever
+    // it (or which fields are locked) changes, so the host decides what
+    // each locked field shows -- including a field the person had typed
+    // into before the host locked it. Only when the host passes the prop;
+    // without it, locked fields keep the PDF's own values.
+    const initialFieldValuesKey = JSON.stringify(initialFieldValues ?? null);
+    const signatureNamesPropKey = JSON.stringify(
+      signatureFieldNamesProp ?? null
+    );
+    useEffect(() => {
+      if (mode !== "defaults" || !pagesReady || !pages) return;
+      if (initialFieldValuesRef.current === undefined) return;
+      const signatureNames = getEffectiveSignatureFieldNames();
+      applyHostValues(
+        (field) => isFieldLocked(field) && !signatureNames.has(field.name)
+      );
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+      mode,
+      pagesReady,
+      initialFieldValuesKey,
+      defaultableKey,
+      signatureNamesPropKey,
+    ]);
+
+    // `resetFieldValues`: a new nonce puts the listed fields back to the
+    // host's value (or empty). The first nonce seen is the starting point,
+    // not a request; a change that lands while a document is loading is
+    // applied once its fields are known.
+    const resetNonce = resetFieldValues?.nonce;
+    const lastResetNonceRef = useRef(resetNonce);
+    useEffect(() => {
+      if (resetNonce === undefined || resetNonce === lastResetNonceRef.current)
+        return;
+      if (!pagesReady || !pages) return;
+      lastResetNonceRef.current = resetNonce;
+      const names = new Set(resetFieldValues?.fields ?? []);
+      if (names.size === 0) return;
+      applyHostValues((field) => names.has(field.name));
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [resetNonce, pagesReady]);
 
     // Assignment gating for one edit-mode overlay: null when the active
     // participant may fill it (or gating doesn't apply), else the label
@@ -2780,7 +2907,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         setIsDirty(true);
         setHasUnsavedBuildChanges(true);
       },
-      [setSelectedField]
+      [setSelectedField, setIsDirty]
     );
 
     // Handle touch drop for mobile build mode
@@ -2960,7 +3087,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         setIsDirty(true);
         setHasUnsavedBuildChanges(true);
       },
-      [selectedField, selectedFieldIds, setSelectedField]
+      [selectedField, selectedFieldIds, setSelectedField, setIsDirty]
     );
 
     // A6 batch actions from the context toolbar: apply to EVERY selected
@@ -2979,7 +3106,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         setIsDirty(true);
         setHasUnsavedBuildChanges(true);
       },
-      [selectedFieldIds]
+      [selectedFieldIds, setIsDirty]
     );
 
     // Field keyboard shortcuts (Delete/Backspace, Cmd/Ctrl+D) follow the
@@ -2997,7 +3124,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       setOptionsModalOpen(false);
       setIsDirty(true);
       setHasUnsavedBuildChanges(true);
-    }, [selectedFieldIds, setSelectedField]);
+    }, [selectedFieldIds, setSelectedField, setIsDirty]);
 
     const moveBuildModeField = useCallback(
       (fieldId: string, x: number, y: number) => {
@@ -3011,7 +3138,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         setIsDirty(true);
         setHasUnsavedBuildChanges(true);
       },
-      []
+      [setIsDirty]
     );
 
     const resizeBuildModeField = useCallback(
@@ -3030,20 +3157,36 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         setIsDirty(true);
         setHasUnsavedBuildChanges(true);
       },
-      []
+      [setIsDirty]
     );
 
     const updateBuildModeField = useCallback(
       (fieldId: string, updates: Partial<BuildModeField>) => {
         setBuildModeFields((prev) =>
-          prev.map((field) =>
-            field.id === fieldId ? { ...field, ...updates } : field
-          )
+          prev.map((field) => {
+            if (field.id !== fieldId) return field;
+            const next = { ...field, ...updates };
+            // A signature exists to be collected: giving it to someone
+            // (an assignee it didn't have) makes it required. Taking one
+            // away leaves Required as the person set it.
+            const before = new Set(field.properties.assignees ?? []);
+            const gained = (next.properties.assignees ?? []).some(
+              (id) => !before.has(id)
+            );
+            if (
+              next.type === "signature" &&
+              gained &&
+              !next.properties.required
+            ) {
+              next.properties = { ...next.properties, required: true };
+            }
+            return next;
+          })
         );
         setIsDirty(true);
         setHasUnsavedBuildChanges(true);
       },
-      []
+      [setIsDirty]
     );
 
     // Handle field selection with single click for property editor
@@ -3389,7 +3532,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           setHasUnsavedBuildChanges(true);
         }
       },
-      [buildModeFields, setSelectedField]
+      [buildModeFields, setSelectedField, setIsDirty]
     );
 
     // "Duplicate on all pages" -- the per-page-initials pain point: place
@@ -3420,7 +3563,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         setIsDirty(true);
         setHasUnsavedBuildChanges(true);
       },
-      [buildModeFields, pages]
+      [buildModeFields, pages, setIsDirty]
     );
 
     // ContextToolbar's "Duplicate" -> "On every page" menu item: runs the
@@ -4018,6 +4161,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             ...stampedNow,
           ];
 
+          // Unknown top-level keys of the document's own metadata (a
+          // host's or server's stamp) are kept verbatim.
           libDoc.setTitle(
             serializeEditorMetadata(
               createEditorMetadata({
@@ -4026,7 +4171,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 signatureFields: Array.from(signatureFieldNames),
                 choiceGroups: savedChoiceGroups,
                 signedFields,
-              })
+              }),
+              libDoc.getTitle()
             )
           );
 
@@ -4181,7 +4327,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       setShowUnsavedGuard(false);
       setIsDirty(false);
       onClose?.();
-    }, [onClose]);
+    }, [onClose, setIsDirty]);
 
     // Header's decline button -- opens the confirm, nothing else. Only
     // reachable when `onDecline` is provided (HeaderBar hides the button
@@ -4779,14 +4925,14 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         // save keeps one value per name; writing a single copy let a stale
         // copy elsewhere win (§9.4).
         setValue: (newValue) => {
-          setIsDirty(true);
+          markFieldsDirty([field.name]);
           fieldValues.setValueForIds(
             idsSharingName(field, ["text", "combobox", "list"]),
             newValue
           );
         },
         setChecked: (on) => {
-          setIsDirty(true);
+          const touched = new Set<string>([field.name]);
           // CHOICE GROUP: checking one member unchecks the others (each on
           // every copy of its name). A member that is not this signer's
           // (gated) is never touched.
@@ -4812,7 +4958,12 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 );
               });
             if (others.length) fieldValues.setValueForIds(others, "Off");
+            others.forEach((id) => {
+              const name = fieldById.get(id)?.name;
+              if (name !== undefined) touched.add(name);
+            });
           }
+          markFieldsDirty(touched);
           if (field.type === "radio") {
             // Selecting one option deselects the rest of its group, on
             // every page.

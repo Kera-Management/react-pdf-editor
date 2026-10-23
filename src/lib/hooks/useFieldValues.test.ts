@@ -145,4 +145,24 @@ describe("useFieldValues", () => {
     // implicit.
     expect(result.current.getValue).not.toBe(firstGetValue);
   });
+
+  it("assign overwrites live edits, as a seed or as a session value", () => {
+    const { result } = renderHook(() => useFieldValues());
+    act(() => {
+      result.current.setValue("a", "typed");
+      result.current.setValue("b", "typed");
+    });
+    act(() => {
+      result.current.assign({ a: "host" }, true);
+      result.current.assign({ b: "" }, false);
+    });
+    expect(result.current.values).toEqual({ a: "host", b: "" });
+    expect(result.current.isSeededValue("a", "host")).toBe(true);
+    expect(result.current.isSeededValue("b", "")).toBe(false);
+    // A later seed() never clobbers an assigned value.
+    act(() => {
+      result.current.seed({ a: "seed", c: "seed" });
+    });
+    expect(result.current.values).toEqual({ a: "host", b: "", c: "seed" });
+  });
 });

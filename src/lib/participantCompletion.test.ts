@@ -629,3 +629,36 @@ describe("signedFields (signatures stamped into the document)", () => {
     expect(after.isComplete).toBe(true);
   });
 });
+
+describe("serializeEditorMetadata: unknown top-level keys", () => {
+  const PREFIX = "REACT_PDF_EDITOR_METADATA:";
+  const metadata = () =>
+    participantCompletion.createEditorMetadata({
+      fieldAssignments: { a: ["p1"] },
+      requiredFields: ["a"],
+    });
+  const serialize = (...args: Parameters<typeof participantCompletion.serializeEditorMetadata>) =>
+    participantCompletion.serializeEditorMetadata(...args);
+
+  it("carries a previous Title's unknown keys verbatim, never its stale known keys", () => {
+    const previous = `${PREFIX}${JSON.stringify({
+      version: 3,
+      fieldAssignments: { old: ["p9"] },
+      requiredFields: ["old"],
+      signatureFields: [],
+      choiceGroups: [{ id: "g", fields: ["x", "y"] }],
+      keraSignatures: "manual",
+      hostCustom: { a: 1 },
+    })}`;
+    const parsed = JSON.parse(serialize(metadata(), previous).slice(PREFIX.length));
+    expect(parsed).toEqual({ ...metadata(), keraSignatures: "manual", hostCustom: { a: 1 } });
+    expect(parsed.choiceGroups).toBeUndefined();
+  });
+
+  it("writes exactly as before without a previous Title, or one that isn't editor metadata", () => {
+    const plain = `${PREFIX}${JSON.stringify(metadata())}`;
+    expect(serialize(metadata())).toBe(plain);
+    expect(serialize(metadata(), "Residential Tenancy Agreement")).toBe(plain);
+    expect(serialize(metadata(), `${PREFIX}{not json`)).toBe(plain);
+  });
+});

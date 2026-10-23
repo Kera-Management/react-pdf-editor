@@ -215,8 +215,45 @@ export const withSignedFieldsInTitle = (
   return `${METADATA_PREFIX}${JSON.stringify(next)}`;
 };
 
-export const serializeEditorMetadata = (metadata: PDFEditorMetadata): string =>
-  `${METADATA_PREFIX}${JSON.stringify(metadata)}`;
+// Top-level metadata keys this version writes itself. Anything else in a
+// document's editor metadata belongs to someone else (a host or server
+// stamp) and is carried over verbatim by serializeEditorMetadata.
+const KNOWN_METADATA_KEYS = new Set([
+  "version",
+  "fieldAssignments",
+  "requiredFields",
+  "signatureFields",
+  "choiceGroups",
+  "signedFields",
+]);
+
+/**
+ * Serializes editor metadata for a PDF Title. Pass the document's previous
+ * Title as `previousTitle` to keep every top-level key of its editor
+ * metadata that this version doesn't know (e.g. a host's own stamp),
+ * verbatim, after the known keys. Known keys always come from `metadata`:
+ * one the new metadata leaves out (say `choiceGroups`) is not carried over.
+ * A previous Title that isn't editor metadata contributes nothing.
+ */
+export const serializeEditorMetadata = (
+  metadata: PDFEditorMetadata,
+  previousTitle?: string | null
+): string => {
+  const extras: Record<string, unknown> = {};
+  if (previousTitle && previousTitle.startsWith(METADATA_PREFIX)) {
+    try {
+      const parsed = JSON.parse(previousTitle.slice(METADATA_PREFIX.length));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        for (const [key, value] of Object.entries(parsed)) {
+          if (!KNOWN_METADATA_KEYS.has(key)) extras[key] = value;
+        }
+      }
+    } catch {
+      // Unreadable previous metadata: nothing to keep.
+    }
+  }
+  return `${METADATA_PREFIX}${JSON.stringify({ ...metadata, ...extras })}`;
+};
 
 export const parseEditorMetadataValue = (
   value?: string | null
