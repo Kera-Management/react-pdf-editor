@@ -61,6 +61,26 @@
   mobile note. Another signer's field still says "Assigned to {name}".
   When gating lifts, the overlay's own hover title comes back.
 
+### Fixed
+
+- **The Progress panel's Remaining list matches its count.** The count and
+  Finish have always measured the signer's REQUIRED fields, but Remaining
+  listed every assigned field still empty, so a signer with an optional
+  field of their own (a lease's date beside the signature) read "0 of 1"
+  over two Remaining items, and after signing read "You've completed all
+  your fields" with that field still listed above it. Remaining now lists
+  the required work only (what Start/Next walk); the signer's other empty
+  fields are listed under "Optional" after the finished state, which then
+  says "You've completed all your required fields." New `ProgressPanel`
+  prop `requiredFieldNames?` (PDFEditor passes
+  `getRequiredAssignedFieldNames`); without it the panel lists as before.
+- **No required ring on another signer's field.** The dashed required ring
+  marked every empty required field, including ones gated to someone else
+  (a tenant's signature, and with choice groups the tenant's yes/no boxes,
+  for the manager signing first). It now marks only fields the active
+  signer can fill, and it is also applied after switching from Prepare to
+  Fill & Sign, where it used to be missing until the next zoom.
+
 ## 4.2.0
 
 ### Fixed

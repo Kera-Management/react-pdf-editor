@@ -1519,6 +1519,26 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       []
     );
 
+    // Required-field indicator: a single data attribute, read by a CSS rule
+    // keyed off it, covers every overlay type (text input, select,
+    // checkbox/radio, the signature button) uniformly rather than
+    // special-casing each one's JSX. Call it AFTER applyAssignmentGating:
+    // a field gated to another signer never carries the cue (it is not
+    // this signer's work, and a dashed ring on a box they can't fill reads
+    // as something they missed). Both the canvas render and the re-gating
+    // effect apply it, so it is right after a mode switch too, which
+    // remounts the overlays without re-rendering the canvas.
+    const applyRequiredCue = (
+      el: HTMLElement,
+      field: PDFFormRawField | undefined
+    ) => {
+      if (field && showsRequiredCue(field.name) && !("pdfeGated" in el.dataset)) {
+        el.setAttribute("data-required", "true");
+      } else {
+        el.removeAttribute("data-required");
+      }
+    };
+
     const renderPages = useCallback(
       (scale: number) => {
         let maxPageActualWidth = 0;
@@ -1661,16 +1681,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
 
               // Enforce assignment in edit mode by disabling or hiding.
               applyAssignmentGating(el, field);
-
-              // Required-field indicator: a single data attribute, read by a
-              // CSS rule keyed off it, covers every overlay type (text
-              // input, select, checkbox/radio, the signature button)
-              // uniformly rather than special-casing each one's JSX.
-              if (field && showsRequiredCue(field.name)) {
-                el.setAttribute("data-required", "true");
-              } else {
-                el.removeAttribute("data-required");
-              }
+              applyRequiredCue(el, field);
             });
         });
         if (maxPageWidth === 0) {
@@ -1805,6 +1816,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           .forEach((el) => {
             const field = page.fields?.find((f) => f.id === el.dataset.fieldId);
             applyAssignmentGating(el, field);
+            applyRequiredCue(el, field);
           });
       });
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2412,11 +2424,12 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // Calculate progress for the active participant
     const getProgressData = () => {
       const formFields = getAllFieldsValue();
+      const metadata = {
+        ...extractedMetadata.current,
+        fieldAssignments: gatingInputs.effectiveAssignments,
+      };
       const completion = calculateParticipantCompletion({
-        metadata: {
-          ...extractedMetadata.current,
-          fieldAssignments: gatingInputs.effectiveAssignments,
-        },
+        metadata,
         formFields,
         participantId: activeParticipantId,
         renderedFieldNames: getRenderedFieldNames(),
@@ -2426,6 +2439,12 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         formFields,
         totalFields: completion.requiredAssignedCount,
         completedFields: completion.completedRequiredCount,
+        // The same required set the counts above come from, so the
+        // Progress panel's Remaining list can never disagree with them.
+        requiredFieldNames: getRequiredAssignedFieldNames({
+          metadata,
+          participantId: activeParticipantId,
+        }),
       };
     };
 
@@ -2958,11 +2977,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // edit-mode signer directly on their first incomplete required field
     // instead of leaving them to find the Start button themselves. Uses
     // the same focus/highlight jump ProgressPanel's "Start" button drives,
-    // but its own target: the first remaining REQUIRED field, where Start
-    // walks every remaining ASSIGNED field. On a document whose assigned
-    // set is wider than its required set the two can land differently --
-    // deliberate, since the point of the auto-jump is the work the signer
-    // cannot skip.
+    // and the same target: the first remaining REQUIRED field (Start walks
+    // the panel's "Remaining" list, which is the required set; optional
+    // assigned fields are listed apart from it).
     // With the mobile friendly view coming up, wait for it: the jump must
     // land in the view the signer will actually see (spec §9.3).
     const reflowPending = reflowSurface && conversion.status !== "ok";
@@ -4766,6 +4783,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       formFields: progressData.formFields,
       totalFields: progressData.totalFields,
       completedFields: progressData.completedFields,
+      requiredFieldNames: progressData.requiredFieldNames,
       mode,
       onFieldFocus: handleFieldFocus,
       onFinish: requestFinish,
