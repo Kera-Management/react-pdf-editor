@@ -252,10 +252,10 @@ describe("Fill & Sign: a required yes/no choice group", () => {
     });
     await waitFor(() =>
       expect(overlay(container, "f_yes")!.getAttribute("title")).toBe(
-        `Yes, by email — ${HELP}`
+        `Yes, by email. ${HELP}`
       )
     );
-    expect(overlay(container, "f_no")!.getAttribute("title")).toBe(`No — ${HELP}`);
+    expect(overlay(container, "f_no")!.getAttribute("title")).toBe(`No. ${HELP}`);
     expect(overlay(container, "f_yes")!.getAttribute("data-required")).toBe("true");
     expect(overlay(container, "f_no")!.getAttribute("data-required")).toBe("true");
   });

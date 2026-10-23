@@ -5161,7 +5161,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                             // A choice-group member's title also carries the
                             // group's help text.
                             const fieldTitle = control.choiceGroup?.help
-                              ? `${control.label} \u2014 ${control.choiceGroup.help}`
+                              ? `${control.label}. ${control.choiceGroup.help}`
                               : control.label;
                             if (field.type === "combobox")
                               return (
