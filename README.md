@@ -94,6 +94,8 @@ The `theme` prop is **deprecated** and ignored since 4.0.0. It is kept only so e
 | `savedSignature`, `onSignatureAdopted` | `string`, `(dataUrl) => void`                                                           | Offer and capture a reusable signature (PNG data URL). The library never persists it. |
 | `initialFieldValues`   | `Record<string, string \| boolean>`                                                                     | Values seeded once per document load, keyed by field name. A boolean ticks (true) or clears (false) a checkbox and is ignored for other fields. |
 | `defaultableFields`    | `string[]`                                                                                              | Defaults mode only: field names the person may fill. See [Defaults mode](#defaults-mode). |
+| `fieldNotes`           | `Record<string, string>`                                                                                | Defaults mode only: a note per field name, shown on that field while it is locked. See [Defaults mode](#defaults-mode). |
+| `exclusiveFieldGroups` | `string[][]`                                                                                            | Sets of checkbox field names of which at most one may be ticked, in every mode. See [Required choice groups](#required-choice-groups). |
 | `onDefaultsSave`       | `(values: PDFEditorDefaultsValues) => void \| Promise<void>`                                            | Defaults mode's "Save defaults". No PDF is produced. |
 | `rememberableFields`, `onRememberFieldValue` | `string[]`, `(fieldName, value: string \| boolean) => void \| Promise<void>`                     | Offer "Use on future documents" for these fields in Prepare and Fill & Sign. See [Use on future documents](#use-on-future-documents). |
 | `signatureFieldNames`  | `string[]`                                                                                              | Extra field names to treat as signature fields. |
@@ -179,6 +181,7 @@ pdfDoc.setTitle(
 - **Display.** The Progress panel lists the group once, under `label` (else the members' display names joined with " / "), with `help` below it. Each member's hover title carries the help text, and the mobile friendly view shows the label, required mark and help above the first member.
 - **Assignment.** A group is a participant's work when its members are assigned to them. Only that signer can answer it.
 - **Saving.** Fill & Sign saves keep the title as is. A Prepare save writes the groups back, dropping a deleted member (and a group left with fewer than two). There is no Prepare UI for creating groups. A member's Required toggle in Prepare is its group's.
+- **Host groups.** The `exclusiveFieldGroups` prop adds exclusive sets without touching the PDF: ticking one member unticks the others, in every mode (Fill & Sign, defaults, the mobile friendly view). They are merged with the document's groups (a field can be in both; ticking it unticks the members of each), but carry no label, help or required rule and are never written to the PDF. A member the person can't fill (another signer's, or locked in defaults mode) is never changed.
 - **Absent means unchanged.** A PDF without `choiceGroups` behaves and saves exactly as before, and no `choiceGroups` key is written. Older readers ignore the key.
 
 Pure helpers, for hosts and servers that need the same rule:
@@ -202,12 +205,17 @@ Defaults mode lets a person fill in the values a host keeps for later documents,
   mode="defaults"
   allowedModes={["defaults"]}
   defaultableFields={["parking_spaces", "utilities_heat", "additional_terms"]}
+  fieldNotes={{ tenant_name: "Filled in on each document" }}
+  exclusiveFieldGroups={[["utilities_heat_landlord", "utilities_heat_tenant"]]}
   initialFieldValues={{ utilities_heat: true }}
   onDefaultsSave={async (values) => saveMyDefaults(values)}
 />
 ```
 
 - **Which fields.** Only fields named in `defaultableFields` can be filled. Every other field renders locked with its value showing and is never reported; locked text boxes are disabled (dimmed, no focus, skipped by Tab) like locked checkboxes, so only the fillable fields look fillable. Signature fields are always read-only here and show no Sign prompt.
+- **Changing the lists.** `defaultableFields` and `fieldNotes` are read on every render: change either prop and the form updates in place, with no remount. Values typed into fields that stay fillable are kept, a field that becomes locked keeps showing its value (it is no longer reported), and a field that unlocks can be filled straight away.
+- **Notes on locked fields.** `fieldNotes` maps a field name to a short note saying why it can't be filled here. A locked field with a note gets it in its hover title (after the field's label) and, while the pointer is on the field, as a small muted label laid over the field's own box (it may run past a narrow box; near the page's right edge it grows leftwards). The label is hover-only on purpose: a long form has dozens of locked fields, and a permanent label on each would bury the form's own text and truncate on narrow boxes. In the mobile friendly view the note is helper text under the field. Notes on fillable fields, and outside defaults mode, are ignored.
+- **Header.** With `allowedModes={["defaults"]}` there is no mode menu; a small muted "Defaults" label sits where it would be.
 - **Starting values.** The PDF's own field values, then `initialFieldValues` for fields the PDF leaves blank.
 - **Save defaults.** The header's primary button (label "Save defaults", or `saveLabel`) calls `onDefaultsSave(values)`. `values` (type `PDFEditorDefaultsValues = Record<string, string | boolean | null>`) has an entry for every defaultable field the document has: text, dropdown and radio fields give a trimmed string, or `null` when blank (cleared); checkboxes give `true` or `false`. Names the document doesn't have are left out. A returned promise keeps the "Saving" state until it settles; a rejection leaves the session unsaved. `ref.save()` and the unsaved-changes guard's "Save and close" do the same.
 - **No signing UI.** No Progress panel, no required cues or Save gate, no guided signing, no parties or assignment, no tour. Display names (`/TU`) label fields as in other modes, and the mobile friendly view works (Save reports straight away, with no review step).

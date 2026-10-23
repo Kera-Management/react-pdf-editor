@@ -19,6 +19,19 @@
   and the mobile friendly view work as elsewhere. New type
   `PDFEditorDefaultsValues`; `"defaults"` joins `PDFEditorMode` (and the
   `ProgressPanel` `mode` prop type, which renders nothing for it).
+- Defaults mode: `defaultableFields` and the new `fieldNotes?:
+  Record<string, string>` follow the props live (no remount): typed
+  values in fields that stay fillable are kept, and a field that becomes
+  locked keeps showing its value. A locked field with a note gets it in
+  its hover title and, while the pointer is on it, as a small muted label
+  over the field's own box (helper text in the mobile friendly view).
+  `FieldControlModel` gains `note?`.
+- With `allowedModes={["defaults"]}` the header shows a small "Defaults"
+  label where the mode menu would be.
+- **`exclusiveFieldGroups?: string[][]`**: ticking one checkbox in a set
+  unticks the others, in every mode, merged with the document's own choice
+  groups. Members another signer owns or that are locked are left alone
+  (now true of choice groups too).
 - **"Use on future documents"** (`rememberableFields`,
   `onRememberFieldValue(fieldName, value)`). In Prepare, the selected
   field's toolbar (and the phone field action bar) offers it for a listed

@@ -37,6 +37,7 @@ vi.mock("pdfjs-dist", () => ({
 const RECTS = {
   parking: { x: 10, y: 260, width: 150, height: 20 },
   heat: { x: 10, y: 230, width: 12, height: 12 },
+  water: { x: 40, y: 230, width: 12, height: 12 },
   terms: { x: 10, y: 160, width: 250, height: 60 },
   smoking: { x: 10, y: 130, width: 150, height: 20 },
   tenant_name: { x: 10, y: 100, width: 150, height: 20 },
@@ -55,6 +56,7 @@ async function buildSourceDocument(): Promise<Uint8Array> {
     PDFHexString.fromText("Parking spaces")
   );
   form.createCheckBox("heat").addToPage(page, { ...RECTS.heat, borderWidth: 0 });
+  form.createCheckBox("water").addToPage(page, { ...RECTS.water, borderWidth: 0 });
   const terms = form.createTextField("terms");
   terms.enableMultiline();
   terms.addToPage(page, { ...RECTS.terms, borderWidth: 0 });
@@ -128,6 +130,13 @@ function makeFakeDoc(bytes: Uint8Array) {
       smoking: [rawField("f_smoking", "smoking", "text", { value: "No smoking" })],
       tenant_name: [rawField("f_tenant", "tenant_name", "text", { value: "Ada Tenant" })],
       landlord_sig: [rawField("f_sig", "landlord_sig", "text")],
+      water: [
+        rawField("f_water", "water", "checkbox", {
+          exportValues: "Yes",
+          value: "Off",
+          defaultValue: "Off",
+        }),
+      ],
     })),
     getData: vi.fn(async () => bytes),
     destroy: vi.fn(),
@@ -576,5 +585,207 @@ describe("Use on future documents: Prepare", () => {
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: original });
     }
+  });
+});
+
+describe("defaults mode: defaultableFields and fieldNotes follow the props", () => {
+  const NOTES = {
+    tenant_name: "Filled in on each document",
+    landlord_sig: "Signed on each document",
+    parking: "Never shown: parking is editable",
+  };
+
+  it("unlocks and locks fields in place, keeping every value", async () => {
+    const user = userEvent.setup();
+    const onDefaultsSave = vi.fn();
+    const props: Partial<PDFEditorProps> = {
+      mode: "defaults",
+      allowedModes: ["defaults"],
+      onDefaultsSave,
+    };
+    const { container, rerender } = await mountDefaults(props);
+    const parking = overlay(container, "f_parking");
+    await user.click(parking);
+    await user.keyboard("P12");
+    await user.click(overlay(container, "f_smoking"));
+    await user.keyboard(" indoors");
+    expect(overlay(container, "f_tenant").disabled).toBe(true);
+
+    // tenant_name becomes editable, smoking becomes locked: no remount
+    // (the same element), and both keep what they show.
+    rerender(
+      <PDFEditor
+        src="fake://form.pdf"
+        {...props}
+        defaultableFields={["parking", "heat", "terms", "tenant_name"]}
+      />
+    );
+    const tenant = overlay(container, "f_tenant");
+    await waitFor(() => expect(tenant.disabled).toBe(false));
+    expect(overlay(container, "f_parking")).toBe(parking);
+    expect(parking.value).toBe("P12");
+    const smoking = overlay(container, "f_smoking");
+    expect(smoking.disabled).toBe(true);
+    expect(smoking.value).toBe("No smoking indoors");
+
+    await user.clear(tenant);
+    await user.type(tenant, "Pat");
+    expect(tenant.value).toBe("Pat");
+
+    fireEvent.click(saveDefaultsButton());
+    await waitFor(() => expect(onDefaultsSave).toHaveBeenCalledTimes(1));
+    expect(onDefaultsSave.mock.calls[0][0]).toEqual({
+      parking: "P12",
+      heat: false,
+      terms: null,
+      tenant_name: "Pat",
+    });
+  });
+
+  it("shows a locked field's note as its title and a hover label; editable fields get none", async () => {
+    const { container } = await mountDefaults({ fieldNotes: NOTES });
+    const tenant = overlay(container, "f_tenant");
+    expect(tenant.title).toBe("Tenant Name. Filled in on each document");
+    const label = container.querySelector(`[data-field-note="f_tenant"]`)!;
+    expect(label).toHaveTextContent("Filled in on each document");
+    // Right after its field, so the CSS hover rule can reach it.
+    expect(tenant.nextElementSibling).toBe(label);
+
+    // A signature too: its label, then the note.
+    expect(overlay(container, "f_sig").title).toBe("Landlord Sig. Signed on each document");
+    expect(container.querySelector(`[data-field-note="f_sig"]`)).toHaveTextContent(
+      "Signed on each document"
+    );
+
+    // Listed as defaultable: no note at all.
+    expect(container.querySelector(`[data-field-note="f_parking"]`)).toBeNull();
+    expect(overlay(container, "f_parking").title).toBe("Parking spaces");
+  });
+
+  it("updates notes live and drops one when its field unlocks", async () => {
+    const { container, rerender } = await mountDefaults({ fieldNotes: NOTES });
+    rerender(
+      <PDFEditor
+        src="fake://form.pdf"
+        mode="defaults"
+        allowedModes={["defaults"]}
+        defaultableFields={[...DEFAULTABLE, "tenant_name"]}
+        fieldNotes={{ ...NOTES, smoking: "Ignored", landlord_sig: "Kera adds this" }}
+      />
+    );
+    await waitFor(() =>
+      expect(container.querySelector(`[data-field-note="f_tenant"]`)).toBeNull()
+    );
+    expect(overlay(container, "f_tenant").title).toBe("Tenant Name");
+    expect(container.querySelector(`[data-field-note="f_sig"]`)).toHaveTextContent(
+      "Kera adds this"
+    );
+    expect(container.querySelector(`[data-field-note="f_smoking"]`)).toBeNull();
+  });
+
+  it("shows no notes outside defaults mode", async () => {
+    const { container } = await mount({
+      mode: "view",
+      allowedModes: ["view"],
+      fieldNotes: NOTES,
+    });
+    await waitFor(() => {
+      if (!overlay(container, "f_tenant")) throw new Error("no fields");
+    });
+    expect(container.querySelector("[data-field-note]")).toBeNull();
+    expect(overlay(container, "f_tenant").title).toBe("Tenant Name");
+  });
+
+  it("shows the note under a locked field in the mobile friendly view", async () => {
+    const original = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    try {
+      await mountDefaults({ fieldNotes: NOTES, mobileFriendlyView: true });
+      // The reflow view, or its fallback to the original: either way the
+      // note is there for a locked field.
+      await waitFor(() =>
+        expect(screen.getAllByText("Filled in on each document").length).toBeGreaterThan(0)
+      );
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: original });
+    }
+  });
+});
+
+describe("exclusiveFieldGroups", () => {
+  it("ticking one box unticks its partners in defaults mode", async () => {
+    const onDefaultsSave = vi.fn();
+    const { container } = await mountDefaults({
+      defaultableFields: [...DEFAULTABLE, "water"],
+      exclusiveFieldGroups: [["heat", "water"]],
+      onDefaultsSave,
+    });
+    fireEvent.click(overlay(container, "f_heat"));
+    await waitFor(() => expect(overlay(container, "f_heat").checked).toBe(true));
+    fireEvent.click(overlay(container, "f_water"));
+    await waitFor(() => expect(overlay(container, "f_water").checked).toBe(true));
+    expect(overlay(container, "f_heat").checked).toBe(false);
+
+    // Unticking leaves both unticked.
+    fireEvent.click(overlay(container, "f_water"));
+    await waitFor(() => expect(overlay(container, "f_water").checked).toBe(false));
+    expect(overlay(container, "f_heat").checked).toBe(false);
+
+    fireEvent.click(overlay(container, "f_heat"));
+    fireEvent.click(saveDefaultsButton());
+    await waitFor(() => expect(onDefaultsSave).toHaveBeenCalledTimes(1));
+    expect(onDefaultsSave.mock.calls[0][0]).toMatchObject({ heat: true, water: false });
+  });
+
+  it("works in Fill & Sign too, and follows the prop", async () => {
+    const { container, rerender } = await mount({ mode: "edit", allowedModes: ["edit"] });
+    await waitFor(() => {
+      if (!overlay(container, "f_heat")) throw new Error("no fields");
+    });
+    // No groups: both can be ticked.
+    fireEvent.click(overlay(container, "f_heat"));
+    fireEvent.click(overlay(container, "f_water"));
+    await waitFor(() => expect(overlay(container, "f_water").checked).toBe(true));
+    expect(overlay(container, "f_heat").checked).toBe(true);
+
+    rerender(
+      <PDFEditor
+        src="fake://form.pdf"
+        mode="edit"
+        allowedModes={["edit"]}
+        exclusiveFieldGroups={[["water", "heat"]]}
+      />
+    );
+    fireEvent.click(overlay(container, "f_water"));
+    fireEvent.click(overlay(container, "f_water"));
+    await waitFor(() => expect(overlay(container, "f_water").checked).toBe(true));
+    expect(overlay(container, "f_heat").checked).toBe(false);
+  });
+
+  it("leaves a locked partner alone in defaults mode", async () => {
+    // water is not defaultable: locked, and ticked by the source document.
+    (fakeDocRef.current as { getFieldObjects: unknown }).getFieldObjects =
+      vi.fn(async () => ({
+        heat: [
+          rawField("f_heat", "heat", "checkbox", {
+            exportValues: "Yes",
+            value: "Off",
+            defaultValue: "Off",
+          }),
+        ],
+        parking: [rawField("f_parking", "parking", "text")],
+        water: [
+          rawField("f_water", "water", "checkbox", {
+            exportValues: "Yes",
+            value: "Yes",
+            defaultValue: "Off",
+          }),
+        ],
+      }));
+    const { container } = await mountDefaults({ exclusiveFieldGroups: [["heat", "water"]] });
+    expect(overlay(container, "f_water").checked).toBe(true);
+    fireEvent.click(overlay(container, "f_heat"));
+    await waitFor(() => expect(overlay(container, "f_heat").checked).toBe(true));
+    expect(overlay(container, "f_water").checked).toBe(true);
   });
 });

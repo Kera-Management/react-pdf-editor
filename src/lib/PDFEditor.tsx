@@ -622,6 +622,25 @@ export interface PDFEditorProps {
    */
   defaultableFields?: string[];
   /**
+   * Defaults mode: a short note per field NAME saying why a locked field
+   * can't be filled here (e.g. "Filled in on each document"). A locked
+   * field (not in `defaultableFields`, or a signature) with a note gets it
+   * as its hover title, and a small muted label laid over the field while
+   * the pointer is on it (in the mobile friendly view, helper text under
+   * the field). Notes on editable fields are ignored. Like
+   * `defaultableFields`, it is read on every render: changing either prop
+   * updates the form in place, keeping every typed value.
+   */
+  fieldNotes?: Record<string, string>;
+  /**
+   * Sets of checkbox field NAMES of which at most one may be ticked, in
+   * every mode: ticking one unticks the others (on every copy of each
+   * name). Merged with the document's own choice groups (editor
+   * metadata), which behave the same way. Members the person can't fill
+   * (another signer's, or locked) are left as they are.
+   */
+  exclusiveFieldGroups?: string[][];
+  /**
    * Defaults mode's primary button ("Save defaults", or `saveLabel`).
    * `values` holds every defaultable field found in the document (names
    * the document doesn't have are left out): text, dropdown and radio
@@ -721,6 +740,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       tours,
       onTourEnd,
       defaultableFields,
+      fieldNotes,
+      exclusiveFieldGroups,
       onDefaultsSave,
       rememberableFields,
       onRememberFieldValue,
@@ -968,6 +989,18 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       [rememberableKey]
     );
 
+    // Host-declared exclusive sets (`exclusiveFieldGroups`), keyed on
+    // content like the lists above.
+    const exclusiveKey = JSON.stringify(exclusiveFieldGroups ?? null);
+    const exclusiveGroups = useMemo(
+      () =>
+        (exclusiveFieldGroups ?? []).filter(
+          (group) => Array.isArray(group) && new Set(group).size > 1
+        ),
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [exclusiveKey]
+    );
+
     // A field that renders read-only whoever is looking: everything in
     // View mode, and in defaults mode every field the host didn't list as
     // defaultable (and every signature field). Assignment gating (another
@@ -979,6 +1012,13 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         !defaultableSet.has(field.name) ||
         getEffectiveSignatureFieldNames().has(field.name)
       );
+    };
+
+    // Defaults mode: the host's note for a LOCKED field (`fieldNotes`).
+    const lockedNoteFor = (field: PDFFormRawField): string | null => {
+      if (mode !== "defaults" || !isFieldLocked(field)) return null;
+      const note = fieldNotes?.[field.name]?.trim();
+      return note ? note : null;
     };
 
     // Pinch-to-zoom state
@@ -4750,15 +4790,27 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           // CHOICE GROUP: checking one member unchecks the others (each on
           // every copy of its name). A member that is not this signer's
           // (gated) is never touched.
-          if (on && choiceGroup) {
-            const others = choiceGroup.fields
-              .filter((name) => name !== field.name)
+          // The host's `exclusiveFieldGroups` work the same way, merged
+          // with the document's groups; a locked member is never touched
+          // either.
+          if (on) {
+            const partners = new Set<string>(choiceGroup?.fields ?? []);
+            exclusiveGroups.forEach((group) => {
+              if (group.includes(field.name)) {
+                group.forEach((name) => partners.add(name));
+              }
+            });
+            partners.delete(field.name);
+            const others = [...partners]
               .flatMap((name) => idsByName.get(name) ?? [])
-              .filter(
-                (id) =>
-                  fieldById.get(id)?.type === "checkbox" &&
-                  !gatedLabelById.has(id)
-              );
+              .filter((id) => {
+                const other = fieldById.get(id);
+                return (
+                  other?.type === "checkbox" &&
+                  !gatedLabelById.has(id) &&
+                  !isFieldLocked(other)
+                );
+              });
             if (others.length) fieldValues.setValueForIds(others, "Off");
           }
           if (field.type === "radio") {
@@ -4819,6 +4871,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             }
           : {}),
         readOnly: isFieldLocked(field) || gated,
+        note: lockedNoteFor(field),
         gated,
         gatedLabel: gatedText || null,
         hidden: gated && unassignedVisibility === "hidden",
@@ -5575,6 +5628,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                               width: rectScaled[2] - rectScaled[0],
                               height: rectScaled[3] - rectScaled[1],
                             };
+                            // Defaults mode: the host's note on a locked
+                            // field, shown by the label after the overlay.
+                            const note = lockedNoteFor(field);
+                            const overlayElement = ((): React.ReactElement => {
                             // Value, writes and state all come from the
                             // shared model (spec §9.1); the mobile friendly
                             // view renders from the same one.
@@ -5592,9 +5649,13 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                             // Hover text: the field's display label, never
                             // its raw ID (`name`/`data-field-name` keep that).
                             // A choice-group member's title also carries the
-                            // group's help text.
-                            const fieldTitle = control.choiceGroup?.help
-                              ? `${control.label}. ${control.choiceGroup.help}`
+                            // group's help text, and a locked field the
+                            // host's note on it.
+                            const titleNote = note ?? control.choiceGroup?.help;
+                            const fieldTitle = titleNote
+                              ? control.label
+                                ? `${control.label}. ${titleNote}`
+                                : titleNote
                               : control.label;
                             if (field.type === "combobox")
                               return (
@@ -5790,6 +5851,44 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                   }
                                 }}
                               />
+                            );
+                            })();
+                            if (!note) return overlayElement;
+                            // The note's label: laid over the field's own
+                            // box (a locked field holds nothing to edit),
+                            // shown while the pointer is on the field (CSS:
+                            // the overlay's next sibling). It may run past
+                            // a narrow box; near the page's right edge it
+                            // grows leftwards instead.
+                            const pageWidth = vp.width;
+                            const noteFromRight =
+                              Number(style.left) + 360 > pageWidth;
+                            return (
+                              <React.Fragment key={field.id}>
+                                {overlayElement}
+                                <span
+                                  className={styles.fieldNote}
+                                  data-field-note={field.id}
+                                  aria-hidden="true"
+                                  style={{
+                                    top: style.top,
+                                    minHeight: style.height,
+                                    minWidth: style.width,
+                                    ...(noteFromRight
+                                      ? {
+                                          right:
+                                            pageWidth -
+                                            Number(style.left) -
+                                            Number(style.width),
+                                        }
+                                      : { left: style.left }),
+                                  }}
+                                >
+                                  <span className={styles.fieldNoteText}>
+                                    {note}
+                                  </span>
+                                </span>
+                              </React.Fragment>
                             );
                           })}
 

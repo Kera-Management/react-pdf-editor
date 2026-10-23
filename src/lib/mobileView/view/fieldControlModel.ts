@@ -42,8 +42,11 @@ export interface FieldControlModel {
   /** Same rule as progress: non-empty and not the "Off" sentinel; a
    * signature is complete once it holds an image. */
   complete: boolean;
-  /** View mode or gated. */
+  /** View mode, defaults mode's locked fields, or gated. */
   readOnly: boolean;
+  /** Defaults mode: the host's note on a locked field (`fieldNotes`),
+   * shown as helper text. Null or absent otherwise. */
+  note?: string | null;
   /** The active participant may not fill it: another signer's field, or
    * (once any assignment exists) a field assigned to no one. */
   gated: boolean;

@@ -385,7 +385,12 @@ export const FieldControl: React.FC<FieldControlProps> = ({
     );
   } else if (mode === "view" || control.readOnly) {
     body = (
-      <ReadOnlyValue control={control} labelText={labelText} emptyText="Blank" />
+      <ReadOnlyValue
+        control={control}
+        labelText={labelText}
+        emptyText="Blank"
+        note={control.note}
+      />
     );
   } else {
     body = (
@@ -511,9 +516,9 @@ export const ChoiceRow: React.FC<ChoiceRowProps> = ({
         </Box>
       </Flex>
       {hint && hint.length > 0 && <Box ps="8">{hintNode}</Box>}
-      {control.gatedLabel && (
+      {(control.gatedLabel || control.note) && (
         <Text fontSize="14px" lineHeight="20px" color="fg.muted" ps="8">
-          {control.gatedLabel}
+          {control.gatedLabel || control.note}
         </Text>
       )}
     </Stack>

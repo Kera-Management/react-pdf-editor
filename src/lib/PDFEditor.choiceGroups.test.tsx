@@ -207,6 +207,29 @@ describe("Fill & Sign: a required yes/no choice group", () => {
     expect(overlay(container, "f_yes")!.checked).toBe(false);
   });
 
+  it("merges exclusiveFieldGroups with the document's groups", async () => {
+    const { container } = await mountEdit({
+      activeParticipantId: undefined,
+      exclusiveFieldGroups: [["email_no", "pets"]],
+    });
+    fireEvent.click(overlay(container, "f_no")!);
+    await waitFor(() => expect(overlay(container, "f_no")!.checked).toBe(true));
+    // The host's group: pets unticks email_no.
+    fireEvent.click(overlay(container, "f_pets")!);
+    await waitFor(() => expect(overlay(container, "f_pets")!.checked).toBe(true));
+    expect(overlay(container, "f_no")!.checked).toBe(false);
+    // The document's group still works; yes has no tie to pets.
+    fireEvent.click(overlay(container, "f_no")!);
+    await waitFor(() => expect(overlay(container, "f_no")!.checked).toBe(true));
+    expect(overlay(container, "f_pets")!.checked).toBe(false);
+    fireEvent.click(overlay(container, "f_yes")!);
+    await waitFor(() => expect(overlay(container, "f_yes")!.checked).toBe(true));
+    expect(overlay(container, "f_no")!.checked).toBe(false);
+    fireEvent.click(overlay(container, "f_pets")!);
+    await waitFor(() => expect(overlay(container, "f_pets")!.checked).toBe(true));
+    expect(overlay(container, "f_yes")!.checked).toBe(true);
+  });
+
   it("lists the group once, by its label, with its help; members not on their own", async () => {
     const { container } = await mountEdit();
     await waitFor(() =>
