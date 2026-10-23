@@ -141,6 +141,54 @@ Short first-run tours that explain the editor before a user runs into it. The li
 - **Inside a host dialog.** The tour isn't portaled: it renders inside the editor on a fixed full-viewport layer, so it stays clickable inside a host's modal Chakra Dialog, and a click on its dimmed background ends the tour without closing the dialog. Esc while a tour shows ends only the tour; the host dialog never sees it.
 - **The unsaved-fields guard stays.** Completing or skipping the Prepare tour never affects the "Save your fields first?" dialog: any switch out of Prepare with unsaved fields still opens it, including picking a mode from the menu the tour opened.
 
+## Required choice groups
+
+Some forms ask one question with several separate checkbox fields, such as a yes/no pair ("Notices by email · yes" / "· no"). A choice group ties them together. The host declares groups in the editor's PDF Title metadata (`REACT_PDF_EDITOR_METADATA:` JSON, still version 3), next to `fieldAssignments`, `requiredFields` and `signatureFields`:
+
+```ts
+choiceGroups?: Array<{
+  id: string;        // unique within the document
+  fields: string[];  // member field NAMES, at least two
+  required: boolean; // one answer is required
+  label?: string;    // e.g. "Notices by email"
+  help?: string;     // shown with the group
+}>;
+```
+
+```ts
+import { createEditorMetadata, serializeEditorMetadata } from "@kera-management/react-pdf-editor";
+
+pdfDoc.setTitle(
+  serializeEditorMetadata(
+    createEditorMetadata({
+      fieldAssignments: { email_yes: ["tenant1"], email_no: ["tenant1"] },
+      requiredFields: [],
+      choiceGroups: [
+        { id: "notices_by_email", fields: ["email_yes", "email_no"], required: true, label: "Notices by email" },
+      ],
+    })
+  )
+);
+```
+
+- **Fill & Sign and the mobile friendly view.** Checking one member unchecks the others. Nothing is pre-selected by the editor.
+- **One required item.** A required group is complete when exactly one member is checked: none, or more than one, is incomplete. It counts once in progress ("N of M"), blocks Save and Finish like a required field, and is one stop for guided navigation. Members are never required on their own, even if `requiredFields` lists them (a group with a listed member counts as required).
+- **Display.** The Progress panel lists the group once, under `label` (else the members' display names joined with " / "), with `help` below it. Each member's hover title carries the help text, and the mobile friendly view shows the label, required mark and help above the first member.
+- **Assignment.** A group is a participant's work when its members are assigned to them. Only that signer can answer it.
+- **Saving.** Fill & Sign saves keep the title as is. A Prepare save writes the groups back, dropping a deleted member (and a group left with fewer than two). There is no Prepare UI for creating groups. A member's Required toggle in Prepare is its group's.
+- **Absent means unchanged.** A PDF without `choiceGroups` behaves and saves exactly as before, and no `choiceGroups` key is written. Older readers ignore the key.
+
+Pure helpers, for hosts and servers that need the same rule:
+
+| Export | Does |
+| ------ | ---- |
+| `choiceGroupsFromMetadata(metadataOrTitle)` | The validated groups from parsed metadata or the raw PDF title string. `[]` if none. |
+| `isChoiceGroupComplete(values, group)` | `true` when exactly one member is checked (`values` keyed by field name; `""` / `"Off"` is unchecked). |
+| `isFieldOrChoiceGroupComplete(name, values, groups)` | Completion of one entry of a required-names list: a member answers with its group. |
+| `normalizeChoiceGroups`, `pruneChoiceGroups`, `choiceGroupForField`, `choiceGroupLabel`, `isChoiceValueChecked` | Validation, keeping groups in step with existing fields, lookup and naming. |
+
+`calculateParticipantCompletion` and `getParticipantCompletion` apply groups too: a group is one entry of `remainingRequiredFields` (under its first member's name), and `remainingChoiceGroups` lists the unanswered group ids (only for documents that have groups).
+
 ## Ref
 
 ```tsx

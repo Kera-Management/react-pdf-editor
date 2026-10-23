@@ -440,8 +440,29 @@ export const ChoiceRow: React.FC<ChoiceRowProps> = ({
     fallbackName ||
     control.label ||
     "Field";
+  // A choice group's name and help, once, above its first member. Its
+  // required mark lives here too: the members are not required one by one.
+  const group = control.choiceGroup?.first ? control.choiceGroup : undefined;
   return (
     <Stack gap="1" data-mf-field-slot={fieldId}>
+      {group && (
+        <Stack gap="0.5" data-mf-choice-group={group.id}>
+          <Text
+            fontSize="14px"
+            lineHeight="20px"
+            fontWeight="medium"
+            color="fg.muted"
+          >
+            {group.label}
+            {group.required && !control.gated && <RequiredMark />}
+          </Text>
+          {group.help && (
+            <Text fontSize="14px" lineHeight="20px" color="fg.muted">
+              {group.help}
+            </Text>
+          )}
+        </Stack>
+      )}
       <Flex
         as="label"
         align="center"

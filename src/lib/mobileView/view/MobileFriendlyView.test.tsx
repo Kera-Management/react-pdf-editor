@@ -22,6 +22,7 @@ interface FakeField {
   label?: string;
   hidden?: boolean;
   options?: { exportValue: string; displayValue: string }[];
+  choiceGroup?: FieldControlModel["choiceGroup"];
 }
 
 const FIELDS: Record<string, FakeField> = {
@@ -112,6 +113,7 @@ function Harness({
       gated: !!field.gatedLabel || !!field.gated,
       gatedLabel: field.gatedLabel ?? null,
       hidden: !!field.hidden,
+      ...(field.choiceGroup ? { choiceGroup: field.choiceGroup } : {}),
     };
   };
   return (
@@ -305,6 +307,41 @@ describe("MobileFriendlyView fields", () => {
     name.focus();
     fireEvent.keyDown(name, { key: "Enter" });
     expect(document.activeElement).toBe(control(container, "f_phone"));
+  });
+});
+
+describe("MobileFriendlyView choice groups", () => {
+  const group = {
+    id: "notices_by_email",
+    label: "Notices by email",
+    help: "Choose yes to get notices by email.",
+    required: true,
+    first: true,
+  };
+
+  it("shows the group's label, required mark and help once, above its first member", () => {
+    const { container } = renderWithChakra(
+      <Harness fieldOverrides={{ f_park: { choiceGroup: group } }} />
+    );
+    const heading = container.querySelector<HTMLElement>(
+      '[data-mf-choice-group="notices_by_email"]'
+    )!;
+    expect(heading).not.toBeNull();
+    expect(heading.textContent).toContain("Notices by email");
+    expect(heading.textContent).toContain("Required");
+    expect(within(heading).getByText(group.help)).toBeInTheDocument();
+    // The member itself is not marked required.
+    expect(control(container, "f_park")).not.toHaveAttribute("aria-required");
+  });
+
+  it("shows nothing extra on a member that is not the group's first", () => {
+    const { container } = renderWithChakra(
+      <Harness
+        fieldOverrides={{ f_park: { choiceGroup: { ...group, first: false } } }}
+      />
+    );
+    expect(container.querySelector("[data-mf-choice-group]")).toBeNull();
+    expect(screen.queryByText(group.help)).toBeNull();
   });
 });
 

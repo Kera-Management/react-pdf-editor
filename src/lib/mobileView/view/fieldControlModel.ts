@@ -53,6 +53,19 @@ export interface FieldControlModel {
   /** Gated with `unassignedVisibility="hidden"`: render no control at all
    * (the surrounding document text still shows). */
   hidden: boolean;
+  /**
+   * Set when the field is a member of a choice group (one question answered
+   * by several checkboxes, e.g. yes/no). `label` is the group's name for a
+   * person, `required` whether one answer is required, and `first` marks the
+   * member the group's label and help are shown with (once per group).
+   */
+  choiceGroup?: {
+    id: string;
+    label: string;
+    help?: string;
+    required: boolean;
+    first: boolean;
+  };
 }
 
 /** Looks a field up by id. Null for an id the editor doesn't know. */

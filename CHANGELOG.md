@@ -28,6 +28,31 @@
 - `BuildModeField.displayName?`; `ProgressPanel`: `fieldDisplayNames?`
   prop; `fieldLabels` now applies beyond the Progress panel.
 
+- **Required choice groups** for questions asked as several checkbox
+  fields (e.g. Ontario 2229E Section 3, "Notices by email · yes" / "·
+  no"). Optional `choiceGroups: { id, fields, required, label?, help? }[]`
+  in the editor's title metadata (still v3; absent = unchanged behaviour,
+  and no key is written). In Fill & Sign and the mobile friendly view the
+  members are mutually exclusive; a required group is ONE required item,
+  complete when exactly one member is checked, that blocks Save/Finish and
+  guided navigation like any required field. Members are never required on
+  their own. The Progress panel lists the group once by `label` (fallback:
+  the members' display names joined with " / ") with its `help`; member
+  hover titles carry the help, and the mobile friendly view shows label,
+  required mark and help above the first member. Assignment gating applies.
+  Fill & Sign saves keep the metadata; Prepare saves write it back, drop a
+  deleted member and a group left with fewer than two members.
+- Pure helpers: `choiceGroupsFromMetadata`, `isChoiceGroupComplete`,
+  `isFieldOrChoiceGroupComplete`, `normalizeChoiceGroups`,
+  `pruneChoiceGroups`, `choiceGroupForField`, `choiceGroupLabel`,
+  `isChoiceValueChecked`; type `PDFEditorChoiceGroup`.
+  `PDFEditorMetadata.choiceGroups?`, `createEditorMetadata({ choiceGroups })`,
+  `ParticipantCompletion.remainingChoiceGroups?` (only for documents with
+  groups) and the `ProgressPanel` `choiceGroups?` prop.
+  `calculateParticipantCompletion` /
+  `getRequiredAssignedFieldNames` count a group once, under its first
+  member's name.
+
 ### Changed
 
 - **No "Not assigned to a signer" text.** A field assigned to no one (once

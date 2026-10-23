@@ -9,6 +9,12 @@ import {
   normalizeParticipantId,
   resolveEffectiveFieldAssignments,
 } from "./utils/participantMatching";
+import {
+  choiceGroupForField,
+  isChoiceGroupComplete,
+  normalizeChoiceGroups,
+  type PDFEditorChoiceGroup,
+} from "./utils/choiceGroups";
 
 // Re-exported for backward compatibility: every existing consumer imports
 // these from "./participantCompletion". The implementations live in
@@ -16,6 +22,17 @@ import {
 // a lightweight consumer like ProgressPanel can use them without pulling in
 // this module's pdfjs-dist/pdf-lib dependency.
 export { assigneesIncludeParticipant, normalizeParticipantId, resolveEffectiveFieldAssignments };
+export {
+  choiceGroupForField,
+  choiceGroupLabel,
+  choiceGroupsFromMetadata,
+  isChoiceGroupComplete,
+  isChoiceValueChecked,
+  isFieldOrChoiceGroupComplete,
+  normalizeChoiceGroups,
+  pruneChoiceGroups,
+} from "./utils/choiceGroups";
+export type { PDFEditorChoiceGroup } from "./utils/choiceGroups";
 
 export type PDFEditorSource =
   | string
@@ -33,6 +50,14 @@ export interface PDFEditorMetadata {
    * fields). Introduced in v3; a v2 document parses with `[]`.
    */
   signatureFields: string[];
+  /**
+   * Checkbox fields that answer one question together (e.g. a yes/no
+   * pair). Additive and optional within v3: absent (every document written
+   * before it, and every document that declares none) means no groups, and
+   * readers that predate it simply ignore the key. See
+   * utils/choiceGroups.ts for the rule.
+   */
+  choiceGroups?: PDFEditorChoiceGroup[];
 }
 
 export interface ParticipantCompletion {
@@ -48,6 +73,13 @@ export interface ParticipantCompletion {
    * nothing to report here.
    */
   unrenderableAssignedFields: string[];
+  /**
+   * Ids of the participant's required choice groups still unanswered (no
+   * member checked, or more than one). Each such group is ALSO one entry
+   * of `remainingRequiredFields`, under its first member's name. Present
+   * only when the document declares choice groups.
+   */
+  remainingChoiceGroups?: string[];
   isComplete: boolean;
 }
 
@@ -113,16 +145,24 @@ export const createEditorMetadata = ({
   fieldAssignments,
   requiredFields,
   signatureFields = [],
+  choiceGroups,
 }: {
   fieldAssignments: Record<string, string[]>;
   requiredFields: string[];
   signatureFields?: string[];
-}): PDFEditorMetadata => ({
-  version: 3,
-  fieldAssignments: normalizeFieldAssignments(fieldAssignments),
-  requiredFields: normalizeRequiredFields(requiredFields),
-  signatureFields: normalizeSignatureFields(signatureFields),
-});
+  choiceGroups?: PDFEditorChoiceGroup[];
+}): PDFEditorMetadata => {
+  const groups = normalizeChoiceGroups(choiceGroups);
+  return {
+    version: 3,
+    fieldAssignments: normalizeFieldAssignments(fieldAssignments),
+    requiredFields: normalizeRequiredFields(requiredFields),
+    signatureFields: normalizeSignatureFields(signatureFields),
+    // Only written when there is something to say, so a document without
+    // groups serializes exactly as before.
+    ...(groups.length > 0 ? { choiceGroups: groups } : {}),
+  };
+};
 
 export const serializeEditorMetadata = (metadata: PDFEditorMetadata): string =>
   `${METADATA_PREFIX}${JSON.stringify(metadata)}`;
@@ -143,6 +183,9 @@ export const parseEditorMetadataValue = (
       // to `[]` below and its `version` is preserved as-is (2), so a
       // not-yet-touched-by-signatures document stays honestly labelled v2
       // until it is next written (createEditorMetadata always writes v3).
+      const choiceGroups = normalizeChoiceGroups(
+        isObject ? parsed.choiceGroups : undefined
+      );
       return {
         version: isObject && parsed.version === 2 ? 2 : 3,
         fieldAssignments: normalizeFieldAssignments(
@@ -154,6 +197,7 @@ export const parseEditorMetadataValue = (
         signatureFields: normalizeSignatureFields(
           isObject ? parsed.signatureFields : []
         ),
+        ...(choiceGroups.length > 0 ? { choiceGroups } : {}),
       };
     } catch (error) {
       console.warn("Failed to parse react-pdf-editor metadata:", error);
@@ -215,13 +259,13 @@ const getFieldValue = (fieldEntries?: PDFFormRawField[]) => {
 const isFieldComplete = (value?: string) =>
   Boolean(value && value.trim() !== "" && value !== "Off");
 
-export const getRequiredAssignedFieldNames = ({
+const getRequiredAssignedFieldNamesWithoutGroups = ({
   metadata,
   participantId,
 }: {
   metadata: PDFEditorMetadata;
   participantId?: string;
-}) => {
+}): string[] => {
   if (!participantId) {
     return metadata.requiredFields;
   }
@@ -263,6 +307,83 @@ export const getRequiredAssignedFieldNames = ({
     }
     return !hasAssignmentMapping;
   });
+};
+
+/**
+ * The participant's required work as a list of field NAMES. A choice group
+ * (see utils/choiceGroups.ts) is ONE entry, under the name of its first
+ * member that is this participant's; its members never appear on their own.
+ * Check entries with `isFieldOrChoiceGroupComplete`.
+ *
+ * Which groups count: every `required` group, plus any group a member of
+ * which is listed in `requiredFields` (members are never required alone,
+ * and a yes/no pair whose boxes were each required could never be
+ * finished). A group counts for a participant under the same assignment
+ * rule as a required field: any member of it is theirs.
+ *
+ * The "nothing declared required -> every assigned field is" fallback
+ * applies only when the document declares neither required fields nor a
+ * required group; under it, a group whose members are assigned is one
+ * entry too. Without choice groups this is exactly the previous behavior.
+ */
+export const getRequiredAssignedFieldNames = ({
+  metadata,
+  participantId,
+}: {
+  metadata: PDFEditorMetadata;
+  participantId?: string;
+}): string[] => {
+  const groups = normalizeChoiceGroups(metadata.choiceGroups);
+  if (groups.length === 0) {
+    return getRequiredAssignedFieldNamesWithoutGroups({ metadata, participantId });
+  }
+
+  const hasAssignmentMapping = Object.keys(metadata.fieldAssignments).length > 0;
+  const isTheirs = (fieldName: string) => {
+    if (!participantId) return true;
+    const assignees = metadata.fieldAssignments[fieldName];
+    if (assignees) return assigneesIncludeParticipant(assignees, participantId);
+    return !hasAssignmentMapping;
+  };
+  const groupOf = (fieldName: string) => choiceGroupForField(groups, fieldName);
+
+  const individual = metadata.requiredFields.filter((name) => !groupOf(name));
+  const requiredGroups = groups.filter(
+    (group) =>
+      group.required ||
+      group.fields.some((name) => metadata.requiredFields.includes(name))
+  );
+
+  // Fallback: nothing declared required, so every assigned field is.
+  if (
+    participantId &&
+    individual.length === 0 &&
+    requiredGroups.length === 0
+  ) {
+    const names: string[] = [];
+    const emitted = new Set<string>();
+    Object.keys(metadata.fieldAssignments)
+      .filter((name) =>
+        assigneesIncludeParticipant(metadata.fieldAssignments[name], participantId)
+      )
+      .forEach((name) => {
+        const group = groupOf(name);
+        if (!group) {
+          names.push(name);
+        } else if (!emitted.has(group.id)) {
+          emitted.add(group.id);
+          names.push(name);
+        }
+      });
+    return names;
+  }
+
+  const names = individual.filter(isTheirs);
+  requiredGroups.forEach((group) => {
+    const representative = group.fields.find(isTheirs);
+    if (representative) names.push(representative);
+  });
+  return names;
 };
 
 export const calculateParticipantCompletion = ({
@@ -317,9 +438,14 @@ export const calculateParticipantCompletion = ({
     ? requiredAssignedFields.filter((fieldName) => !renderedSet.has(fieldName))
     : [];
 
-  const completedRequiredFields = renderableFields.filter((fieldName) =>
-    isFieldComplete(formFields[fieldName])
-  );
+  const groups = normalizeChoiceGroups(metadata.choiceGroups);
+  const isEntryComplete = (fieldName: string) => {
+    const group = groups.length ? choiceGroupForField(groups, fieldName) : undefined;
+    return group
+      ? isChoiceGroupComplete(formFields, group)
+      : isFieldComplete(formFields[fieldName]);
+  };
+  const completedRequiredFields = renderableFields.filter(isEntryComplete);
   const remainingRequiredFields = renderableFields.filter(
     (fieldName) => !completedRequiredFields.includes(fieldName)
   );
@@ -330,6 +456,15 @@ export const calculateParticipantCompletion = ({
     remainingRequiredCount: remainingRequiredFields.length,
     remainingRequiredFields,
     unrenderableAssignedFields,
+    // Only for documents with choice groups, so every other result is
+    // exactly what it was before groups existed.
+    ...(groups.length > 0
+      ? {
+          remainingChoiceGroups: remainingRequiredFields
+            .map((fieldName) => choiceGroupForField(groups, fieldName)?.id)
+            .filter((id): id is string => !!id),
+        }
+      : {}),
     isComplete:
       renderableFields.length > 0 && remainingRequiredFields.length === 0,
   };

@@ -44,6 +44,14 @@ import {
   resolveEffectiveFieldAssignments,
   serializeEditorMetadata,
 } from "./participantCompletion";
+import {
+  choiceGroupForField,
+  choiceGroupLabel,
+  isChoiceGroupComplete,
+  isFieldOrChoiceGroupComplete,
+  pruneChoiceGroups,
+  type PDFEditorChoiceGroup,
+} from "./utils/choiceGroups";
 // New component imports
 import { useResponsive } from "./hooks/useResponsive";
 import { usePanelState } from "./hooks/usePanelState";
@@ -821,6 +829,27 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // Build mode has always shown the raw field name when nothing better
     // exists; it keeps that fallback.
     const rawName = (name: string) => name;
+
+    // CHOICE GROUPS (utils/choiceGroups.ts), from the PDF's title metadata.
+    // Read through these on every call, like the signature set below:
+    // `extractedMetadata` is a ref replaced on each document load.
+    const getChoiceGroups = (): PDFEditorChoiceGroup[] =>
+      extractedMetadata.current.choiceGroups ?? [];
+    // A required group's members are not required one by one, but each
+    // shows the required cue (the group is): `data-required` and Prepare's
+    // Required toggle. A group a member of which the metadata lists as
+    // required counts as a required group (see getRequiredAssignedFieldNames).
+    const isGroupRequired = (group: PDFEditorChoiceGroup): boolean =>
+      group.required ||
+      group.fields.some((name) =>
+        extractedMetadata.current.requiredFields.includes(name)
+      );
+    const showsRequiredCue = (fieldName: string): boolean => {
+      const group = choiceGroupForField(getChoiceGroups(), fieldName);
+      return group
+        ? isGroupRequired(group)
+        : extractedMetadata.current.requiredFields.includes(fieldName);
+    };
 
     // Single construction point for "which field names are signature
     // fields" outside build mode: the union of the host-declared
@@ -1637,10 +1666,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
               // CSS rule keyed off it, covers every overlay type (text
               // input, select, checkbox/radio, the signature button)
               // uniformly rather than special-casing each one's JSX.
-              if (
-                field &&
-                extractedMetadata.current.requiredFields.includes(field.name)
-              ) {
+              if (field && showsRequiredCue(field.name)) {
                 el.setAttribute("data-required", "true");
               } else {
                 el.removeAttribute("data-required");
@@ -2601,9 +2627,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           // Get assignments for this field from extracted metadata
           const fieldAssignments =
             extractedMetadata.current.fieldAssignments[field.name] || [];
-          const isRequired = extractedMetadata.current.requiredFields.includes(
-            field.name
-          );
+          // A choice-group member shows its group's requiredness; the
+          // Prepare save folds it back into the group (never into
+          // requiredFields).
+          const isRequired = showsRequiredCue(field.name);
 
           initial.push({
             id: `existing_${field.id}`,
@@ -3571,6 +3598,27 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           // Create a mapping from field names to assignees for the parent app
           const fieldAssignmentsMap: Record<string, string[]> = {};
           const requiredFields: string[] = [];
+          // Choice groups follow the fields: a renamed member keeps its
+          // place, a deleted one drops out, a group left with fewer than
+          // two members goes (pruneChoiceGroups).
+          const originalNameById = new Map<string, string>();
+          pages?.forEach((p) =>
+            p.fields?.forEach((f) => originalNameById.set(f.id, f.name))
+          );
+          const renames = new Map<string, string>();
+          buildModeFields.forEach((field) => {
+            const original = field.originalId
+              ? originalNameById.get(field.originalId)
+              : undefined;
+            if (original && original !== field.name) {
+              renames.set(original, field.name);
+            }
+          });
+          const choiceGroups = pruneChoiceGroups(
+            getChoiceGroups(),
+            buildModeFields.map((field) => field.name),
+            renames
+          );
           buildModeFields.forEach((field) => {
             if (
               field.properties.assignees &&
@@ -3578,9 +3626,33 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             ) {
               fieldAssignmentsMap[field.name] = field.properties.assignees;
             }
-            if (field.properties.required) {
+            // A member is never required on its own: its Required toggle
+            // is its group's (any member on -> the group is required). A
+            // former member whose group was dropped (its partner deleted)
+            // showed the group's Required state, not its own, so it stays
+            // optional unless the metadata listed it required itself.
+            const formerName = field.originalId
+              ? originalNameById.get(field.originalId)
+              : undefined;
+            const wasMember =
+              !!formerName && !!choiceGroupForField(getChoiceGroups(), formerName);
+            if (
+              field.properties.required &&
+              !choiceGroupForField(choiceGroups, field.name) &&
+              (!wasMember ||
+                extractedMetadata.current.requiredFields.includes(formerName!))
+            ) {
               requiredFields.push(field.name);
             }
+          });
+          const savedChoiceGroups = choiceGroups.map((group) => {
+            const members = buildModeFields.filter((field) =>
+              group.fields.includes(field.name)
+            );
+            return {
+              ...group,
+              required: members.some((field) => field.properties.required),
+            };
           });
 
           libDoc.setTitle(
@@ -3589,6 +3661,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 fieldAssignments: fieldAssignmentsMap,
                 requiredFields,
                 signatureFields: Array.from(signatureFieldNames),
+                choiceGroups: savedChoiceGroups,
               })
             )
           );
@@ -4281,6 +4354,24 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
      * friendly view both render from it, so the two views can never apply
      * different rules. Every write marks the session dirty.
      */
+    // Current values of a choice group's members, by name (the first copy
+    // of each name: same-name copies share one value).
+    const choiceGroupValues = (
+      group: PDFEditorChoiceGroup
+    ): Record<string, string> => {
+      const values: Record<string, string> = {};
+      group.fields.forEach((name) => {
+        const member = fieldById.get(idsByName.get(name)?.[0] ?? "");
+        if (member) {
+          values[name] = fieldValues.getValue(
+            member.id,
+            member.value || member.defaultValue
+          );
+        }
+      });
+      return values;
+    };
+
     const getFieldControlModel = (
       field: PDFFormRawField
     ): FieldControlModel => {
@@ -4293,6 +4384,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       const gatedText = gatedLabelById.get(field.id);
       const gated = gatedText !== undefined;
       const isSignature = kind === "signature";
+      const choiceGroups = getChoiceGroups();
+      const choiceGroup = choiceGroups.length
+        ? choiceGroupForField(choiceGroups, field.name)
+        : undefined;
       return {
         id: field.id,
         name: field.name,
@@ -4317,6 +4412,20 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         },
         setChecked: (on) => {
           setIsDirty(true);
+          // CHOICE GROUP: checking one member unchecks the others (each on
+          // every copy of its name). A member that is not this signer's
+          // (gated) is never touched.
+          if (on && choiceGroup) {
+            const others = choiceGroup.fields
+              .filter((name) => name !== field.name)
+              .flatMap((name) => idsByName.get(name) ?? [])
+              .filter(
+                (id) =>
+                  fieldById.get(id)?.type === "checkbox" &&
+                  !gatedLabelById.has(id)
+              );
+            if (others.length) fieldValues.setValueForIds(others, "Off");
+          }
           if (field.type === "radio") {
             // Selecting one option deselects the rest of its group, on
             // every page.
@@ -4346,10 +4455,32 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         ...(field.type === "checkbox" || field.type === "radio"
           ? { exportValue: field.exportValues || undefined }
           : {}),
-        required: extractedMetadata.current.requiredFields.includes(field.name),
+        // A choice-group member is never required on its own (its group
+        // is; see `choiceGroup`), and is complete when its group is.
+        required:
+          !choiceGroup &&
+          extractedMetadata.current.requiredFields.includes(field.name),
         complete: isSignature
           ? !!value && value.startsWith("data:image")
-          : isFieldValueComplete(value),
+          : choiceGroup
+            ? isChoiceGroupComplete(choiceGroupValues(choiceGroup), choiceGroup)
+            : isFieldValueComplete(value),
+        ...(choiceGroup
+          ? {
+              choiceGroup: {
+                id: choiceGroup.id,
+                label: choiceGroupLabel(choiceGroup, (name) =>
+                  labelForField(
+                    name,
+                    fieldById.get(idsByName.get(name)?.[0] ?? "")?.displayName
+                  )
+                ),
+                ...(choiceGroup.help ? { help: choiceGroup.help } : {}),
+                required: isGroupRequired(choiceGroup),
+                first: choiceGroup.fields[0] === field.name,
+              },
+            }
+          : {}),
         readOnly: mode === "view" || gated,
         gated,
         gatedLabel: gatedText || null,
@@ -4532,7 +4663,11 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         guidedOrderCacheRef.current = { key, order, firstIdByName, positions };
       }
       const isComplete = (name: string) =>
-        isFieldValueComplete(progressData.formFields[name]);
+        isFieldOrChoiceGroupComplete(
+          name,
+          progressData.formFields,
+          extractedMetadata.current.choiceGroups
+        );
       return { order, isComplete, firstIdByName, ids, positions };
     };
 
@@ -4637,6 +4772,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       renderedFieldNames: getRenderedFieldNames(),
       fieldLabels,
       fieldDisplayNames: fieldDisplayNamesRef.current,
+      choiceGroups: getChoiceGroups(),
     });
 
     const layout: EditorLayoutKind = isMobile
@@ -5022,7 +5158,11 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                             const control = getFieldControlModel(field);
                             // Hover text: the field's display label, never
                             // its raw ID (`name`/`data-field-name` keep that).
-                            const fieldTitle = control.label;
+                            // A choice-group member's title also carries the
+                            // group's help text.
+                            const fieldTitle = control.choiceGroup?.help
+                              ? `${control.label} \u2014 ${control.choiceGroup.help}`
+                              : control.label;
                             if (field.type === "combobox")
                               return (
                                 <select

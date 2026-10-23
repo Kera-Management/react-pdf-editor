@@ -20,6 +20,12 @@ import { PanelHeader } from "./PanelHeader";
 import { UserAvatar } from "./UserAvatar";
 import { resolveFieldLabel } from "../../utils/fieldLabels";
 import { assigneesIncludeParticipant } from "../../utils/participantMatching";
+import {
+  choiceGroupForField,
+  choiceGroupLabel,
+  isFieldOrChoiceGroupComplete,
+  type PDFEditorChoiceGroup,
+} from "../../utils/choiceGroups";
 
 export interface ProgressPanelProps {
   /** Active participant ID */
@@ -75,6 +81,14 @@ export interface ProgressPanelProps {
    * `humanizeFieldName(name)`. PDFEditor fills this from the document.
    */
   fieldDisplayNames?: Record<string, string>;
+  /**
+   * Choice groups (checkbox fields answering one question, e.g. yes/no).
+   * A group is listed ONCE, under its `label` (else its members' names
+   * joined with " / "), with its `help` below, and is remaining until
+   * exactly one member is checked. Clicking it goes to the member it is
+   * listed under. PDFEditor fills this from the document's metadata.
+   */
+  choiceGroups?: PDFEditorChoiceGroup[];
 }
 
 export const ProgressPanel: React.FC<ProgressPanelProps> = ({
@@ -90,6 +104,7 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
   renderedFieldNames,
   fieldLabels,
   fieldDisplayNames,
+  choiceGroups,
 }) => {
   // Which remaining field guided navigation ("Start"/"Next") last sent the
   // signer to. Tracked by name, not list position -- the remaining list
@@ -164,12 +179,25 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
   // Get remaining (incomplete) fields, in document order (the order
   // fieldAssignments/formFields were built in) -- this is also the order
   // Start/Next walk through.
+  // A choice group is one entry, under the first of its members in this
+  // order.
   const remainingFields = React.useMemo(() => {
+    const listedGroups = new Set<string>();
     return renderableAssignedFields.filter((name) => {
-      const value = formFields[name];
-      return !value || value.trim() === "" || value === "Off";
+      const group = choiceGroupForField(choiceGroups, name);
+      if (group) {
+        if (listedGroups.has(group.id)) return false;
+        listedGroups.add(group.id);
+      }
+      return !isFieldOrChoiceGroupComplete(name, formFields, choiceGroups);
     });
-  }, [renderableAssignedFields, formFields]);
+  }, [renderableAssignedFields, formFields, choiceGroups]);
+
+  const labelFor = (fieldName: string) =>
+    resolveFieldLabel(fieldName, {
+      fieldLabels,
+      displayName: fieldDisplayNames?.[fieldName],
+    });
 
   // Check if all fields are complete
   const isComplete = completedFields === totalFields && totalFields > 0;
@@ -290,7 +318,8 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
           <Stack gap={0.5}>
             {remainingFields.map((fieldName) => {
               const isActive = fieldName === activeFieldName;
-              return (
+              const group = choiceGroupForField(choiceGroups, fieldName);
+              const button = (
                 <Button
                   key={fieldName}
                   type="button"
@@ -311,12 +340,27 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
                     <CircleIcon weight={isActive ? "fill" : "regular"} />
                   </Icon>
                   <Text as="span" truncate>
-                    {resolveFieldLabel(fieldName, {
-                      fieldLabels,
-                      displayName: fieldDisplayNames?.[fieldName],
-                    })}
+                    {group
+                      ? choiceGroupLabel(group, labelFor)
+                      : labelFor(fieldName)}
                   </Text>
                 </Button>
+              );
+              if (!group?.help) return button;
+              return (
+                <Stack key={fieldName} gap={0}>
+                  {button}
+                  <Text
+                    fontSize="xs"
+                    color="fg.muted"
+                    ps={8}
+                    pe={2}
+                    pb={1}
+                    data-choice-group-help={group.id}
+                  >
+                    {group.help}
+                  </Text>
+                </Stack>
               );
             })}
           </Stack>
