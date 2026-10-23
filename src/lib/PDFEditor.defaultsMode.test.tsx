@@ -222,6 +222,43 @@ describe("defaults mode: what renders", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  // A locked text box used to be read-only only: it looked and focused
+  // exactly like a defaultable one, took the caret, then swallowed every
+  // keystroke ("I'm clicking on fields but I can't type"). It is disabled
+  // now, like the locked checkboxes: dimmed, no focus, not in the tab order.
+  it("types into a defaultable field; a locked text box takes no focus", async () => {
+    const user = userEvent.setup();
+    const { container } = await mountDefaults();
+    const parking = overlay(container, "f_parking");
+    await user.click(parking);
+    expect(parking).toHaveFocus();
+    await user.keyboard("P12");
+    expect(parking.value).toBe("P12");
+
+    const tenant = overlay(container, "f_tenant");
+    expect(tenant.disabled).toBe(true);
+    await user.click(tenant);
+    expect(tenant).not.toHaveFocus();
+    await user.keyboard("x");
+    expect(tenant.value).toBe("Ada Tenant");
+    expect(parking.value).toBe("P12");
+
+    // Tab from the last editable box never lands on the locked one.
+    await user.click(overlay(container, "f_smoking"));
+    await user.tab();
+    expect(tenant).not.toHaveFocus();
+  });
+
+  it("keeps View mode's text read-only, not disabled", async () => {
+    const { container } = await mount({ mode: "view", allowedModes: ["view"] });
+    await waitFor(() => {
+      if (!overlay(container, "f_tenant")) throw new Error("no fields");
+    });
+    const tenant = overlay(container, "f_tenant");
+    expect(tenant.readOnly).toBe(true);
+    expect(tenant.disabled).toBe(false);
+  });
+
   it("labels fields with their display names (/TU)", async () => {
     const { container } = await mountDefaults();
     expect(overlay(container, "f_parking").getAttribute("title")).toBe(

@@ -6,8 +6,10 @@
 
 - **Defaults mode** (`mode="defaults"`, passed as the only allowed mode).
   The person fills only the fields the host lists in `defaultableFields`;
-  every other field renders read-only with its value, like View, and
-  signature fields are always read-only with no Sign prompt. The primary
+  every other field renders locked with its value (a locked text box is
+  disabled, dimmed and out of the tab order like a locked checkbox, so it
+  never looks fillable), and signature fields are always read-only with
+  no Sign prompt. The primary
   button, "Save defaults" (or `saveLabel`), calls
   `onDefaultsSave(values)` instead of producing a PDF: `values` has every
   defaultable field the document has, text, dropdown and radio as a

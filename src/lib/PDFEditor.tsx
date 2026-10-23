@@ -5582,6 +5582,13 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                             // Read-only whoever looks (View mode, defaults
                             // mode's other fields). Gating is separate.
                             const locked = isFieldLocked(field);
+                            // A locked text box in defaults mode is a field
+                            // the host fills per document: disabled, so it
+                            // dims like the locked checkboxes and can't take
+                            // focus. Read-only alone looked fillable and
+                            // took the caret, but swallowed every keystroke.
+                            // View mode keeps read-only text (selectable).
+                            const textDisabled = locked && mode === "defaults";
                             // Hover text: the field's display label, never
                             // its raw ID (`name`/`data-field-name` keep that).
                             // A choice-group member's title also carries the
@@ -5751,6 +5758,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                   className={styles.pdfInput}
                                   style={style}
                                   readOnly={locked}
+                                  disabled={textDisabled}
                                   maxLength={maxLength}
                                   value={currentValue}
                                   onChange={(e) => {
@@ -5773,6 +5781,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                 className={styles.pdfInput}
                                 style={style}
                                 readOnly={locked}
+                                disabled={textDisabled}
                                 maxLength={maxLength}
                                 value={currentValue}
                                 onChange={(e) => {

@@ -207,7 +207,7 @@ Defaults mode lets a person fill in the values a host keeps for later documents,
 />
 ```
 
-- **Which fields.** Only fields named in `defaultableFields` can be filled. Every other field renders read-only with its value showing, like View mode, and is never reported. Signature fields are always read-only here and show no Sign prompt.
+- **Which fields.** Only fields named in `defaultableFields` can be filled. Every other field renders locked with its value showing and is never reported; locked text boxes are disabled (dimmed, no focus, skipped by Tab) like locked checkboxes, so only the fillable fields look fillable. Signature fields are always read-only here and show no Sign prompt.
 - **Starting values.** The PDF's own field values, then `initialFieldValues` for fields the PDF leaves blank.
 - **Save defaults.** The header's primary button (label "Save defaults", or `saveLabel`) calls `onDefaultsSave(values)`. `values` (type `PDFEditorDefaultsValues = Record<string, string | boolean | null>`) has an entry for every defaultable field the document has: text, dropdown and radio fields give a trimmed string, or `null` when blank (cleared); checkboxes give `true` or `false`. Names the document doesn't have are left out. A returned promise keeps the "Saving" state until it settles; a rejection leaves the session unsaved. `ref.save()` and the unsaved-changes guard's "Save and close" do the same.
 - **No signing UI.** No Progress panel, no required cues or Save gate, no guided signing, no parties or assignment, no tour. Display names (`/TU`) label fields as in other modes, and the mobile friendly view works (Save reports straight away, with no review step).
