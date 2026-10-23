@@ -23,6 +23,7 @@ import {
   type FieldControlModel,
 } from "./fieldControlModel";
 import { Runs } from "./Runs";
+import { STAMPED_SIGNATURE_VALUE } from "../../utils/signatureValue";
 
 /** Spec S7: at least 16px (no iOS focus zoom) and 44px tall. */
 const CONTROL_FONT_SIZE = "16px";
@@ -69,7 +70,10 @@ const ReadOnlyValue: React.FC<{
 }> = ({ control, labelText, emptyText, note }) => {
   let display: React.ReactNode = control.value;
   if (control.kind === "signature") {
-    display = isSignedValue(control.value) ? (
+    display =
+      control.value === STAMPED_SIGNATURE_VALUE ? (
+        "Signed"
+      ) : isSignedValue(control.value) ? (
       <SignatureSwatch
         src={control.value}
         alt={labelText ? `Signature: ${labelText}` : "Signature"}
@@ -160,6 +164,16 @@ const EditableControl: React.FC<ControlProps> = ({
     "aria-required": isRequiredHere(control) || undefined,
   };
   const onFocus = () => onFieldFocus(control.id);
+
+  if (control.kind === "signature" && control.value === STAMPED_SIGNATURE_VALUE) {
+    // Signed by an earlier save: the signature is part of the page now and
+    // can't be replaced (a second stamp would land on top of it).
+    return (
+      <Text {...dataAttributes(control)} {...a11y} aria-labelledby={undefined}>
+        Signed
+      </Text>
+    );
+  }
 
   if (control.kind === "signature") {
     const signed = isSignedValue(control.value);

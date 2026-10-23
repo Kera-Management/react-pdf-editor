@@ -80,6 +80,26 @@
   for the manager signing first). It now marks only fields the active
   signer can fill, and it is also applied after switching from Prepare to
   Fill & Sign, where it used to be missing until the next zoom.
+- **A signed signature stays signed after saving.** A drawn or adopted
+  signature is stamped onto the page as an image, and the signature
+  field's own AcroForm value stays empty (by design, since 2.9.0). Nothing
+  in the saved PDF said the field was signed, so reopening the saved bytes
+  (which a host does after every save) showed "Sign" again and the Progress
+  panel counted it as remaining, and `getParticipantCompletion` on the
+  saved file reported it as a missing required field. This affected every
+  signature field, whether a Prepare save created it or a server wrote it.
+  Saves now record each stamped field in the title metadata's new optional
+  `signedFields` (v3; written only when non-empty, limited to
+  `signatureFields`). Fill & Sign saves add to it and keep every other
+  metadata key as it was; a document without editor metadata keeps its
+  Title. Prepare saves carry it through renames. `calculateParticipantCompletion`
+  and `getParticipantCompletion` count a stamped field as complete. On
+  reopening, a stamped field shows as signed, with the stamp visible
+  through it, and can't be signed again (a second stamp would land on the
+  first). Hosts still receive `""` for it in `onSave` formFields and
+  `ref.formFields`. A document signed before this version has no record
+  and still asks again. `PDFEditorMetadata.signedFields?`,
+  `createEditorMetadata({ signedFields })`, `withSignedFieldsInTitle`.
 
 ## 4.2.0
 

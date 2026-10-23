@@ -532,3 +532,100 @@ describe("getRequiredAssignedFieldNames: unmapped fields under a non-empty mappi
     });
   });
 });
+
+// A drawn signature is stamped into the page as an image and its AcroForm
+// text value stays empty by design, so `signedFields` is the only record a
+// saved document carries that the field is signed. Without it, every
+// signed signature read as unsigned on reopen and in host checks
+// (Ontario Standard Lease: "Add lease" kept saying Signature 1 was missing).
+describe("signedFields (signatures stamped into the document)", () => {
+  const META = {
+    fieldAssignments: { sig: ["manager"], date: ["manager"] },
+    requiredFields: ["sig", "date"],
+    signatureFields: ["sig"],
+  };
+
+  it("is written only when non-empty, deduplicated, and only for signature fields", () => {
+    const { createEditorMetadata } = participantCompletion;
+    expect(createEditorMetadata(META)).not.toHaveProperty("signedFields");
+    expect(
+      createEditorMetadata({ ...META, signedFields: ["sig", "sig", "date", "gone"] })
+        .signedFields
+    ).toEqual(["sig"]);
+  });
+
+  it("round-trips through serialize/parse and drops non-signature names on parse", () => {
+    const { createEditorMetadata, serializeEditorMetadata, parseEditorMetadataValue } =
+      participantCompletion;
+    const title = serializeEditorMetadata(
+      createEditorMetadata({ ...META, signedFields: ["sig"] })
+    );
+    expect(parseEditorMetadataValue(title).signedFields).toEqual(["sig"]);
+    const forged = `REACT_PDF_EDITOR_METADATA:${JSON.stringify({ ...META, version: 3, signedFields: ["date"] })}`;
+    expect(parseEditorMetadataValue(forged)).not.toHaveProperty("signedFields");
+  });
+
+  it("withSignedFieldsInTitle adds names and keeps every other key verbatim", () => {
+    const { withSignedFieldsInTitle } = participantCompletion;
+    const title = `REACT_PDF_EDITOR_METADATA:${JSON.stringify({
+      version: 3,
+      ...META,
+      futureKey: { kept: true },
+      signedFields: ["other_sig"],
+    }).replace('"signatureFields":["sig"]', '"signatureFields":["sig","other_sig"]')}`;
+    const next = withSignedFieldsInTitle(title, ["sig", "date"])!;
+    const parsed = JSON.parse(next.slice("REACT_PDF_EDITOR_METADATA:".length));
+    expect(parsed.futureKey).toEqual({ kept: true });
+    expect(parsed.signedFields).toEqual(["other_sig", "sig"]);
+    expect(parsed.requiredFields).toEqual(META.requiredFields);
+  });
+
+  it("withSignedFieldsInTitle leaves a non-editor Title alone", () => {
+    const { withSignedFieldsInTitle } = participantCompletion;
+    expect(withSignedFieldsInTitle("Form N11", ["sig"])).toBeNull();
+    expect(withSignedFieldsInTitle(undefined, ["sig"])).toBeNull();
+    expect(withSignedFieldsInTitle("REACT_PDF_EDITOR_METADATA:{bad", ["sig"])).toBeNull();
+  });
+
+  it("calculateParticipantCompletion counts a stamped signature as complete with an empty value", () => {
+    const { calculateParticipantCompletion, createEditorMetadata } = participantCompletion;
+    const unsigned = calculateParticipantCompletion({
+      metadata: createEditorMetadata(META),
+      formFields: { sig: "", date: "2027/06/01" },
+      participantId: "manager",
+    });
+    expect(unsigned.remainingRequiredFields).toEqual(["sig"]);
+    const stamped = calculateParticipantCompletion({
+      metadata: createEditorMetadata({ ...META, signedFields: ["sig"] }),
+      formFields: { sig: "", date: "2027/06/01" },
+      participantId: "manager",
+    });
+    expect(stamped.remainingRequiredFields).toEqual([]);
+    expect(stamped.isComplete).toBe(true);
+  });
+
+  it("getParticipantCompletion reads signedFields from the saved PDF", async () => {
+    const { createEditorMetadata, serializeEditorMetadata, getParticipantCompletion } =
+      participantCompletion;
+    const build = async (signedFields?: string[]) => {
+      const doc = await PDFDocument.create();
+      const page = doc.addPage([600, 800]);
+      const form = doc.getForm();
+      form.createTextField("sig").addToPage(page, { x: 40, y: 100, width: 200, height: 30 });
+      const date = form.createTextField("date");
+      date.addToPage(page, { x: 300, y: 100, width: 100, height: 30 });
+      date.setText("2027/06/01");
+      doc.setTitle(
+        serializeEditorMetadata(createEditorMetadata({ ...META, signedFields }))
+      );
+      return doc.save();
+    };
+    const before = await getParticipantCompletion(clonePdfBytes(await build()), "manager");
+    expect(before.remainingRequiredFields).toEqual(["sig"]);
+    const after = await getParticipantCompletion(
+      clonePdfBytes(await build(["sig"])),
+      "manager"
+    );
+    expect(after.isComplete).toBe(true);
+  });
+});

@@ -271,6 +271,14 @@
     background 100ms;
 }
 
+/* Signed by an earlier save: the stamp is page content under the button,
+   so the button stays clear and takes no clicks. */
+.signatureFieldButton[data-stamped="true"] {
+  background: transparent;
+  border-color: transparent;
+  cursor: default;
+}
+
 .signatureFieldButton:hover:not(:disabled) {
   border-color: var(--pdfe-field-border-hover);
 }

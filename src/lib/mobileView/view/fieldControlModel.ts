@@ -77,7 +77,9 @@ export type GetFieldControl = (fieldId: string) => FieldControlModel | null;
 export const isRequiredHere = (control: FieldControlModel | null): boolean =>
   !!control && control.required && !control.gated;
 
-/** A signature value is a PNG data URL once adopted. */
+/** A signature value is a PNG data URL once adopted (the image a swatch
+ * can show). A signature stamped by an earlier save is signed too, but has
+ * no image here: see STAMPED_SIGNATURE_VALUE. */
 export const isSignedValue = (value: string): boolean =>
   !!value && value.startsWith("data:image");
 

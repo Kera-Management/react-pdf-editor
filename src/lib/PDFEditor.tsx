@@ -43,7 +43,13 @@ import {
   normalizeParticipantId,
   resolveEffectiveFieldAssignments,
   serializeEditorMetadata,
+  withSignedFieldsInTitle,
 } from "./participantCompletion";
+import {
+  hostFieldValue,
+  isSignatureValueSigned,
+  STAMPED_SIGNATURE_VALUE,
+} from "./utils/signatureValue";
 import {
   choiceGroupForField,
   choiceGroupLabel,
@@ -1277,13 +1283,29 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                         .map((rawField) => {
                           const displayName =
                             fieldDisplayNamesRef.current[rawField.name];
-                          return rawField.type === "radiobutton" || displayName
+                          // A signature an earlier save stamped into the
+                          // page content: its AcroForm value is empty by
+                          // design, so it would read as unsigned (and ask
+                          // to be signed again) on every reopen. Hold the
+                          // internal stamped marker as its loaded value.
+                          const stamped =
+                            rawField.type === "text" &&
+                            !rawField.value &&
+                            (
+                              extractedMetadata.current.signedFields ?? []
+                            ).includes(rawField.name);
+                          return rawField.type === "radiobutton" ||
+                            displayName ||
+                            stamped
                             ? {
                                 ...rawField,
                                 ...(rawField.type === "radiobutton"
                                   ? { type: "radio" as const }
                                   : {}),
                                 ...(displayName ? { displayName } : {}),
+                                ...(stamped
+                                  ? { value: STAMPED_SIGNATURE_VALUE }
+                                  : {}),
                               }
                             : rawField;
                         })
@@ -2378,6 +2400,36 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       return formFields;
     };
 
+    // getAllFieldsValue as a host sees it: a signature stamped by an
+    // earlier save is "" (as it always was), never the internal marker --
+    // a host submitting values (submitSignerFields) must not receive it.
+    const getHostFieldsValue = (): PDFFormFields =>
+      Object.fromEntries(
+        Object.entries(getAllFieldsValue()).map(([name, value]) => [
+          name,
+          hostFieldValue(value),
+        ])
+      );
+
+    // Opens the adoption modal for a signature field -- unless its
+    // signature is already stamped into the page by an earlier save: a
+    // second stamp would land on top of the first, and the field is done.
+    const openSignatureFor = (fieldId: string) => {
+      let stamped = false;
+      pages?.forEach((page) =>
+        page.fields?.forEach((field) => {
+          if (
+            field.id === fieldId &&
+            fieldValues.getValue(field.id, field.value || "") ===
+              STAMPED_SIGNATURE_VALUE
+          ) {
+            stamped = true;
+          }
+        })
+      );
+      if (!stamped) setSigningFieldId(fieldId);
+    };
+
     // Field NAMES that actually rendered -- i.e. survived the
     // editable/hidden/button pre-render filter in the pages-load effect
     // above, so `pages[].fields` already IS that filtered set. A field can
@@ -2451,7 +2503,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // expose formFields value and save function
     useImperativeHandle(ref, () => ({
       get formFields() {
-        return getAllFieldsValue();
+        return getHostFieldsValue();
       },
       save: onSaveAs,
       // The factory re-runs each render (no deps array), so this always
@@ -3589,6 +3641,11 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         // Stamp every adopted signature as a flattened image at its field's
         // rect. This is the only place the actual signature pixels reach
         // the saved PDF -- setText() was skipped for these fields above.
+        // Each one stamped is recorded in the metadata's `signedFields`
+        // below: the field's AcroForm value stays empty, so that record is
+        // the only thing that tells a reopened (or headlessly checked)
+        // document the field is signed.
+        const stampedNow = new Set<string>();
         for (const [fieldName, rect] of signatureFieldRects) {
           const dataUrl = formFields[fieldName];
           if (!dataUrl || !dataUrl.startsWith("data:image/png")) continue;
@@ -3604,9 +3661,18 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
               pngImage,
               signatureStampGeometry(rect, (w, h) => pngImage.scaleToFit(w, h))
             );
+            stampedNow.add(fieldName);
           } catch (error) {
             console.error(`Failed to stamp signature for ${fieldName}:`, error);
           }
+        }
+
+        // Fill & Sign: record what was just stamped in the document's own
+        // editor metadata, keeping every other key as it was. A document
+        // without editor metadata (a government form) keeps its Title.
+        if (mode !== "build" && stampedNow.size > 0) {
+          const title = withSignedFieldsInTitle(libDoc.getTitle(), stampedNow);
+          if (title) libDoc.setTitle(title);
         }
 
         const savedData = await libDoc.save();
@@ -3672,6 +3738,18 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             };
           });
 
+          // Signatures stamped by earlier saves are still on the page (the
+          // rebuild only replaces the fields over them): keep them signed,
+          // under their new names, alongside any stamped by this save.
+          // createEditorMetadata drops a name that is no longer a
+          // signature field.
+          const signedFields = [
+            ...(extractedMetadata.current.signedFields ?? []).map(
+              (name) => renames.get(name) ?? name
+            ),
+            ...stampedNow,
+          ];
+
           libDoc.setTitle(
             serializeEditorMetadata(
               createEditorMetadata({
@@ -3679,6 +3757,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 requiredFields,
                 signatureFields: Array.from(signatureFieldNames),
                 choiceGroups: savedChoiceGroups,
+                signedFields,
               })
             )
           );
@@ -3702,7 +3781,15 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           setReloadBytes(savedDataWithMetadata);
         } else if (onSave) {
           // AWAITED -- same contract as onBuildSave above.
-          await onSave(savedData, formFields);
+          await onSave(
+            savedData,
+            Object.fromEntries(
+              Object.entries(formFields).map(([name, value]) => [
+                name,
+                hostFieldValue(value),
+              ])
+            )
+          );
         } else {
           // default behavior, save to local machine
           // Trigger the save-as dialog
@@ -3784,7 +3871,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         // the closing dialog has handed focus back (or it would take focus
         // from the modal).
         if (fieldId && name && effectiveSignatureFieldNames.has(name)) {
-          window.setTimeout(() => setSigningFieldId(fieldId), 0);
+          window.setTimeout(() => openSignatureFor(fieldId), 0);
         } else if (fieldId) {
           // pendingPlaceRef scrolls to the field and focuses it. The
           // closing dialog then hands focus back to its trigger, so take it
@@ -4478,7 +4565,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           !choiceGroup &&
           extractedMetadata.current.requiredFields.includes(field.name),
         complete: isSignature
-          ? !!value && value.startsWith("data:image")
+          ? isSignatureValueSigned(value)
           : choiceGroup
             ? isChoiceGroupComplete(choiceGroupValues(choiceGroup), choiceGroup)
             : isFieldValueComplete(value),
@@ -4701,7 +4788,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       const signatureId =
         fieldId && effectiveSignatureFieldNames.has(name) ? fieldId : null;
       handleFieldFocus(name, { focus: !signatureId });
-      if (signatureId) setSigningFieldId(signatureId);
+      if (signatureId) openSignatureFor(signatureId);
     };
 
     // Guided Next/Previous over the active participant's required fields.
@@ -5231,27 +5318,39 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                             // the exact same gating loop above.
                             if (control.kind === "signature") {
                               const isSigned = control.complete;
+                              // Signed by an earlier save: the ink is part
+                              // of the page now, so the button stays clear
+                              // over it. It can't be re-signed -- a second
+                              // stamp would land on top of the first.
+                              const isStamped =
+                                currentValue === STAMPED_SIGNATURE_VALUE;
                               return (
                                 <button
                                   type="button"
                                   key={field.id}
                                   data-field-id={field.id}
                                   data-complete={isSigned}
+                                  data-stamped={isStamped || undefined}
                                   // Guided navigation looks fields up by
                                   // NAME; buttons have no `name` attribute,
                                   // so carry it as a data attribute.
                                   data-field-name={field.name}
                                   className={styles.signatureFieldButton}
-                                  title={fieldTitle}
+                                  title={
+                                    isStamped && !fieldTitle
+                                      ? "Signed"
+                                      : fieldTitle
+                                  }
                                   style={style}
                                   disabled={mode === "view"}
+                                  aria-label={isStamped ? "Signed" : undefined}
                                   onClick={() => {
-                                    if (mode !== "view") {
+                                    if (mode !== "view" && !isStamped) {
                                       setSigningFieldId(field.id);
                                     }
                                   }}
                                 >
-                                  {isSigned ? (
+                                  {isStamped ? null : isSigned ? (
                                     <img
                                       src={currentValue}
                                       alt="Your signature"
@@ -5461,7 +5560,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 mode={mode}
                 getFieldControl={getReflowFieldControl}
                 onOpenSignature={(fieldId) => {
-                  if (mode === "edit") setSigningFieldId(fieldId);
+                  if (mode === "edit") openSignatureFor(fieldId);
                 }}
                 onFieldFocus={setCurrentReflowFieldId}
                 onShowOriginal={handleShowOriginalAt}

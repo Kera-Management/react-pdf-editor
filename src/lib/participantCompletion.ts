@@ -58,6 +58,17 @@ export interface PDFEditorMetadata {
    * utils/choiceGroups.ts for the rule.
    */
   choiceGroups?: PDFEditorChoiceGroup[];
+  /**
+   * Signature fields whose adopted signature has been stamped into this
+   * document's page content by an editor save. A stamped signature is an
+   * IMAGE drawn on the page; the field's own AcroForm text value stays
+   * empty by design (see PDFEditor's save path), so without this record a
+   * signed field reads as unsigned the moment the saved bytes are reopened
+   * or checked with `getParticipantCompletion`. Additive and optional
+   * within v3, like `choiceGroups`: absent means nothing is recorded as
+   * stamped, and older readers ignore the key.
+   */
+  signedFields?: string[];
 }
 
 export interface ParticipantCompletion {
@@ -146,22 +157,62 @@ export const createEditorMetadata = ({
   requiredFields,
   signatureFields = [],
   choiceGroups,
+  signedFields,
 }: {
   fieldAssignments: Record<string, string[]>;
   requiredFields: string[];
   signatureFields?: string[];
   choiceGroups?: PDFEditorChoiceGroup[];
+  signedFields?: string[];
 }): PDFEditorMetadata => {
   const groups = normalizeChoiceGroups(choiceGroups);
+  const normalizedSignatureFields = normalizeSignatureFields(signatureFields);
+  // Only signature fields can be stamped; a name that is no longer one (a
+  // field deleted or retyped in Prepare) drops out.
+  const signed = Array.from(
+    new Set(normalizeSignatureFields(signedFields))
+  ).filter((name) => normalizedSignatureFields.includes(name));
   return {
     version: 3,
     fieldAssignments: normalizeFieldAssignments(fieldAssignments),
     requiredFields: normalizeRequiredFields(requiredFields),
-    signatureFields: normalizeSignatureFields(signatureFields),
+    signatureFields: normalizedSignatureFields,
     // Only written when there is something to say, so a document without
-    // groups serializes exactly as before.
+    // groups (or stamped signatures) serializes exactly as before.
     ...(groups.length > 0 ? { choiceGroups: groups } : {}),
+    ...(signed.length > 0 ? { signedFields: signed } : {}),
   };
+};
+
+/**
+ * Records `stampedFieldNames` as signed in an editor-metadata Title, keeping
+ * every other key of the existing JSON exactly as it was (including keys
+ * this version doesn't know). Returns `null` when `title` is not editor
+ * metadata: a document the editor didn't prepare (a government form, a
+ * host-labelled notice) keeps its own Title untouched.
+ */
+export const withSignedFieldsInTitle = (
+  title: string | undefined | null,
+  stampedFieldNames: Iterable<string>
+): string | null => {
+  if (!title || !title.startsWith(METADATA_PREFIX)) return null;
+  let parsed: Record<string, unknown>;
+  try {
+    const value = JSON.parse(title.slice(METADATA_PREFIX.length));
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    parsed = value as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const signatureFields = normalizeSignatureFields(parsed.signatureFields);
+  const signed = new Set(normalizeSignatureFields(parsed.signedFields));
+  for (const name of stampedFieldNames) {
+    if (signatureFields.includes(name)) signed.add(name);
+  }
+  const next = { ...parsed };
+  if (signed.size > 0) next.signedFields = Array.from(signed);
+  else delete next.signedFields;
+  return `${METADATA_PREFIX}${JSON.stringify(next)}`;
 };
 
 export const serializeEditorMetadata = (metadata: PDFEditorMetadata): string =>
@@ -186,6 +237,12 @@ export const parseEditorMetadataValue = (
       const choiceGroups = normalizeChoiceGroups(
         isObject ? parsed.choiceGroups : undefined
       );
+      const signatureFields = normalizeSignatureFields(
+        isObject ? parsed.signatureFields : []
+      );
+      const signedFields = normalizeSignatureFields(
+        isObject ? parsed.signedFields : []
+      ).filter((name) => signatureFields.includes(name));
       return {
         version: isObject && parsed.version === 2 ? 2 : 3,
         fieldAssignments: normalizeFieldAssignments(
@@ -194,10 +251,9 @@ export const parseEditorMetadataValue = (
         requiredFields: normalizeRequiredFields(
           isObject ? parsed.requiredFields : []
         ),
-        signatureFields: normalizeSignatureFields(
-          isObject ? parsed.signatureFields : []
-        ),
+        signatureFields,
         ...(choiceGroups.length > 0 ? { choiceGroups } : {}),
+        ...(signedFields.length > 0 ? { signedFields } : {}),
       };
     } catch (error) {
       console.warn("Failed to parse react-pdf-editor metadata:", error);
@@ -439,7 +495,11 @@ export const calculateParticipantCompletion = ({
     : [];
 
   const groups = normalizeChoiceGroups(metadata.choiceGroups);
+  // A signature already stamped into the document is signed whatever
+  // `formFields` says: its AcroForm value is empty by design.
+  const stamped = new Set(metadata.signedFields ?? []);
   const isEntryComplete = (fieldName: string) => {
+    if (stamped.has(fieldName)) return true;
     const group = groups.length ? choiceGroupForField(groups, fieldName) : undefined;
     return group
       ? isChoiceGroupComplete(formFields, group)
