@@ -18,6 +18,7 @@ import {
 } from "@chakra-ui/react";
 import {
   ArrowCounterClockwiseIcon,
+  BookmarkSimpleIcon,
   CaretDownIcon,
   CheckIcon,
   DotsThreeVerticalIcon,
@@ -163,15 +164,17 @@ const modeDescriptions: Record<PDFEditorMode, string> = {
   build: "Place fields and choose who signs",
   edit: "Fill in and sign your fields",
   view: "Read-only",
+  defaults: "Fill in values to reuse on future documents",
 };
 
 const modeIcons: Record<PDFEditorMode, React.ReactElement> = {
   build: <NotePencilIcon />,
   edit: <SignatureIcon />,
   view: <EyeIcon />,
+  defaults: <BookmarkSimpleIcon />,
 };
 
-const allModes: PDFEditorMode[] = ["build", "edit", "view"];
+const allModes: PDFEditorMode[] = ["build", "edit", "view", "defaults"];
 
 interface OverflowItem {
   value: string;

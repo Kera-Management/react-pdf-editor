@@ -63,7 +63,13 @@ const setup = (initial: Props) => {
 
 describe("mode to tour", () => {
   it("maps modes to tours and nothing else", () => {
-    expect(TOUR_FOR_MODE).toEqual({ build: "pdf_prepare", edit: "pdf_sign", view: null });
+    expect(TOUR_FOR_MODE).toEqual({
+      build: "pdf_prepare",
+      edit: "pdf_sign",
+      view: null,
+      // Defaults mode has no tour.
+      defaults: null,
+    });
   });
 
   it("has no tour in View", () => {

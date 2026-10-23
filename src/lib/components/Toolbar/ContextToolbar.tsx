@@ -13,6 +13,7 @@ import {
 } from "@chakra-ui/react";
 import {
   AsteriskIcon,
+  BookmarkSimpleIcon,
   CaretDownIcon,
   CopyIcon,
   PencilSimpleIcon,
@@ -72,6 +73,14 @@ export interface ContextToolbarProps {
   isLocked?: boolean;
   /** Additional actions, rendered after Duplicate and before Delete. */
   additionalActions?: React.ReactNode;
+  /**
+   * "Use on future documents": keep this field's value for the host. The
+   * action renders only when this is given, and never for a
+   * multi-selection.
+   */
+  onRemember?: () => void;
+  /** Disables "Use on future documents" (e.g. while the host saves it). */
+  rememberDisabled?: boolean;
   /**
    * A6: number of selected fields. Above 1 the leading segment becomes an
    * "N selected" badge, Edit and Duplicate are disabled (not hidden), and
@@ -159,6 +168,8 @@ export const ContextToolbar: React.FC<ContextToolbarProps> = ({
   onDuplicateAllPages,
   onDelete,
   additionalActions,
+  onRemember,
+  rememberDisabled,
   selectionCount = 1,
   onBatchRequired,
   onBatchDelete,
@@ -216,6 +227,7 @@ export const ContextToolbar: React.FC<ContextToolbarProps> = ({
   const handleDelete = isMulti && onBatchDelete ? onBatchDelete : onDelete;
   const showRequired = !!(onToggleRequired || (isMulti && onBatchRequired));
   const showDelete = !!(onDelete || (isMulti && onBatchDelete));
+  const showRemember = !!onRemember && !isMulti;
 
   const leading = isMulti ? (
     <Box px={1} display="flex" alignItems="center">
@@ -319,7 +331,11 @@ export const ContextToolbar: React.FC<ContextToolbarProps> = ({
     >
       {leading}
 
-      {(showRequired || onOpenProperties || showDuplicate || additionalActions) && (
+      {(showRequired ||
+        onOpenProperties ||
+        showDuplicate ||
+        showRemember ||
+        additionalActions) && (
         <HStack gap={1}>
           {showRequired && (
             <Action
@@ -340,6 +356,15 @@ export const ContextToolbar: React.FC<ContextToolbarProps> = ({
             />
           )}
           {duplicateControl}
+          {showRemember && (
+            <Action
+              label="Use on future documents"
+              icon={<BookmarkSimpleIcon />}
+              compact={compact}
+              disabled={rememberDisabled}
+              onClick={onRemember}
+            />
+          )}
           {additionalActions}
         </HStack>
       )}

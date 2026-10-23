@@ -1060,3 +1060,34 @@ describe("guided sign tour on a phone (guided tour spec §3.2)", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("defaults mode", () => {
+  it("fills only defaultable fields, with no guided bar or progress, and reports values", async () => {
+    const user = userEvent.setup();
+    const onDefaultsSave = vi.fn();
+    const onSave = vi.fn();
+    const { container } = await mountReflow({
+      mode: "defaults",
+      allowedModes: ["defaults"],
+      defaultableFields: ["phone", "parking"],
+      onDefaultsSave,
+      onSave,
+    });
+    // Defaultable: editable. Everything else (a required name, the
+    // signature): read-only, with no guided signing and no progress.
+    expect(reflowControl(container, "f_phone")?.tagName).toBe("INPUT");
+    expect(reflowControl(container, "f_name")?.tagName).not.toBe("INPUT");
+    expect(reflowControl(container, "f_sig")?.tagName).not.toBe("BUTTON");
+    expect(screen.queryByRole("region", { name: "Guided signing" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /progress/i })).toBeNull();
+
+    await user.type(reflowControl(container, "f_phone")!, " 4165550100 ");
+    await user.click(reflowControl(container, "f_park")!);
+    // No review step: Save defaults reports straight away.
+    await user.click(screen.getByRole("button", { name: /^Save defaults/ }));
+    await waitFor(() =>
+      expect(onDefaultsSave).toHaveBeenCalledWith({ phone: "4165550100", parking: true })
+    );
+    expect(onSave).not.toHaveBeenCalled();
+  });
+});

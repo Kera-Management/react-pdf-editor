@@ -4,6 +4,33 @@
 
 ### Added
 
+- **Defaults mode** (`mode="defaults"`, passed as the only allowed mode).
+  The person fills only the fields the host lists in `defaultableFields`;
+  every other field renders read-only with its value, like View, and
+  signature fields are always read-only with no Sign prompt. The primary
+  button, "Save defaults" (or `saveLabel`), calls
+  `onDefaultsSave(values)` instead of producing a PDF: `values` has every
+  defaultable field the document has, text, dropdown and radio as a
+  trimmed string or `null` when blank, checkboxes as `true` / `false`.
+  Awaited like `onSave`. No Progress panel, required cues or Save gate,
+  guided signing, parties or assignment UI, or tour. Display names (`/TU`)
+  and the mobile friendly view work as elsewhere. New type
+  `PDFEditorDefaultsValues`; `"defaults"` joins `PDFEditorMode` (and the
+  `ProgressPanel` `mode` prop type, which renders nothing for it).
+- **"Use on future documents"** (`rememberableFields`,
+  `onRememberFieldValue(fieldName, value)`). In Prepare, the selected
+  field's toolbar (and the phone field action bar) offers it for a listed
+  field that has a value; in Fill & Sign, a small toolbar beside the
+  focused field does. The callback gets the trimmed text, or `true` for a
+  ticked checkbox; "Saved for future documents" shows briefly once it
+  settles. Never for signature fields, another signer's field, blank
+  fields, View or defaults mode. `ContextToolbar` gains `onRemember?` /
+  `rememberDisabled?`; `FieldActionBar` gains `onRemember?`,
+  `rememberDisabled?`, `rememberFeedback?`.
+- `initialFieldValues` accepts booleans for checkboxes
+  (`Record<string, string | boolean>`): true ticks the box, false clears
+  it; a boolean for any other field is ignored. Strings work as before.
+
 - **Field display names (AcroForm `/TU`).** A PDF field can carry a short
   human label in its standard alternate name, `/TU` (e.g. "Landlord's
   legal name"), while its ID (`/T`, the full name) never changes. The

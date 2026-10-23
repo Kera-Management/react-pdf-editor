@@ -244,6 +244,21 @@ interface PDFPageAndFormFields {
   fields?: PDFFormRawField[];
 }
 
+/** "Use on future documents" confirmation, shown where the action was. */
+const REMEMBER_FEEDBACK = "Saved for future documents";
+
+/** The palette type a loaded field reads as, for toolbar icons. */
+const buildTypeOfRawField = (field: PDFFormRawField): BuildModeFieldType =>
+  field.type === "checkbox"
+    ? "checkbox"
+    : field.type === "radio"
+      ? "radio"
+      : field.type === "combobox" || field.type === "list"
+        ? "dropdown"
+        : field.multiline
+          ? "multiline"
+          : "text";
+
 /** How long a guided-navigation target keeps `data-flash` (C6). */
 const FIELD_FLASH_MS = 1200;
 
@@ -338,7 +353,20 @@ const computeExcludedFromRoles = (
   );
 };
 
-export type PDFEditorMode = "build" | "edit" | "view";
+/**
+ * "defaults" is a standalone mode (hosts pass `allowedModes={["defaults"]}`):
+ * the person fills only the fields the host lists in `defaultableFields`,
+ * and the primary button reports the values (`onDefaultsSave`) instead of
+ * producing a PDF. See `defaultableFields`.
+ */
+export type PDFEditorMode = "build" | "edit" | "view" | "defaults";
+
+/**
+ * Values reported by defaults mode's "Save defaults", keyed by field NAME.
+ * Text, dropdown and radio fields give a trimmed string, or null when
+ * blank (cleared); a checkbox gives true or false.
+ */
+export type PDFEditorDefaultsValues = Record<string, string | boolean | null>;
 
 export interface PDFEditorProps {
   /**
@@ -483,13 +511,18 @@ export interface PDFEditorProps {
    * Prepare-mode save): a live edit already in the session always wins, and
    * a host passing a new object reference on a later render does NOT
    * re-seed or clobber in-progress typing.
+   *
+   * A boolean applies to checkboxes only: true ticks the box (its export
+   * value), false leaves it unticked. A boolean for any other kind of
+   * field is ignored. Strings work for every kind, as before.
    */
-  initialFieldValues?: Record<string, string>;
+  initialFieldValues?: Record<string, string | boolean>;
   /**
    * Label for the Save button (and its aria-label/dirty-state announcement).
    * Defaults to "Save". Per-mount, not per-mode -- a host that wants
    * "Submit signature" in Fill & Sign but "Save" in Prepare passes it based
-   * on the current `mode` itself.
+   * on the current `mode` itself. Defaults mode's default is "Save
+   * defaults".
    */
   saveLabel?: string;
   /**
@@ -580,6 +613,43 @@ export interface PDFEditorProps {
     reason: EditorTourEndReason,
     meta: EditorTourEndMeta
   ) => void;
+  /**
+   * Defaults mode (`mode="defaults"`): field NAMES (/T full names) the
+   * person may fill. Every other field renders read-only with its value
+   * showing, like View mode, and is never reported. Signature fields are
+   * always read-only in this mode. Starting values come from the PDF
+   * itself and from `initialFieldValues`. Ignored in every other mode.
+   */
+  defaultableFields?: string[];
+  /**
+   * Defaults mode's primary button ("Save defaults", or `saveLabel`).
+   * `values` holds every defaultable field found in the document (names
+   * the document doesn't have are left out): text, dropdown and radio
+   * fields as a trimmed string, or null when blank; checkboxes as true or
+   * false. No PDF is produced. Same awaitable contract as `onSave`: a
+   * rejection leaves the session dirty.
+   */
+  onDefaultsSave?: (values: PDFEditorDefaultsValues) => void | Promise<void>;
+  /**
+   * Field NAMES the person may keep for future documents. In Prepare and
+   * Fill & Sign, a listed field that has a value (non-blank text, a chosen
+   * option, a ticked checkbox) offers "Use on future documents" where the
+   * field shows its actions: the Prepare field toolbar (the action bar on
+   * phones), and in Fill & Sign a small toolbar beside the field while it
+   * has focus. Never offered for signature fields, for another signer's
+   * field, or without `onRememberFieldValue`. The editor stores nothing.
+   */
+  rememberableFields?: string[];
+  /**
+   * Called by "Use on future documents" with the field's name and value:
+   * a trimmed string, or true for a ticked checkbox. May return a
+   * Promise; "Saved for future documents" shows once it settles, and a
+   * rejection shows nothing (the host reports its own failure).
+   */
+  onRememberFieldValue?: (
+    fieldName: string,
+    value: string | boolean
+  ) => void | Promise<void>;
 }
 
 // Use worker from the installed pdfjs-dist package to ensure version matching
@@ -637,7 +707,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       savedSignature,
       onSignatureAdopted,
       initialFieldValues,
-      saveLabel,
+      saveLabel: saveLabelProp,
       onDecline,
       declineLabel,
       // Renamed on destructure: a local `const signatureFieldNames = new
@@ -650,6 +720,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       mobileFriendlyView = false,
       tours,
       onTourEnd,
+      defaultableFields,
+      onDefaultsSave,
+      rememberableFields,
+      onRememberFieldValue,
     } = props;
 
     // Determine the effective initial mode - must be in allowedModes
@@ -659,6 +733,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
 
     // Internal mode state
     const [mode, setMode] = useState<PDFEditorMode>(effectiveInitialMode);
+    // Defaults mode's primary button says what it does.
+    const saveLabel =
+      saveLabelProp ?? (mode === "defaults" ? "Save defaults" : undefined);
     const divRef = useRef<HTMLDivElement>(null);
     const [maxPageWidth, setMaxPageWidth] = useState(0);
     const [zoomLevel, setZoomLevel] = useState(6);
@@ -876,6 +953,34 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         ...(signatureFieldNamesProp ?? []),
       ]);
 
+    // DEFAULTS MODE and "Use on future documents": the host's name lists,
+    // as sets. Keyed on content, since hosts usually pass them inline.
+    const defaultableKey = JSON.stringify(defaultableFields ?? null);
+    const defaultableSet = useMemo(
+      () => new Set(defaultableFields ?? []),
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [defaultableKey]
+    );
+    const rememberableKey = JSON.stringify(rememberableFields ?? null);
+    const rememberableSet = useMemo(
+      () => new Set(rememberableFields ?? []),
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [rememberableKey]
+    );
+
+    // A field that renders read-only whoever is looking: everything in
+    // View mode, and in defaults mode every field the host didn't list as
+    // defaultable (and every signature field). Assignment gating (another
+    // signer's field) is separate: see getGatedLabel.
+    const isFieldLocked = (field: PDFFormRawField): boolean => {
+      if (mode === "view") return true;
+      if (mode !== "defaults") return false;
+      return (
+        !defaultableSet.has(field.name) ||
+        getEffectiveSignatureFieldNames().has(field.name)
+      );
+    };
+
     // Pinch-to-zoom state
     const lastPinchDistance = useRef<number>(0);
     const isPinching = useRef<boolean>(false);
@@ -1083,12 +1188,38 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       }
       setToolbarFeedbackText(null);
     }, []);
+    // Shows `text` in the toolbar's context chip for ~2s.
+    const flashToolbarFeedback = useCallback(
+      (text: string) => {
+        clearToolbarFeedback();
+        setToolbarFeedbackText(text);
+        toolbarFeedbackTimeoutRef.current = setTimeout(() => {
+          setToolbarFeedbackText(null);
+          toolbarFeedbackTimeoutRef.current = null;
+        }, 2000);
+      },
+      [clearToolbarFeedback]
+    );
+
+    // "USE ON FUTURE DOCUMENTS" (`rememberableFields`). In Fill & Sign the
+    // action sits in a small toolbar beside the field that has focus:
+    // `rememberTargetId` is that field's id, `rememberTargetRect` where it
+    // is on screen. `rememberPending` is true while the host's callback
+    // runs.
+    const [rememberTargetId, setRememberTargetId] = useState<string | null>(
+      null
+    );
+    const [rememberTargetRect, setRememberTargetRect] =
+      useState<DOMRect | null>(null);
+    const [rememberPending, setRememberPending] = useState(false);
+    const rememberToolbarRef = useRef<HTMLDivElement>(null);
+
     // A newly-selected (or deselected) field's toolbar starts clean --
     // feedback belongs to whichever field it fired on.
     useEffect(() => {
       clearToolbarFeedback();
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedField]);
+    }, [selectedField, rememberTargetId]);
     // Belt-and-suspenders unmount cleanup for the timeout itself.
     useEffect(() => clearToolbarFeedback, [clearToolbarFeedback]);
 
@@ -1351,12 +1482,29 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       const initial = initialFieldValuesRef.current;
       if (!initial) return;
       const entries: FieldValueMap = {};
+      // A boolean ticks a checkbox with the export value of the name's
+      // first box (a same-name group whose boxes export different values
+      // then ticks just that one).
+      const firstExportByName = new Map<string, string>();
+      pages.forEach((page) => {
+        page.fields?.forEach((field) => {
+          if (field.type === "checkbox" && !firstExportByName.has(field.name)) {
+            firstExportByName.set(field.name, field.exportValues || "On");
+          }
+        });
+      });
       pages.forEach((page) => {
         page.fields?.forEach((field) => {
           const value = initial[field.name];
-          if (value !== undefined) {
-            entries[field.id] = value;
+          if (value === undefined) return;
+          if (typeof value === "boolean") {
+            if (field.type !== "checkbox") return;
+            entries[field.id] = value
+              ? (firstExportByName.get(field.name) ?? "On")
+              : "Off";
+            return;
           }
+          entries[field.id] = value;
         });
       });
       if (Object.keys(entries).length > 0) {
@@ -1472,12 +1620,14 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       activeParticipantId,
       unassignedVisibility,
       getGatedLabel,
+      isFieldLocked,
     });
     gatingRef.current = {
       mode,
       activeParticipantId,
       unassignedVisibility,
       getGatedLabel,
+      isFieldLocked,
     };
 
     // Enforce assignment on one overlay element in edit mode by disabling or
@@ -1532,9 +1682,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           if (!("pdfeGated" in el.dataset)) return;
           delete el.dataset.pdfeGated;
           el.style.display = "";
-          // View mode overlays are disabled by their own JSX
-          // (`disabled={mode === "view"}`); keep that.
-          if (gating.mode !== "view") el.removeAttribute("disabled");
+          // Locked overlays (View mode, defaults mode's other fields) are
+          // disabled by their own JSX; keep that.
+          if (!gating.isFieldLocked(field)) el.removeAttribute("disabled");
           restoreLabels();
         }
       },
@@ -1554,7 +1704,13 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       el: HTMLElement,
       field: PDFFormRawField | undefined
     ) => {
-      if (field && showsRequiredCue(field.name) && !("pdfeGated" in el.dataset)) {
+      if (
+        field &&
+        // Defaults mode has no required fields.
+        gatingRef.current.mode !== "defaults" &&
+        showsRequiredCue(field.name) &&
+        !("pdfeGated" in el.dataset)
+      ) {
         el.setAttribute("data-required", "true");
       } else {
         el.removeAttribute("data-required");
@@ -2959,6 +3115,46 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       selectedFieldData?.height,
     ]);
 
+    // Fill & Sign "Use on future documents" toolbar: tracks the focused
+    // field's on-screen box through scroll and zoom, in whichever view
+    // (original or mobile friendly) is showing.
+    useEffect(() => {
+      if (!rememberTargetId) {
+        setRememberTargetRect(null);
+        return undefined;
+      }
+      const measure = () => {
+        const id = CSS.escape(rememberTargetId);
+        const el = showReflowRef.current
+          ? reflowRootRef.current?.querySelector<HTMLElement>(
+              `[data-mf-field][data-field-id="${id}"]`
+            )
+          : pageWrapperRef.current?.querySelector<HTMLElement>(
+              `[data-field-id="${id}"]`
+            );
+        setRememberTargetRect(el ? el.getBoundingClientRect() : null);
+      };
+      measure();
+      const container = divRef.current;
+      if (!container) return undefined;
+      let rafPending = false;
+      const handleScroll = () => {
+        if (rafPending) return;
+        rafPending = true;
+        requestAnimationFrame(() => {
+          rafPending = false;
+          measure();
+        });
+      };
+      container.addEventListener("scroll", handleScroll, { passive: true });
+      return () => container.removeEventListener("scroll", handleScroll);
+    }, [rememberTargetId, zoomLevel, showReflow]);
+
+    // Leaving Fill & Sign drops the toolbar.
+    useEffect(() => {
+      if (mode !== "edit") setRememberTargetId(null);
+    }, [mode]);
+
     // Handle field focus from progress panel
     // `focus: false` scrolls to the field without taking focus: for a stop
     // that opens the signature modal, which owns focus while it is open.
@@ -3196,15 +3392,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         const pageCount = pages?.length ?? 0;
         duplicateFieldOnAllPages(fieldId);
         if (pageCount > 1) {
-          clearToolbarFeedback();
-          setToolbarFeedbackText(`Added to ${pageCount - 1} pages`);
-          toolbarFeedbackTimeoutRef.current = setTimeout(() => {
-            setToolbarFeedbackText(null);
-            toolbarFeedbackTimeoutRef.current = null;
-          }, 2000);
+          flashToolbarFeedback(`Added to ${pageCount - 1} pages`);
         }
       },
-      [pages, duplicateFieldOnAllPages, clearToolbarFeedback]
+      [pages, duplicateFieldOnAllPages, flashToolbarFeedback]
     );
 
     // Close selection when clicking on canvas
@@ -3384,7 +3575,44 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       }
     };
 
+    // DEFAULTS MODE output: every defaultable field the document has, by
+    // name. Read from the same per-name values a save writes
+    // (getAllFieldsValue), so a same-name copy that is filled wins.
+    const collectDefaultsValues = (): PDFEditorDefaultsValues => {
+      const values: PDFEditorDefaultsValues = {};
+      if (!pages) return values;
+      const formFields = getAllFieldsValue();
+      const signatureNames = getEffectiveSignatureFieldNames();
+      const typeByName = new Map<string, PDFFormRawField["type"]>();
+      pages.forEach((page) =>
+        page.fields?.forEach((field) => {
+          if (!typeByName.has(field.name)) typeByName.set(field.name, field.type);
+        })
+      );
+      defaultableSet.forEach((name) => {
+        const type = typeByName.get(name);
+        if (type === undefined || signatureNames.has(name)) return;
+        const raw = formFields[name] ?? "";
+        if (type === "checkbox") {
+          values[name] = raw !== "" && raw !== "Off";
+          return;
+        }
+        const trimmed = raw.trim();
+        values[name] =
+          trimmed === "" || (type === "radio" && trimmed === "Off")
+            ? null
+            : trimmed;
+      });
+      return values;
+    };
+
     const runSaveAs = async () => {
+      // Defaults mode reports values; it never builds a PDF.
+      if (mode === "defaults") {
+        await onDefaultsSave?.(collectDefaultsValues());
+        setIsDirty(false);
+        return;
+      }
       const originData = await pdfDoc?.getData();
       if (originData) {
         const libDoc = await PDFDocument.load(originData);
@@ -4277,8 +4505,11 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // decision, and in Fill & Sign the panel just crowded the progress
     // panel out (user feedback). Hosts opt other modes in via
     // `parties.modes`; NEVER view by default, per the panel's contract.
+    // Never in defaults mode, which has no assignment or participants.
     const showPartiesPanel =
-      !!parties && (parties.modes ?? ["build"]).includes(mode);
+      !!parties &&
+      mode !== "defaults" &&
+      (parties.modes ?? ["build"]).includes(mode);
 
     // Config handed to <PartiesPanel>: identical to the host's `parties`
     // prop except onSelectionChange is wrapped (see
@@ -4561,7 +4792,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           : {}),
         // A choice-group member is never required on its own (its group
         // is; see `choiceGroup`), and is complete when its group is.
+        // Defaults mode has no required fields.
         required:
+          mode !== "defaults" &&
           !choiceGroup &&
           extractedMetadata.current.requiredFields.includes(field.name),
         complete: isSignature
@@ -4585,7 +4818,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
               },
             }
           : {}),
-        readOnly: mode === "view" || gated,
+        readOnly: isFieldLocked(field) || gated,
         gated,
         gatedLabel: gatedText || null,
         hidden: gated && unassignedVisibility === "hidden",
@@ -4595,6 +4828,78 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     const getReflowFieldControl = (fieldId: string) => {
       const field = fieldById.get(fieldId);
       return field ? getFieldControlModel(field) : null;
+    };
+
+    // "USE ON FUTURE DOCUMENTS": the value a field would be kept with, or
+    // null when the action isn't offered for it (not listed, a signature,
+    // another signer's field, blank, or not Prepare / Fill & Sign).
+    const rememberValueOf = (
+      field: PDFFormRawField | undefined
+    ): string | boolean | null => {
+      if (!field || !onRememberFieldValue) return null;
+      if (mode !== "build" && mode !== "edit") return null;
+      if (!rememberableSet.has(field.name)) return null;
+      if (effectiveSignatureFieldNames.has(field.name)) return null;
+      if (mode === "edit" && gatedLabelById.has(field.id)) return null;
+      const value = progressData.formFields[field.name] ?? "";
+      if (field.type === "checkbox") {
+        return value !== "" && value !== "Off" ? true : null;
+      }
+      const trimmed = value.trim();
+      if (trimmed === "" || (field.type === "radio" && trimmed === "Off")) {
+        return null;
+      }
+      return trimmed;
+    };
+
+    const rememberField = async (fieldName: string, value: string | boolean) => {
+      if (!onRememberFieldValue || rememberPending) return;
+      setRememberPending(true);
+      try {
+        await onRememberFieldValue(fieldName, value);
+        flashToolbarFeedback(REMEMBER_FEEDBACK);
+      } catch (error) {
+        // The host reports its own failure; this library has no toast.
+        console.error("onRememberFieldValue handler failed:", error);
+      } finally {
+        setRememberPending(false);
+      }
+    };
+
+    // Prepare: the selected field, when it came from the PDF (a field
+    // placed in this session has no value yet) and isn't a signature.
+    const buildRememberField =
+      mode === "build" &&
+      selectedFieldData &&
+      selectedFieldIds.length <= 1 &&
+      selectedFieldData.type !== "signature" &&
+      selectedFieldData.originalId
+        ? fieldById.get(selectedFieldData.originalId)
+        : undefined;
+    const buildRememberValue = rememberValueOf(buildRememberField);
+    const handleBuildRemember =
+      buildRememberField && buildRememberValue !== null
+        ? () => void rememberField(buildRememberField.name, buildRememberValue)
+        : undefined;
+
+    // Fill & Sign: the field that has focus.
+    const rememberTargetField =
+      mode === "edit" && rememberTargetId
+        ? fieldById.get(rememberTargetId)
+        : undefined;
+    const rememberTargetValue = rememberValueOf(rememberTargetField);
+    const updateRememberTarget = (target: EventTarget | null) => {
+      if (mode !== "edit" || !onRememberFieldValue) return;
+      const el =
+        target instanceof Element
+          ? target.closest<HTMLElement>("[data-field-id]")
+          : null;
+      const field = el?.dataset.fieldId
+        ? fieldById.get(el.dataset.fieldId)
+        : undefined;
+      setRememberTargetId(
+        field && rememberableSet.has(field.name) ? field.id : null
+      );
     };
 
     // ---- Mobile friendly view: toggle, guided bar, review (spec §8) ----
@@ -5201,10 +5506,23 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             // focus: Ctrl/Cmd zoom keys (C5) and Esc-to-clear (A6) then
             // reach the editor, and arrow keys scroll the document.
             tabIndex={-1}
-            onClick={handleCanvasClick}
+            onClick={(e) => {
+              handleCanvasClick();
+              // A click doesn't focus a checkbox in every browser.
+              updateRememberTarget(e.target);
+            }}
+            onFocusCapture={(e) => updateRememberTarget(e.target)}
             onBlurCapture={(e) => {
               const fieldId = (e.target as HTMLElement).dataset?.fieldId;
               if (fieldId) lastFieldBlurRef.current = { fieldId, at: Date.now() };
+              // Focus leaving for anywhere but the field's own toolbar.
+              const next = e.relatedTarget as Node | null;
+              if (
+                rememberTargetId &&
+                !(next && rememberToolbarRef.current?.contains(next))
+              ) {
+                setRememberTargetId(null);
+              }
             }}
           >
             <div
@@ -5261,6 +5579,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                             // shared model (spec §9.1); the mobile friendly
                             // view renders from the same one.
                             const control = getFieldControlModel(field);
+                            // Read-only whoever looks (View mode, defaults
+                            // mode's other fields). Gating is separate.
+                            const locked = isFieldLocked(field);
                             // Hover text: the field's display label, never
                             // its raw ID (`name`/`data-field-name` keep that).
                             // A choice-group member's title also carries the
@@ -5279,9 +5600,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                   value={control.value}
                                   className={styles.pdfSelect}
                                   style={style}
-                                  disabled={mode === "view"}
+                                  disabled={locked}
                                   onChange={(e) => {
-                                    if (mode !== "view") {
+                                    if (!locked) {
                                       control.setValue(e.target.value);
                                     }
                                   }}
@@ -5342,15 +5663,18 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                       : fieldTitle
                                   }
                                   style={style}
-                                  disabled={mode === "view"}
+                                  disabled={locked}
                                   aria-label={isStamped ? "Signed" : undefined}
                                   onClick={() => {
-                                    if (mode !== "view" && !isStamped) {
+                                    if (!locked && !isStamped) {
                                       setSigningFieldId(field.id);
                                     }
                                   }}
                                 >
-                                  {isStamped ? null : isSigned ? (
+                                  {/* Defaults mode has no signing: an
+                                      unsigned box shows no Sign prompt. */}
+                                  {isStamped ||
+                                  (mode === "defaults" && !isSigned) ? null : isSigned ? (
                                     <img
                                       src={currentValue}
                                       alt="Your signature"
@@ -5379,10 +5703,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                   data-complete={control.complete}
                                   className={styles.pdfInput}
                                   style={style}
-                                  disabled={mode === "view"}
+                                  disabled={locked}
                                   checked={control.checked}
                                   onChange={(e) => {
-                                    if (mode !== "view") {
+                                    if (!locked) {
                                       control.setChecked(e.target.checked);
                                     }
                                   }}
@@ -5401,10 +5725,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                   data-complete={control.complete}
                                   className={styles.pdfInput}
                                   style={style}
-                                  disabled={mode === "view"}
+                                  disabled={locked}
                                   checked={control.checked}
                                   onChange={() => {
-                                    if (mode !== "view") {
+                                    if (!locked) {
                                       control.setChecked(true);
                                     }
                                   }}
@@ -5426,11 +5750,11 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                   data-complete={control.complete}
                                   className={styles.pdfInput}
                                   style={style}
-                                  readOnly={mode === "view"}
+                                  readOnly={locked}
                                   maxLength={maxLength}
                                   value={currentValue}
                                   onChange={(e) => {
-                                    if (mode !== "view") {
+                                    if (!locked) {
                                       control.setValue(e.target.value);
                                     }
                                   }}
@@ -5448,11 +5772,11 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                 data-complete={control.complete}
                                 className={styles.pdfInput}
                                 style={style}
-                                readOnly={mode === "view"}
+                                readOnly={locked}
                                 maxLength={maxLength}
                                 value={currentValue}
                                 onChange={(e) => {
-                                  if (mode !== "view") {
+                                  if (!locked) {
                                     control.setValue(e.target.value);
                                   }
                                 }}
@@ -5552,12 +5876,14 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                     </div>
                   ))}
             </div>
-            {reflowSurface && (mode === "edit" || mode === "view") && (
+            {reflowSurface && (
               <MobileFriendlyView
                 ref={reflowRootRef}
                 status={reflowDocument ? "ready" : "loading"}
                 document={reflowDocument}
-                mode={mode}
+                // Defaults mode fills like Fill & Sign; each control's
+                // read-only state comes from the shared model.
+                mode={mode === "view" ? "view" : "edit"}
                 getFieldControl={getReflowFieldControl}
                 onOpenSignature={(fieldId) => {
                   if (mode === "edit") openSignatureFor(fieldId);
@@ -5630,8 +5956,50 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                   clearToolbarFeedback();
                   setPropertiesPopoverOpen(true);
                 }}
+                onRemember={handleBuildRemember}
+                rememberDisabled={rememberPending}
               />
             )}
+
+            {/* Fill & Sign: "Use on future documents" beside the field that
+                has focus. A press on it never takes focus from the field
+                (mousedown is cancelled), so the field stays current. */}
+            {rememberTargetField &&
+              rememberTargetRect &&
+              (rememberTargetValue !== null ||
+                toolbarFeedbackText === REMEMBER_FEEDBACK) && (
+                <div
+                  ref={rememberToolbarRef}
+                  onMouseDown={(e) => e.preventDefault()}
+                >
+                  <ContextToolbar
+                    targetRect={rememberTargetRect}
+                    containerRef={divRef}
+                    isVisible
+                    context={{
+                      fieldName: labelForField(
+                        rememberTargetField.name,
+                        rememberTargetField.displayName
+                      ),
+                      fieldType: buildTypeOfRawField(rememberTargetField),
+                    }}
+                    feedbackText={toolbarFeedbackText}
+                    onRemember={
+                      rememberTargetValue !== null
+                        ? () =>
+                            void rememberField(
+                              rememberTargetField.name,
+                              rememberTargetValue
+                            )
+                        : undefined
+                    }
+                    rememberDisabled={
+                      rememberPending ||
+                      toolbarFeedbackText === REMEMBER_FEEDBACK
+                    }
+                  />
+                </div>
+              )}
 
             {/* Field settings popover - Desktop, build mode. Anchored to
                 the same contextToolbarTarget the ContextToolbar uses, so
@@ -5715,7 +6083,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                   : undefined
               }
               progress={
-                mode !== "build" ? buildProgressPanelProps() : undefined
+                mode !== "build" && mode !== "defaults"
+                  ? buildProgressPanelProps()
+                  : undefined
               }
               hostPanel={
                 showSidebarPanel
@@ -5756,6 +6126,16 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                       onDelete: () =>
                         deleteBuildModeField(selectedFieldData.id),
                       onDismiss: () => setSelectedField(null),
+                      ...(handleBuildRemember
+                        ? {
+                            onRemember: handleBuildRemember,
+                            rememberDisabled: rememberPending,
+                            rememberFeedback:
+                              toolbarFeedbackText === REMEMBER_FEEDBACK
+                                ? REMEMBER_FEEDBACK
+                                : null,
+                          }
+                        : {}),
                     }
                   : undefined
               }

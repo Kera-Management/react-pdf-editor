@@ -10,6 +10,7 @@ import {
 } from "@chakra-ui/react";
 import {
   AsteriskIcon,
+  BookmarkSimpleIcon,
   CopyIcon,
   PencilSimpleIcon,
   TrashIcon,
@@ -29,6 +30,18 @@ export interface FieldActionBarProps {
   onDelete: () => void;
   /** Deselects the field. */
   onDismiss: () => void;
+  /**
+   * "Use on future documents", as a full-width action under the others.
+   * Renders only when given.
+   */
+  onRemember?: () => void;
+  /** Disables "Use on future documents" (e.g. while the host saves it). */
+  rememberDisabled?: boolean;
+  /**
+   * Shown in place of "Use on future documents" for a moment after it
+   * worked (e.g. "Saved for future documents").
+   */
+  rememberFeedback?: string | null;
 }
 
 /** Height the canvas keeps clear below its last page while the bar shows. */
@@ -81,6 +94,9 @@ export const FieldActionBar: React.FC<FieldActionBarProps> = ({
   onDuplicate,
   onDelete,
   onDismiss,
+  onRemember,
+  rememberDisabled,
+  rememberFeedback,
 }) => (
   <Box
     role="toolbar"
@@ -138,6 +154,19 @@ export const FieldActionBar: React.FC<FieldActionBarProps> = ({
         danger
       />
     </SimpleGrid>
+    {onRemember && (
+      <Button
+        type="button"
+        variant="outline"
+        w="full"
+        mt={2}
+        disabled={rememberDisabled || !!rememberFeedback}
+        onClick={onRemember}
+      >
+        <BookmarkSimpleIcon />
+        {rememberFeedback || "Use on future documents"}
+      </Button>
+    )}
   </Box>
 );
 

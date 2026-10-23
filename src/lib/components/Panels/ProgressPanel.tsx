@@ -52,7 +52,7 @@ export interface ProgressPanelProps {
    */
   requiredFieldNames?: string[];
   /** Current mode */
-  mode: "build" | "edit" | "view";
+  mode: "build" | "edit" | "view" | "defaults";
   /** Callback when a field is focused */
   onFieldFocus?: (fieldName: string) => void;
   /**

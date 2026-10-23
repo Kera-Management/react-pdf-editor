@@ -77,8 +77,8 @@ The `theme` prop is **deprecated** and ignored since 4.0.0. It is kept only so e
 | ---------------------- | ------------------------------------------------------------------------------------------------------- | ----- |
 | `src`                  | `string \| URL \| TypedArray \| ArrayBuffer \| DocumentInitParameters`, required                        | URL, bytes, or a PDF.js parameter object. |
 | `workerSrc`            | `string`                                                                                                | PDF.js worker URL. Defaults to the unpkg CDN build. |
-| `mode`                 | `"view" \| "edit" \| "build"`                                                                           | Default `"edit"`. |
-| `allowedModes`         | `("view" \| "edit" \| "build")[]`                                                                       | Modes offered in the header's mode menu. **Defaults to `[mode]`**, so the menu only appears when you pass two or more. (2.x defaulted to all modes; changed in 3.0.0.) |
+| `mode`                 | `"view" \| "edit" \| "build" \| "defaults"`                                                            | Default `"edit"`. `"defaults"` is a standalone mode: see [Defaults mode](#defaults-mode). |
+| `allowedModes`         | `("view" \| "edit" \| "build" \| "defaults")[]`                                                        | Modes offered in the header's mode menu. **Defaults to `[mode]`**, so the menu only appears when you pass two or more. (2.x defaulted to all modes; changed in 3.0.0.) |
 | `onSave`               | `(pdfBytes, formFields) => void \| Promise<void>`                                                       | Fill & Sign save. A returned promise keeps the "Saving" state until it settles. Without it, Save downloads the PDF. |
 | `onBuildSave`          | `(pdfBytes, buildSchema, fieldAssignments) => void \| Promise<void>`                                    | Prepare save. |
 | `onClose`              | `() => void`                                                                                            | Shows the Close button. Goes through the unsaved-changes guard. |
@@ -90,9 +90,12 @@ The `theme` prop is **deprecated** and ignored since 4.0.0. It is kept only so e
 | `sidebarPanel`         | `{ title; content; modes? }`                                                                            | Host-owned panel shown in the side panel (desktop), side drawer (tablet) or a bottom drawer (mobile). |
 | `onDownload`, `isDownloading` | `() => void`, `boolean`                                                                          | Shows a Download button (in "More actions" on tablet and mobile). |
 | `onDecline`, `declineLabel` | `() => void \| Promise<void>`, `string`                                                            | Fill & Sign only. Shows "I can't sign this" with a confirm dialog. |
-| `saveLabel`            | `string`                                                                                                | Save button label. Default "Save". |
+| `saveLabel`            | `string`                                                                                                | Save button label. Default "Save" ("Save defaults" in defaults mode). |
 | `savedSignature`, `onSignatureAdopted` | `string`, `(dataUrl) => void`                                                           | Offer and capture a reusable signature (PNG data URL). The library never persists it. |
-| `initialFieldValues`   | `Record<string, string>`                                                                                | Values seeded once per document load, keyed by field name. |
+| `initialFieldValues`   | `Record<string, string \| boolean>`                                                                     | Values seeded once per document load, keyed by field name. A boolean ticks (true) or clears (false) a checkbox and is ignored for other fields. |
+| `defaultableFields`    | `string[]`                                                                                              | Defaults mode only: field names the person may fill. See [Defaults mode](#defaults-mode). |
+| `onDefaultsSave`       | `(values: PDFEditorDefaultsValues) => void \| Promise<void>`                                            | Defaults mode's "Save defaults". No PDF is produced. |
+| `rememberableFields`, `onRememberFieldValue` | `string[]`, `(fieldName, value: string \| boolean) => void \| Promise<void>`                     | Offer "Use on future documents" for these fields in Prepare and Fill & Sign. See [Use on future documents](#use-on-future-documents). |
 | `signatureFieldNames`  | `string[]`                                                                                              | Extra field names to treat as signature fields. |
 | `fieldLabels`          | `Record<string, string>`                                                                                | Friendly names, keyed by field name, wherever a field is named to a person. Wins over the PDF's own display name (AcroForm `/TU`), which wins over a humanized field name. |
 | `mobileFriendlyView`   | `boolean`                                                                                               | Default `false`. Offers a reflowed, readable "Mobile friendly" view below 1024px in Fill & Sign and View. See [Mobile friendly view](#mobile-friendly-view). |
@@ -188,6 +191,35 @@ Pure helpers, for hosts and servers that need the same rule:
 | `normalizeChoiceGroups`, `pruneChoiceGroups`, `choiceGroupForField`, `choiceGroupLabel`, `isChoiceValueChecked` | Validation, keeping groups in step with existing fields, lookup and naming. |
 
 `calculateParticipantCompletion` and `getParticipantCompletion` apply groups too: a group is one entry of `remainingRequiredFields` (under its first member's name), and `remainingChoiceGroups` lists the unanswered group ids (only for documents that have groups).
+
+## Defaults mode
+
+Defaults mode lets a person fill in the values a host keeps for later documents, on the document itself, without signing or producing a PDF. It is a standalone mode: pass it as the only allowed mode.
+
+```tsx
+<PDFEditor
+  src={blankFormBytes}
+  mode="defaults"
+  allowedModes={["defaults"]}
+  defaultableFields={["parking_spaces", "utilities_heat", "additional_terms"]}
+  initialFieldValues={{ utilities_heat: true }}
+  onDefaultsSave={async (values) => saveMyDefaults(values)}
+/>
+```
+
+- **Which fields.** Only fields named in `defaultableFields` can be filled. Every other field renders read-only with its value showing, like View mode, and is never reported. Signature fields are always read-only here and show no Sign prompt.
+- **Starting values.** The PDF's own field values, then `initialFieldValues` for fields the PDF leaves blank.
+- **Save defaults.** The header's primary button (label "Save defaults", or `saveLabel`) calls `onDefaultsSave(values)`. `values` (type `PDFEditorDefaultsValues = Record<string, string | boolean | null>`) has an entry for every defaultable field the document has: text, dropdown and radio fields give a trimmed string, or `null` when blank (cleared); checkboxes give `true` or `false`. Names the document doesn't have are left out. A returned promise keeps the "Saving" state until it settles; a rejection leaves the session unsaved. `ref.save()` and the unsaved-changes guard's "Save and close" do the same.
+- **No signing UI.** No Progress panel, no required cues or Save gate, no guided signing, no parties or assignment, no tour. Display names (`/TU`) label fields as in other modes, and the mobile friendly view works (Save reports straight away, with no review step).
+
+## Use on future documents
+
+With `rememberableFields` and `onRememberFieldValue`, a listed field that has a value (non-blank text, a chosen option, a ticked checkbox) offers "Use on future documents":
+
+- **Prepare:** in the selected field's toolbar, and in the field action bar on phones. The value is the field's current value in the document.
+- **Fill & Sign:** in a small toolbar beside the field while it has focus (in the original layout and in the mobile friendly view). Pressing it keeps focus in the field.
+
+Clicking it calls `onRememberFieldValue(fieldName, value)` with the field's name and its trimmed text, or `true` for a ticked checkbox. Once the callback settles, "Saved for future documents" shows in place of the field name for a moment; a rejection shows nothing (the host reports its own failure). The action is never offered for signature fields, another signer's field, a blank field, in View or defaults mode, or without both props. The editor stores nothing.
 
 ## Ref
 
