@@ -160,6 +160,42 @@
   `ref.formFields`. A document signed before this version has no record
   and still asks again. `PDFEditorMetadata.signedFields?`,
   `createEditorMetadata({ signedFields })`, `withSignedFieldsInTitle`.
+- **A stamped signature belongs to the signer who stamped it.** Each
+  `signedFields` entry is now a record, `{ field, participantId, at? }`
+  (`PDFEditorSignedField`): the active participant at the save that
+  stamped it (`""` with no `activeParticipantId`) and when. A record
+  counts as complete only for that participant, and only while they are
+  still assigned to the field. Before this, the record was the field name
+  alone, so a field signed by A and then reassigned to B (a host passing
+  different `fieldAssignments`) read as already signed for B: B's
+  completion said done and B could not sign it.
+  - Completion (`calculateParticipantCompletion`,
+    `getParticipantCompletion`): a stamp is complete for its signer while
+    assigned; with no participant, while its signer is still assigned. The
+    editor's internal stamped marker in `formFields` never counts by
+    itself.
+  - Fill & Sign, desktop and the mobile friendly view: a field the signer
+    at the keyboard is assigned to shows as signed (and is locked) only
+    when their own stamp stands. A field reassigned to them shows "Sign"
+    and they can sign it; their stamp then replaces the earlier record.
+    The Progress panel, guided Next, the Save gate and the field controls
+    all follow from the same rule. Another signer's stamped field still
+    shows as signed for everyone else.
+  - Prepare: a stamped signature is drawn into the page content (pdf-lib
+    `drawImage`), not an annotation, so it can't be removed. The
+    assignment of a field with a standing stamp is locked: the
+    Recipients panel says "Signed by {name}. A signed field can't be
+    reassigned." and its switches are disabled, and assignee changes to
+    that field are ignored whatever path makes them. A Prepare save
+    carries each record, with its signer, to the field's new name; a
+    duplicate of a signed field gets neither the record nor the lock.
+  - Legacy entries (bare names, written by 4.3.0 pre-releases) are read as
+    signed by the field's assignee in the document's own metadata when it
+    has exactly one, and dropped otherwise (the field asks again).
+  - New exports: `PDFEditorSignedField`, `normalizeSignedFields`,
+    `isSignatureRecordedFor`, `standingSignatureRecord`.
+    `withSignedFieldsInTitle(title, records)` takes records.
+    `PartiesPanelAssignMode` gains `lockedReason?`.
 
 ## 4.2.0
 

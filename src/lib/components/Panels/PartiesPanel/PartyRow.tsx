@@ -61,6 +61,8 @@ export interface PartyRowProps {
    * both come from the panel's `assignMode` prop.
    */
   assignChecked?: boolean;
+  /** Shows the assign switch but disables it (the field's assignment is locked). */
+  assignDisabled?: boolean;
   /** Presence renders the assign-mode switch on the name line's right edge. */
   onAssignToggle?: () => void;
   /**
@@ -95,6 +97,7 @@ export const PartyRow: React.FC<PartyRowProps> = ({
   onPointerDown,
   onKeyDown,
   assignChecked,
+  assignDisabled = false,
   onAssignToggle,
   assignAriaLabel,
 }) => {
@@ -168,6 +171,7 @@ export const PartyRow: React.FC<PartyRowProps> = ({
                 <Switch
                   size="sm"
                   checked={!!assignChecked}
+                  disabled={assignDisabled}
                   onToggle={onAssignToggle}
                   ariaLabel={assignAriaLabel ?? `Assign ${label}`}
                 />

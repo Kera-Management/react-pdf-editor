@@ -15,6 +15,12 @@ import {
   normalizeChoiceGroups,
   type PDFEditorChoiceGroup,
 } from "./utils/choiceGroups";
+import {
+  hostFieldValue,
+  isSignatureRecordedFor,
+  normalizeSignedFields,
+  type PDFEditorSignedField,
+} from "./utils/signatureValue";
 
 // Re-exported for backward compatibility: every existing consumer imports
 // these from "./participantCompletion". The implementations live in
@@ -33,6 +39,12 @@ export {
   pruneChoiceGroups,
 } from "./utils/choiceGroups";
 export type { PDFEditorChoiceGroup } from "./utils/choiceGroups";
+export {
+  isSignatureRecordedFor,
+  normalizeSignedFields,
+  standingSignatureRecord,
+} from "./utils/signatureValue";
+export type { PDFEditorSignedField } from "./utils/signatureValue";
 
 export type PDFEditorSource =
   | string
@@ -60,15 +72,20 @@ export interface PDFEditorMetadata {
   choiceGroups?: PDFEditorChoiceGroup[];
   /**
    * Signature fields whose adopted signature has been stamped into this
-   * document's page content by an editor save. A stamped signature is an
-   * IMAGE drawn on the page; the field's own AcroForm text value stays
-   * empty by design (see PDFEditor's save path), so without this record a
-   * signed field reads as unsigned the moment the saved bytes are reopened
-   * or checked with `getParticipantCompletion`. Additive and optional
-   * within v3, like `choiceGroups`: absent means nothing is recorded as
-   * stamped, and older readers ignore the key.
+   * document's page content by an editor save, each with WHO stamped it.
+   * A stamped signature is an IMAGE drawn on the page; the field's own
+   * AcroForm text value stays empty by design (see PDFEditor's save path),
+   * so without this record a signed field reads as unsigned the moment the
+   * saved bytes are reopened or checked with `getParticipantCompletion`.
+   *
+   * A record counts as complete only for the participant who signed, and
+   * only while they are still assigned to the field: a field reassigned to
+   * someone else reads as unsigned for them. Additive and optional within
+   * v3, like `choiceGroups`: absent means nothing is recorded as stamped,
+   * and older readers ignore the key. Bare names (written by 4.3.0
+   * pre-releases) are read as described in `normalizeSignedFields`.
    */
-  signedFields?: string[];
+  signedFields?: PDFEditorSignedField[];
 }
 
 export interface ParticipantCompletion {
@@ -163,18 +180,21 @@ export const createEditorMetadata = ({
   requiredFields: string[];
   signatureFields?: string[];
   choiceGroups?: PDFEditorChoiceGroup[];
-  signedFields?: string[];
+  /** Records; a bare name is read as `normalizeSignedFields` describes. */
+  signedFields?: Array<PDFEditorSignedField | string>;
 }): PDFEditorMetadata => {
   const groups = normalizeChoiceGroups(choiceGroups);
   const normalizedSignatureFields = normalizeSignatureFields(signatureFields);
+  const normalizedAssignments = normalizeFieldAssignments(fieldAssignments);
   // Only signature fields can be stamped; a name that is no longer one (a
   // field deleted or retyped in Prepare) drops out.
-  const signed = Array.from(
-    new Set(normalizeSignatureFields(signedFields))
-  ).filter((name) => normalizedSignatureFields.includes(name));
+  const signed = normalizeSignedFields(
+    signedFields,
+    normalizedAssignments
+  ).filter((record) => normalizedSignatureFields.includes(record.field));
   return {
     version: 3,
-    fieldAssignments: normalizeFieldAssignments(fieldAssignments),
+    fieldAssignments: normalizedAssignments,
     requiredFields: normalizeRequiredFields(requiredFields),
     signatureFields: normalizedSignatureFields,
     // Only written when there is something to say, so a document without
@@ -185,15 +205,16 @@ export const createEditorMetadata = ({
 };
 
 /**
- * Records `stampedFieldNames` as signed in an editor-metadata Title, keeping
- * every other key of the existing JSON exactly as it was (including keys
- * this version doesn't know). Returns `null` when `title` is not editor
- * metadata: a document the editor didn't prepare (a government form, a
- * host-labelled notice) keeps its own Title untouched.
+ * Records `stamped` signatures in an editor-metadata Title, keeping every
+ * other key of the existing JSON exactly as it was (including keys this
+ * version doesn't know). A new record for a field replaces any earlier one
+ * for it (the newest stamp is the one that stands). Returns `null` when
+ * `title` is not editor metadata: a document the editor didn't prepare (a
+ * government form, a host-labelled notice) keeps its own Title untouched.
  */
 export const withSignedFieldsInTitle = (
   title: string | undefined | null,
-  stampedFieldNames: Iterable<string>
+  stamped: Iterable<PDFEditorSignedField>
 ): string | null => {
   if (!title || !title.startsWith(METADATA_PREFIX)) return null;
   let parsed: Record<string, unknown>;
@@ -205,12 +226,18 @@ export const withSignedFieldsInTitle = (
     return null;
   }
   const signatureFields = normalizeSignatureFields(parsed.signatureFields);
-  const signed = new Set(normalizeSignatureFields(parsed.signedFields));
-  for (const name of stampedFieldNames) {
-    if (signatureFields.includes(name)) signed.add(name);
-  }
+  const additions = Array.from(stamped).filter((record) =>
+    signatureFields.includes(record.field)
+  );
+  const signed = normalizeSignedFields(
+    [
+      ...(Array.isArray(parsed.signedFields) ? parsed.signedFields : []),
+      ...additions,
+    ],
+    normalizeFieldAssignments(parsed.fieldAssignments)
+  ).filter((record) => signatureFields.includes(record.field));
   const next = { ...parsed };
-  if (signed.size > 0) next.signedFields = Array.from(signed);
+  if (signed.length > 0) next.signedFields = signed;
   else delete next.signedFields;
   return `${METADATA_PREFIX}${JSON.stringify(next)}`;
 };
@@ -277,14 +304,19 @@ export const parseEditorMetadataValue = (
       const signatureFields = normalizeSignatureFields(
         isObject ? parsed.signatureFields : []
       );
-      const signedFields = normalizeSignatureFields(
-        isObject ? parsed.signedFields : []
-      ).filter((name) => signatureFields.includes(name));
+      const fieldAssignments = normalizeFieldAssignments(
+        isObject ? parsed.fieldAssignments : {}
+      );
+      // Bare names (4.3.0 pre-releases) are credited against the
+      // document's OWN assignments, the ones in force when they were
+      // saved, never a host's later ones: see normalizeSignedFields.
+      const signedFields = normalizeSignedFields(
+        isObject ? parsed.signedFields : [],
+        fieldAssignments
+      ).filter((record) => signatureFields.includes(record.field));
       return {
         version: isObject && parsed.version === 2 ? 2 : 3,
-        fieldAssignments: normalizeFieldAssignments(
-          isObject ? parsed.fieldAssignments : {}
-        ),
+        fieldAssignments,
         requiredFields: normalizeRequiredFields(
           isObject ? parsed.requiredFields : []
         ),
@@ -533,14 +565,31 @@ export const calculateParticipantCompletion = ({
 
   const groups = normalizeChoiceGroups(metadata.choiceGroups);
   // A signature already stamped into the document is signed whatever
-  // `formFields` says: its AcroForm value is empty by design.
-  const stamped = new Set(metadata.signedFields ?? []);
+  // `formFields` says (its AcroForm value is empty by design), but only
+  // for the participant who stamped it, while they are still assigned to
+  // the field. A bare name from a hand-built metadata object is credited
+  // as normalizeSignedFields describes, against these assignments.
+  const signedFields = normalizeSignedFields(
+    metadata.signedFields,
+    metadata.fieldAssignments
+  );
   const isEntryComplete = (fieldName: string) => {
-    if (stamped.has(fieldName)) return true;
+    if (
+      isSignatureRecordedFor({
+        signedFields,
+        fieldAssignments: metadata.fieldAssignments,
+        fieldName,
+        participantId,
+      })
+    ) {
+      return true;
+    }
     const group = groups.length ? choiceGroupForField(groups, fieldName) : undefined;
+    // The editor's internal "stamped" marker never vouches for a field on
+    // its own: the record above is what says who signed.
     return group
       ? isChoiceGroupComplete(formFields, group)
-      : isFieldComplete(formFields[fieldName]);
+      : isFieldComplete(hostFieldValue(formFields[fieldName] ?? ""));
   };
   const completedRequiredFields = renderableFields.filter(isEntryComplete);
   const remainingRequiredFields = renderableFields.filter(

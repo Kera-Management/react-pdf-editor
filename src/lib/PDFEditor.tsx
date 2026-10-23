@@ -49,6 +49,9 @@ import {
   hostFieldValue,
   isSignatureValueSigned,
   STAMPED_SIGNATURE_VALUE,
+  stampedFieldNamesFor,
+  standingSignatureRecord,
+  type PDFEditorSignedField,
 } from "./utils/signatureValue";
 import {
   choiceGroupForField,
@@ -1496,29 +1499,16 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                         .map((rawField) => {
                           const displayName =
                             fieldDisplayNamesRef.current[rawField.name];
-                          // A signature an earlier save stamped into the
-                          // page content: its AcroForm value is empty by
-                          // design, so it would read as unsigned (and ask
-                          // to be signed again) on every reopen. Hold the
-                          // internal stamped marker as its loaded value.
-                          const stamped =
-                            rawField.type === "text" &&
-                            !rawField.value &&
-                            (
-                              extractedMetadata.current.signedFields ?? []
-                            ).includes(rawField.name);
-                          return rawField.type === "radiobutton" ||
-                            displayName ||
-                            stamped
+                          // (A signature an earlier save stamped is NOT
+                          // marked here: whether it counts depends on who
+                          // is signing now. See loadedFieldValue.)
+                          return rawField.type === "radiobutton" || displayName
                             ? {
                                 ...rawField,
                                 ...(rawField.type === "radiobutton"
                                   ? { type: "radio" as const }
                                   : {}),
                                 ...(displayName ? { displayName } : {}),
-                                ...(stamped
-                                  ? { value: STAMPED_SIGNATURE_VALUE }
-                                  : {}),
                               }
                             : rawField;
                         })
@@ -1723,6 +1713,37 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [fieldAssignmentsKey, participantsKey, pagesReady]);
+
+    // Signature fields an earlier save stamped into the page content that
+    // read as signed right now. A stamp is the signature of whoever made it
+    // (the metadata's signedFields records the signer), so this depends on
+    // who is at the keyboard: a field reassigned to the active signer since
+    // someone else stamped it reads as unsigned for them, and they can sign
+    // it. See stampedFieldNamesFor for the rule. View/Prepare have no
+    // signer: any stamp that still stands shows.
+    const stampedFieldNames = useMemo(
+      () =>
+        stampedFieldNamesFor({
+          signedFields: extractedMetadata.current.signedFields,
+          fieldAssignments: gatingInputs.effectiveAssignments,
+          viewerId: mode === "edit" ? activeParticipantId : undefined,
+        }),
+      // gatingInputs turns over on every document load (pagesReady).
+      [gatingInputs, mode, activeParticipantId]
+    );
+
+    // A field's value as loaded, before any edit this session. A stamped
+    // signature's AcroForm value is empty by design; one that counts (see
+    // stampedFieldNames) holds the internal stamped marker instead, so it
+    // shows as signed and can't be stamped twice. Hosts never see the
+    // marker (hostFieldValue), and completion math never trusts it alone.
+    const loadedFieldValue = (field: PDFFormRawField): string =>
+      field.value ||
+      (field.type === "text" && stampedFieldNames.has(field.name)
+        ? STAMPED_SIGNATURE_VALUE
+        : "") ||
+      field.defaultValue ||
+      "";
 
     // null: the active participant may fill this field (or gating doesn't
     // apply). Otherwise the field is gated, and the string is the text that
@@ -2708,7 +2729,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           if (field.name) {
             const value = fieldValues.getValue(
               field.id,
-              field.value || field.defaultValue || ""
+              loadedFieldValue(field)
             );
             const existing = formFields[field.name];
             const existingFilled =
@@ -2743,7 +2764,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         page.fields?.forEach((field) => {
           if (
             field.id === fieldId &&
-            fieldValues.getValue(field.id, field.value || "") ===
+            fieldValues.getValue(field.id, loadedFieldValue(field)) ===
               STAMPED_SIGNATURE_VALUE
           ) {
             stamped = true;
@@ -2786,7 +2807,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           if (!field.name) return;
           const current = fieldValues.getValue(
             field.id,
-            field.value || field.defaultValue || ""
+            loadedFieldValue(field)
           );
           if (fieldValues.isSeededValue(field.id, current)) {
             seeded.add(field.name);
@@ -3160,12 +3181,73 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       [setIsDirty]
     );
 
+    // Prepare: the build field that carries a loaded field's stamped
+    // signature is the one made from it on entering Prepare
+    // (`existing_{id}`). Duplicates copy `originalId` too, but they are new
+    // boxes with no ink under them; if the carrier is deleted, its record
+    // goes with it.
+    const signedCarrierFor = (
+      fields: BuildModeField[],
+      originalId: string
+    ): BuildModeField | undefined =>
+      fields.find(
+        (f) => f.id === `existing_${originalId}` && f.originalId === originalId
+      );
+
+    // Prepare: why `field`'s assignees can't change, or undefined when they
+    // can. A signature stamped by an earlier save is drawn INTO the page
+    // content (pdf-lib drawImage on the page, not an annotation or widget
+    // appearance), so it can't be lifted off again. Giving the field to
+    // someone else would hand them a box already carrying another person's
+    // signature, which they would then sign over, so the assignment stays
+    // locked while the signer's record stands. The lock follows the
+    // field's carrier through renames and type changes.
+    const signedAssignmentLock = (
+      field: BuildModeField,
+      fields: BuildModeField[]
+    ): string | undefined => {
+      if (!field.originalId) return undefined;
+      if (signedCarrierFor(fields, field.originalId)?.id !== field.id) {
+        return undefined;
+      }
+      let originalName: string | undefined;
+      pages?.forEach((p) =>
+        p.fields?.forEach((f) => {
+          if (f.id === field.originalId) originalName = f.name;
+        })
+      );
+      if (!originalName) return undefined;
+      const record = standingSignatureRecord(
+        extractedMetadata.current.signedFields,
+        extractedMetadata.current.fieldAssignments,
+        originalName
+      );
+      if (!record) return undefined;
+      const signer =
+        gatingInputs.labelById.get(normalizeParticipantId(record.participantId)) ||
+        "another signer";
+      return `Signed by ${signer}. A signed field can't be reassigned.`;
+    };
+    const signedAssignmentLockRef = useRef(signedAssignmentLock);
+    signedAssignmentLockRef.current = signedAssignmentLock;
+
     const updateBuildModeField = useCallback(
       (fieldId: string, updates: Partial<BuildModeField>) => {
         setBuildModeFields((prev) =>
           prev.map((field) => {
             if (field.id !== fieldId) return field;
             const next = { ...field, ...updates };
+            // A field signed in the document keeps its assignees, whatever
+            // path asked to change them (see signedAssignmentLock).
+            if (
+              next.properties.assignees !== field.properties.assignees &&
+              signedAssignmentLockRef.current(field, prev)
+            ) {
+              next.properties = {
+                ...next.properties,
+                assignees: field.properties.assignees,
+              };
+            }
             // A signature exists to be collected: giving it to someone
             // (an assignee it didn't have) makes it required. Taking one
             // away leaves Required as the person set it.
@@ -4081,8 +4163,23 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         // Fill & Sign: record what was just stamped in the document's own
         // editor metadata, keeping every other key as it was. A document
         // without editor metadata (a government form) keeps its Title.
-        if (mode !== "build" && stampedNow.size > 0) {
-          const title = withSignedFieldsInTitle(libDoc.getTitle(), stampedNow);
+        // Each record names the signer (the active participant; "" when the
+        // host gave none): a stamp only ever counts for the person who made
+        // it, never for whoever the field is assigned to later.
+        const stampedAt = new Date().toISOString();
+        const stampedRecords: PDFEditorSignedField[] = Array.from(
+          stampedNow,
+          (field) => ({
+            field,
+            participantId: activeParticipantId ?? "",
+            at: stampedAt,
+          })
+        );
+        if (mode !== "build" && stampedRecords.length > 0) {
+          const title = withSignedFieldsInTitle(
+            libDoc.getTitle(),
+            stampedRecords
+          );
           if (title) libDoc.setTitle(title);
         }
 
@@ -4151,14 +4248,35 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
 
           // Signatures stamped by earlier saves are still on the page (the
           // rebuild only replaces the fields over them): keep them signed,
-          // under their new names, alongside any stamped by this save.
-          // createEditorMetadata drops a name that is no longer a
-          // signature field.
-          const signedFields = [
-            ...(extractedMetadata.current.signedFields ?? []).map(
-              (name) => renames.get(name) ?? name
+          // under their new names and by the same signer, alongside any
+          // stamped by this save (which replace an earlier record for the
+          // same field). createEditorMetadata drops a name that is no
+          // longer a signature field. A signed field's assignees can't be
+          // changed here (see signedAssignmentLock), so its signer is still
+          // assigned to it.
+          // The record follows the field's CARRIER (signedCarrierFor), not
+          // `renames`: a duplicate copies `originalId` too, and must not
+          // walk off with the signature. A carrier deleted in Prepare drops
+          // its record.
+          const idByOriginalName = new Map<string, string>();
+          pages?.forEach((p) =>
+            p.fields?.forEach((f) => {
+              if (!idByOriginalName.has(f.name)) {
+                idByOriginalName.set(f.name, f.id);
+              }
+            })
+          );
+          const signedFields: PDFEditorSignedField[] = [
+            ...(extractedMetadata.current.signedFields ?? []).flatMap(
+              (record) => {
+                const originalId = idByOriginalName.get(record.field);
+                const carrier = originalId
+                  ? signedCarrierFor(buildModeFields, originalId)
+                  : undefined;
+                return carrier ? [{ ...record, field: carrier.name }] : [];
+              }
             ),
-            ...stampedNow,
+            ...stampedRecords,
           ];
 
           // Unknown top-level keys of the document's own metadata (a
@@ -4723,9 +4841,15 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     // this is its replacement home. Mobile keeps its own separate parties
     // sheet with no assign mode (see the mobile PartiesPanel call below),
     // since there's no field Popover on mobile to assign FROM.
+    const selectedAssignmentLock = selectedFieldData
+      ? signedAssignmentLock(selectedFieldData, buildModeFields)
+      : undefined;
     const assignModeForParties: PartiesPanelAssignMode | undefined =
       !isMobile && mode === "build" && selectedFieldData
         ? {
+            ...(selectedAssignmentLock
+              ? { lockedReason: selectedAssignmentLock }
+              : {}),
             fieldId: selectedFieldData.id,
             fieldLabel:
               labelForField(
@@ -4896,10 +5020,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
     const getFieldControlModel = (
       field: PDFFormRawField
     ): FieldControlModel => {
-      const value = fieldValues.getValue(
-        field.id,
-        field.value || field.defaultValue
-      );
+      const value = fieldValues.getValue(field.id, loadedFieldValue(field));
       const kind = widgetKind(field, effectiveSignatureFieldNames);
       // "" = gated with no explanation (a field assigned to no one).
       const gatedText = gatedLabelById.get(field.id);

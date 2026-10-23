@@ -544,70 +544,159 @@ describe("signedFields (signatures stamped into the document)", () => {
     requiredFields: ["sig", "date"],
     signatureFields: ["sig"],
   };
+  const BY_MANAGER = { field: "sig", participantId: "manager", at: "2027-06-01T12:00:00.000Z" };
 
-  it("is written only when non-empty, deduplicated, and only for signature fields", () => {
+  it("is written only when non-empty, one record per field, and only for signature fields", () => {
     const { createEditorMetadata } = participantCompletion;
     expect(createEditorMetadata(META)).not.toHaveProperty("signedFields");
     expect(
-      createEditorMetadata({ ...META, signedFields: ["sig", "sig", "date", "gone"] })
-        .signedFields
-    ).toEqual(["sig"]);
+      createEditorMetadata({
+        ...META,
+        signedFields: [
+          { field: "sig", participantId: "someone" },
+          BY_MANAGER,
+          { field: "date", participantId: "manager" },
+          { field: "gone", participantId: "manager" },
+        ],
+      }).signedFields
+    ).toEqual([BY_MANAGER]);
   });
 
   it("round-trips through serialize/parse and drops non-signature names on parse", () => {
     const { createEditorMetadata, serializeEditorMetadata, parseEditorMetadataValue } =
       participantCompletion;
     const title = serializeEditorMetadata(
-      createEditorMetadata({ ...META, signedFields: ["sig"] })
+      createEditorMetadata({ ...META, signedFields: [BY_MANAGER] })
     );
-    expect(parseEditorMetadataValue(title).signedFields).toEqual(["sig"]);
-    const forged = `REACT_PDF_EDITOR_METADATA:${JSON.stringify({ ...META, version: 3, signedFields: ["date"] })}`;
+    expect(parseEditorMetadataValue(title).signedFields).toEqual([BY_MANAGER]);
+    const forged = `REACT_PDF_EDITOR_METADATA:${JSON.stringify({
+      ...META,
+      version: 3,
+      signedFields: [{ field: "date", participantId: "manager" }, { field: "sig" }, 7],
+    })}`;
     expect(parseEditorMetadataValue(forged)).not.toHaveProperty("signedFields");
   });
 
-  it("withSignedFieldsInTitle adds names and keeps every other key verbatim", () => {
+  it("reads a legacy bare name as signed by the field's only assignee, and drops it otherwise", () => {
+    const { parseEditorMetadataValue } = participantCompletion;
+    const legacy = (fieldAssignments: Record<string, string[]>) =>
+      parseEditorMetadataValue(
+        `REACT_PDF_EDITOR_METADATA:${JSON.stringify({
+          ...META,
+          version: 3,
+          fieldAssignments,
+          signedFields: ["sig"],
+        })}`
+      ).signedFields;
+    expect(legacy({ sig: ["manager"] })).toEqual([{ field: "sig", participantId: "manager" }]);
+    expect(legacy({ sig: ["manager", "tenant"] })).toBeUndefined();
+    expect(legacy({})).toBeUndefined();
+  });
+
+  it("withSignedFieldsInTitle adds records, replaces a field's earlier one, keeps every other key", () => {
     const { withSignedFieldsInTitle } = participantCompletion;
     const title = `REACT_PDF_EDITOR_METADATA:${JSON.stringify({
       version: 3,
       ...META,
+      fieldAssignments: { ...META.fieldAssignments, other_sig: ["tenant"] },
+      signatureFields: ["sig", "other_sig"],
       futureKey: { kept: true },
-      signedFields: ["other_sig"],
-    }).replace('"signatureFields":["sig"]', '"signatureFields":["sig","other_sig"]')}`;
-    const next = withSignedFieldsInTitle(title, ["sig", "date"])!;
+      // A legacy bare name: credited to other_sig's only assignee.
+      signedFields: ["other_sig", { field: "sig", participantId: "old-signer" }],
+    })}`;
+    const next = withSignedFieldsInTitle(title, [
+      { field: "sig", participantId: "manager" },
+      { field: "date", participantId: "manager" },
+    ])!;
     const parsed = JSON.parse(next.slice("REACT_PDF_EDITOR_METADATA:".length));
     expect(parsed.futureKey).toEqual({ kept: true });
-    expect(parsed.signedFields).toEqual(["other_sig", "sig"]);
+    expect(parsed.signedFields).toEqual([
+      { field: "other_sig", participantId: "tenant" },
+      { field: "sig", participantId: "manager" },
+    ]);
     expect(parsed.requiredFields).toEqual(META.requiredFields);
   });
 
   it("withSignedFieldsInTitle leaves a non-editor Title alone", () => {
     const { withSignedFieldsInTitle } = participantCompletion;
-    expect(withSignedFieldsInTitle("Form N11", ["sig"])).toBeNull();
-    expect(withSignedFieldsInTitle(undefined, ["sig"])).toBeNull();
-    expect(withSignedFieldsInTitle("REACT_PDF_EDITOR_METADATA:{bad", ["sig"])).toBeNull();
+    const rec = [{ field: "sig", participantId: "manager" }];
+    expect(withSignedFieldsInTitle("Form N11", rec)).toBeNull();
+    expect(withSignedFieldsInTitle(undefined, rec)).toBeNull();
+    expect(withSignedFieldsInTitle("REACT_PDF_EDITOR_METADATA:{bad", rec)).toBeNull();
   });
 
-  it("calculateParticipantCompletion counts a stamped signature as complete with an empty value", () => {
+  it("counts a stamp as complete for its signer only, while they are still assigned", () => {
     const { calculateParticipantCompletion, createEditorMetadata } = participantCompletion;
+    const run = (
+      fieldAssignments: Record<string, string[]>,
+      participantId: string | undefined,
+      signedFields: Array<{ field: string; participantId: string } | string> = [BY_MANAGER]
+    ) =>
+      calculateParticipantCompletion({
+        // Assignments as a host may pass them, after the stamp was written.
+        metadata: {
+          ...createEditorMetadata({ ...META, signedFields }),
+          fieldAssignments,
+        },
+        formFields: { sig: "", date: "2027/06/01" },
+        participantId,
+      });
+
     const unsigned = calculateParticipantCompletion({
       metadata: createEditorMetadata(META),
       formFields: { sig: "", date: "2027/06/01" },
       participantId: "manager",
     });
     expect(unsigned.remainingRequiredFields).toEqual(["sig"]);
-    const stamped = calculateParticipantCompletion({
-      metadata: createEditorMetadata({ ...META, signedFields: ["sig"] }),
-      formFields: { sig: "", date: "2027/06/01" },
-      participantId: "manager",
-    });
-    expect(stamped.remainingRequiredFields).toEqual([]);
-    expect(stamped.isComplete).toBe(true);
+
+    // A signed, A still assigned: complete for A (ids match loosely).
+    expect(run(META.fieldAssignments, "manager").isComplete).toBe(true);
+    expect(run(META.fieldAssignments, " MANAGER ").isComplete).toBe(true);
+    // ...and for the document as a whole.
+    expect(run(META.fieldAssignments, undefined).remainingRequiredFields).toEqual([]);
+
+    // Reassigned to B: B's signature is outstanding; A's stamp is not theirs.
+    const reassigned = { sig: ["tenant"], date: ["manager"] };
+    expect(run(reassigned, "tenant").remainingRequiredFields).toEqual(["sig"]);
+    expect(run(reassigned, "tenant").isComplete).toBe(false);
+    // A no longer owns it: the whole document is not signed there either.
+    expect(run(reassigned, undefined).remainingRequiredFields).toEqual(["sig"]);
+
+    // Shared with B: still A's signature, never B's.
+    const shared = { sig: ["manager", "tenant"], date: ["manager"] };
+    expect(run(shared, "manager").isComplete).toBe(true);
+    expect(run(shared, "tenant").remainingRequiredFields).toEqual(["sig"]);
   });
 
-  it("getParticipantCompletion reads signedFields from the saved PDF", async () => {
+  it("never trusts the editor's internal stamped marker in formFields on its own", () => {
+    const { calculateParticipantCompletion, createEditorMetadata } = participantCompletion;
+    const completion = calculateParticipantCompletion({
+      metadata: createEditorMetadata(META),
+      formFields: { sig: "__react_pdf_editor_signature_stamped__", date: "2027/06/01" },
+      participantId: "manager",
+    });
+    expect(completion.remainingRequiredFields).toEqual(["sig"]);
+  });
+
+  it("a legacy bare name in hand-built metadata is credited to the current only assignee", () => {
+    const { calculateParticipantCompletion } = participantCompletion;
+    const run = (fieldAssignments: Record<string, string[]>, participantId: string) =>
+      calculateParticipantCompletion({
+        metadata: { version: 3, ...META, fieldAssignments, signedFields: ["sig"] as never },
+        formFields: { sig: "", date: "x" },
+        participantId,
+      }).remainingRequiredFields;
+    expect(run({ sig: ["manager"], date: ["manager"] }, "manager")).toEqual([]);
+    expect(run({ sig: ["manager", "tenant"], date: ["manager"] }, "manager")).toEqual(["sig"]);
+  });
+
+  it("getParticipantCompletion reads signedFields, and its signer, from the saved PDF", async () => {
     const { createEditorMetadata, serializeEditorMetadata, getParticipantCompletion } =
       participantCompletion;
-    const build = async (signedFields?: string[]) => {
+    const build = async (
+      signedFields?: Array<{ field: string; participantId: string } | string>,
+      fieldAssignments: Record<string, string[]> = META.fieldAssignments
+    ) => {
       const doc = await PDFDocument.create();
       const page = doc.addPage([600, 800]);
       const form = doc.getForm();
@@ -616,17 +705,36 @@ describe("signedFields (signatures stamped into the document)", () => {
       date.addToPage(page, { x: 300, y: 100, width: 100, height: 30 });
       date.setText("2027/06/01");
       doc.setTitle(
-        serializeEditorMetadata(createEditorMetadata({ ...META, signedFields }))
+        serializeEditorMetadata(
+          createEditorMetadata({ ...META, fieldAssignments, signedFields })
+        )
       );
       return doc.save();
     };
     const before = await getParticipantCompletion(clonePdfBytes(await build()), "manager");
     expect(before.remainingRequiredFields).toEqual(["sig"]);
     const after = await getParticipantCompletion(
-      clonePdfBytes(await build(["sig"])),
+      clonePdfBytes(await build([BY_MANAGER])),
       "manager"
     );
     expect(after.isComplete).toBe(true);
+
+    // Saved with the field reassigned to the tenant: the manager's stamp
+    // doesn't sign it for them.
+    const reassigned = await build([BY_MANAGER], { sig: ["tenant"], date: ["manager"] });
+    const tenant = await getParticipantCompletion(clonePdfBytes(reassigned), "tenant");
+    expect(tenant.remainingRequiredFields).toEqual(["sig"]);
+    expect(tenant.isComplete).toBe(false);
+
+    // Legacy bare names: one assignee -> theirs; two -> nobody's.
+    const legacyOne = await build(["sig"]);
+    expect((await getParticipantCompletion(clonePdfBytes(legacyOne), "manager")).isComplete).toBe(
+      true
+    );
+    const legacyTwo = await build(["sig"], { sig: ["manager", "tenant"], date: ["manager"] });
+    expect(
+      (await getParticipantCompletion(clonePdfBytes(legacyTwo), "manager")).remainingRequiredFields
+    ).toEqual(["sig"]);
   });
 });
 

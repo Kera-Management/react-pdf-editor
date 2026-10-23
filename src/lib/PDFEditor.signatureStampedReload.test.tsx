@@ -1,6 +1,6 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { PDFDocument, PDFName, PDFString } from "pdf-lib";
 import { renderWithChakra } from "./testUtils";
 
@@ -118,7 +118,12 @@ const DATE = "landlord_date";
  * upload): pdf-lib text fields, a /TU display name, v3 metadata naming the
  * signature in signatureFields and both fields required for the manager.
  */
-async function buildLeasePdf(): Promise<Uint8Array> {
+async function buildLeasePdf(
+  overrides: {
+    fieldAssignments?: Record<string, string[]>;
+    signedFields?: unknown[];
+  } = {}
+): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const page = doc.addPage([612, 792]);
   const form = doc.getForm();
@@ -127,14 +132,21 @@ async function buildLeasePdf(): Promise<Uint8Array> {
   sig.acroField.dict.set(PDFName.of("TU"), PDFString.of("Signature 1"));
   form.createTextField(DATE).addToPage(page, { x: 300, y: 100, width: 100, height: 24 });
   form.createTextField("tenant_sig").addToPage(page, { x: 50, y: 50, width: 200, height: 24 });
+  const metadata = createEditorMetadata({
+    fieldAssignments: overrides.fieldAssignments ?? {
+      [SIG]: [MANAGER],
+      [DATE]: [MANAGER],
+      tenant_sig: [TENANT],
+    },
+    requiredFields: [SIG, DATE, "tenant_sig"],
+    signatureFields: [SIG, "tenant_sig"],
+  });
+  // Written raw, so a test can store the legacy bare-name form.
   doc.setTitle(
-    serializeEditorMetadata(
-      createEditorMetadata({
-        fieldAssignments: { [SIG]: [MANAGER], [DATE]: [MANAGER], tenant_sig: [TENANT] },
-        requiredFields: [SIG, DATE, "tenant_sig"],
-        signatureFields: [SIG, "tenant_sig"],
-      })
-    )
+    serializeEditorMetadata({
+      ...metadata,
+      ...(overrides.signedFields ? { signedFields: overrides.signedFields as never } : {}),
+    })
   );
   return doc.save();
 }
@@ -142,7 +154,11 @@ async function buildLeasePdf(): Promise<Uint8Array> {
 const sigButton = (container: HTMLElement, name = SIG) =>
   container.querySelector<HTMLButtonElement>(`button[data-field-name="${name}"]`);
 
-async function mount(bytes: Uint8Array, mode: "edit" | "build" = "edit") {
+async function mount(
+  bytes: Uint8Array,
+  mode: "edit" | "build" = "edit",
+  props: Partial<React.ComponentProps<typeof PDFEditor>> = {}
+) {
   currentBytes = bytes;
   const ref = React.createRef<PDFEditorRef>();
   const onSave = vi.fn();
@@ -158,6 +174,7 @@ async function mount(bytes: Uint8Array, mode: "edit" | "build" = "edit") {
       savedSignature={TINY_PNG}
       onSave={onSave}
       onBuildSave={onBuildSave}
+      {...props}
     />
   );
   await waitFor(
@@ -201,7 +218,10 @@ describe("PDFEditor: a stamped signature stays signed after save", () => {
     // The field itself still holds no text: the signature is page content.
     const lib = await PDFDocument.load(saved);
     expect(lib.getForm().getTextField(SIG).getText() ?? "").toBe("");
-    expect((await extractEditorMetadata(saved)).signedFields).toEqual([SIG]);
+    // Recorded WITH its signer.
+    expect((await extractEditorMetadata(saved)).signedFields).toEqual([
+      { field: SIG, participantId: MANAGER, at: expect.any(String) },
+    ]);
 
     const completion = await getParticipantCompletion(Uint8Array.from(saved), MANAGER);
     expect(completion.remainingRequiredFields).toEqual([]);
@@ -232,7 +252,9 @@ describe("PDFEditor: a stamped signature stays signed after save", () => {
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(onSave.mock.calls[0][1][SIG]).toBe("");
     const resaved = onSave.mock.calls[0][0] as Uint8Array;
-    expect((await extractEditorMetadata(resaved)).signedFields).toEqual([SIG]);
+    expect((await extractEditorMetadata(resaved)).signedFields).toEqual([
+      { field: SIG, participantId: MANAGER, at: expect.any(String) },
+    ]);
     const completion = await getParticipantCompletion(Uint8Array.from(resaved), MANAGER);
     expect(completion.isComplete).toBe(true);
   }, 60000);
@@ -243,8 +265,138 @@ describe("PDFEditor: a stamped signature stays signed after save", () => {
     await save();
     await waitFor(() => expect(onBuildSave).toHaveBeenCalledTimes(1));
     const prepared = onBuildSave.mock.calls[0][0] as Uint8Array;
-    expect((await extractEditorMetadata(prepared)).signedFields).toEqual([SIG]);
+    expect((await extractEditorMetadata(prepared)).signedFields).toEqual([
+      { field: SIG, participantId: MANAGER, at: expect.any(String) },
+    ]);
     const completion = await getParticipantCompletion(Uint8Array.from(prepared), MANAGER);
     expect(completion.isComplete).toBe(true);
+  }, 60000);
+
+  it("a field reassigned to another signer reads as unsigned for them, and they can sign it", async () => {
+    const saved = await signDateAndSave(await buildLeasePdf());
+    // The host now hands Signature 1 to the tenant (outside the editor).
+    const reassigned = { [SIG]: [TENANT], [DATE]: [MANAGER], tenant_sig: [TENANT] };
+    const { container, onSave, save } = await mount(saved, "edit", {
+      activeParticipantId: TENANT,
+      fieldAssignments: reassigned,
+    });
+
+    const button = sigButton(container)!;
+    expect(button.dataset.complete).toBe("false");
+    expect(button.dataset.stamped).toBeUndefined();
+    expect(button.disabled).toBe(false);
+
+    fireEvent.click(button);
+    fireEvent.click(await screen.findByRole("button", { name: /use this signature/i }));
+    await waitFor(() => expect(sigButton(container)?.dataset.complete).toBe("true"));
+
+    await save();
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave.mock.calls[0][1][SIG]).toMatch(/^data:image\/png/);
+    // The tenant's stamp replaces the manager's record for the field.
+    const resaved = onSave.mock.calls[0][0] as Uint8Array;
+    expect((await extractEditorMetadata(resaved)).signedFields).toEqual([
+      { field: SIG, participantId: TENANT, at: expect.any(String) },
+    ]);
+  }, 60000);
+
+  it("the original signer, still assigned, still sees it signed after a host adds a co-signer", async () => {
+    const saved = await signDateAndSave(await buildLeasePdf());
+    const shared = { [SIG]: [MANAGER, TENANT], [DATE]: [MANAGER], tenant_sig: [TENANT] };
+    const asManager = await mount(saved, "edit", { fieldAssignments: shared });
+    expect(sigButton(asManager.container)?.dataset.stamped).toBe("true");
+    cleanup();
+    // The co-signer has not signed it: it is theirs to sign.
+    const asTenant = await mount(saved, "edit", {
+      activeParticipantId: TENANT,
+      fieldAssignments: shared,
+    });
+    expect(sigButton(asTenant.container)?.dataset.complete).toBe("false");
+    expect(sigButton(asTenant.container)?.dataset.stamped).toBeUndefined();
+  }, 60000);
+
+  it("another signer's stamped field shows as signed (and stays locked) for a viewer it isn't assigned to", async () => {
+    const saved = await signDateAndSave(await buildLeasePdf());
+    const { container } = await mount(saved, "edit", { activeParticipantId: TENANT });
+    const button = sigButton(container)!;
+    expect(button.dataset.stamped).toBe("true");
+    fireEvent.click(button);
+    expect(screen.queryByRole("button", { name: /use this signature/i })).toBeNull();
+  }, 60000);
+
+  it("legacy bare-name signedFields: signed only when the field has exactly one assignee", async () => {
+    const one = await buildLeasePdf({ signedFields: [SIG] });
+    const single = await mount(one);
+    expect(sigButton(single.container)?.dataset.stamped).toBe("true");
+    expect(
+      (await getParticipantCompletion(Uint8Array.from(one), MANAGER)).remainingRequiredFields
+    ).toEqual([DATE]);
+    cleanup();
+
+    const two = await buildLeasePdf({
+      signedFields: [SIG],
+      fieldAssignments: { [SIG]: [MANAGER, TENANT], [DATE]: [MANAGER], tenant_sig: [TENANT] },
+    });
+    const ambiguous = await mount(two);
+    expect(sigButton(ambiguous.container)?.dataset.complete).toBe("false");
+    expect(sigButton(ambiguous.container)?.dataset.stamped).toBeUndefined();
+    expect(
+      (await getParticipantCompletion(Uint8Array.from(two), MANAGER)).remainingRequiredFields
+    ).toEqual([SIG, DATE]);
+  }, 60000);
+
+  it("Prepare locks a signed field's assignment, and a save keeps it and the record", async () => {
+    const saved = await signDateAndSave(await buildLeasePdf());
+    const { onBuildSave, save } = await mount(saved, "build", {
+      parties: {
+        seedKey: "seed-1",
+        initial: {
+          roles: { [MANAGER]: "signer", [TENANT]: "signer" },
+          order: [MANAGER, TENANT],
+          groupedWithPrevious: {},
+        },
+        onSelectionChange: vi.fn(),
+      },
+    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: /^signature field: Signature 1/ })
+    );
+    await screen.findByText("Signed by Avery Admin. A signed field can't be reassigned.");
+    const tenantSwitch = screen.getByRole("switch", { name: /^Assign Sam Rivera to/ });
+    const managerSwitch = screen.getByRole("switch", { name: /^Assign Avery Admin to/ });
+    expect(tenantSwitch).toBeDisabled();
+    expect(managerSwitch).toBeDisabled();
+    expect(managerSwitch).toBeChecked();
+    expect(tenantSwitch).not.toBeChecked();
+    // Clicks change nothing (asserted on the saved assignments below: a
+    // disabled checkbox's DOM state under jsdom isn't React's).
+    fireEvent.click(tenantSwitch);
+    fireEvent.click(managerSwitch);
+
+    // A duplicate is a new, unsigned box: assignable, and no record.
+    fireEvent.click(
+      within(screen.getByRole("toolbar", { name: "Field actions" })).getByRole("button", {
+        name: /^duplicate$/i,
+      })
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("switch", { name: /^Assign Sam Rivera to Signature 1 copy/ })
+      ).not.toBeDisabled()
+    );
+
+    // An unsigned signature field stays freely assignable.
+    fireEvent.click(screen.getByRole("button", { name: /^signature field: tenant_sig/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: /^Assign Avery Admin to/ })).not.toBeDisabled()
+    );
+
+    await save();
+    await waitFor(() => expect(onBuildSave).toHaveBeenCalledTimes(1));
+    expect(onBuildSave.mock.calls[0][2][SIG]).toEqual([MANAGER]);
+    const prepared = onBuildSave.mock.calls[0][0] as Uint8Array;
+    expect((await extractEditorMetadata(prepared)).signedFields).toEqual([
+      { field: SIG, participantId: MANAGER, at: expect.any(String) },
+    ]);
   }, 60000);
 });

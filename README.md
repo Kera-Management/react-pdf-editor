@@ -265,6 +265,8 @@ const ref = useRef<PDFEditorRef>(null);
 
 A Prepare save rewrites the editor metadata in the PDF Title (`fieldAssignments`, `requiredFields`, `signatureFields`, `choiceGroups`, `signedFields`) and keeps any other top-level key a host put there verbatim; Fill & Sign saves leave them alone too.
 
+A signature adopted in Fill & Sign is stamped into the page content when the document is saved, and the save records it in the metadata's `signedFields` as `{ field, participantId, at }`. The `participantId` is whoever was the `activeParticipantId` at the time. A stamped field counts as signed only for that participant, and only while they are still assigned to it: if a host later gives the field to someone else, it shows "Sign" for the new assignee and is incomplete for them until they sign. In Prepare, the assignment of a field that has a standing stamp is locked ("Signed by {name}. A signed field can't be reassigned."), because the ink can't be lifted off the page.
+
 Assigning a signature field to someone in Prepare marks it required (it is saved in the metadata's `requiredFields`); unassigning leaves Required as it was, and the Required toggle still works either way.
 
 ### Sign as one participant
