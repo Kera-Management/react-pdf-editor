@@ -15,7 +15,6 @@ import {
 } from "@chakra-ui/react";
 import { PencilSimpleIcon, SignatureIcon } from "@phosphor-icons/react";
 import type { TextRun } from "../types";
-import { humanizeFieldName } from "../../utils/fieldLabels";
 import { useFieldControl, useMobileViewContext } from "./context";
 import {
   inputModeFor,
@@ -361,7 +360,7 @@ export const FieldControl: React.FC<FieldControlProps> = ({
   }
 
   let body: React.ReactNode;
-  if (control.gatedLabel) {
+  if (control.gated) {
     body = (
       <ReadOnlyValue
         control={control}
@@ -439,7 +438,7 @@ export const ChoiceRow: React.FC<ChoiceRowProps> = ({
   const name =
     labelText ||
     fallbackName ||
-    humanizeFieldName(control.name) ||
+    control.label ||
     "Field";
   return (
     <Stack gap="1" data-mf-field-slot={fieldId}>

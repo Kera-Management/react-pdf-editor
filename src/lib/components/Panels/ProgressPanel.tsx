@@ -18,7 +18,7 @@ import {
 } from "@phosphor-icons/react";
 import { PanelHeader } from "./PanelHeader";
 import { UserAvatar } from "./UserAvatar";
-import { humanizeFieldName } from "../../utils/fieldLabels";
+import { resolveFieldLabel } from "../../utils/fieldLabels";
 import { assigneesIncludeParticipant } from "../../utils/participantMatching";
 
 export interface ProgressPanelProps {
@@ -69,6 +69,12 @@ export interface ProgressPanelProps {
    * those instead of a best-effort guess.
    */
   fieldLabels?: Record<string, string>;
+  /**
+   * The PDF's own display names (AcroForm /TU), keyed by field NAME. Shown
+   * when `fieldLabels` has no entry, before falling back to
+   * `humanizeFieldName(name)`. PDFEditor fills this from the document.
+   */
+  fieldDisplayNames?: Record<string, string>;
 }
 
 export const ProgressPanel: React.FC<ProgressPanelProps> = ({
@@ -83,6 +89,7 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
   onFinish,
   renderedFieldNames,
   fieldLabels,
+  fieldDisplayNames,
 }) => {
   // Which remaining field guided navigation ("Start"/"Next") last sent the
   // signer to. Tracked by name, not list position -- the remaining list
@@ -304,7 +311,10 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
                     <CircleIcon weight={isActive ? "fill" : "regular"} />
                   </Icon>
                   <Text as="span" truncate>
-                    {fieldLabels?.[fieldName] ?? humanizeFieldName(fieldName)}
+                    {resolveFieldLabel(fieldName, {
+                      fieldLabels,
+                      displayName: fieldDisplayNames?.[fieldName],
+                    })}
                   </Text>
                 </Button>
               );

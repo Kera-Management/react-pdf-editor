@@ -116,6 +116,11 @@ import type {
   PDFEditorTours,
 } from "./tour/types";
 import { setCheckBoxValue } from "./utils/checkBoxValue";
+import { resolveFieldLabel } from "./utils/fieldLabels";
+import {
+  extractFieldDisplayNames,
+  writeFieldDisplayName,
+} from "./utils/fieldDisplayNames";
 import {
   documentPositions,
   guidedAnchor,
@@ -172,6 +177,9 @@ interface PDFFormRawField {
   /** Comb text field (one character per cell), from pdf.js. Read only by
    * the mobile friendly view's converter input. */
   comb?: boolean;
+  /** The field's display name (AcroForm /TU), trimmed, when the PDF sets
+   * one. Shown to people in place of `name`; `name` stays the field's ID. */
+  displayName?: string;
   // TBD: actions, combo, fillColor, rotation, strokeColor
 }
 
@@ -192,6 +200,12 @@ export interface BuildModeField {
   origin: "existing" | "new";
   // For existing fields, keep a reference to their original identifier
   originalId?: string;
+  /**
+   * Display name (AcroForm /TU) read from the PDF, shown to people in place
+   * of `name`. `name` stays the field's ID. Written back into /TU when a
+   * Prepare save rebuilds the field.
+   */
+  displayName?: string;
   properties: {
     placeholder?: string;
     required?: boolean;
@@ -495,13 +509,16 @@ export interface PDFEditorProps {
    */
   signatureFieldNames?: string[];
   /**
-   * Friendly-label overrides for the Progress panel's remaining-fields
-   * list, keyed by field NAME (as in `fieldAssignments`). When a field's
-   * name has an entry here, that string is shown instead of the library's
-   * best-effort `humanizeFieldName` guess (e.g. "tenant_full_name" ->
-   * "Tenant Full Name") -- useful when the host already has real labels
-   * (from its own form-builder metadata) and wants those shown verbatim.
-   * Omitting this prop leaves every existing consumer unchanged.
+   * Friendly-label overrides, keyed by field NAME (as in
+   * `fieldAssignments`). Wherever the editor names a field to a person (the
+   * Progress panel's remaining-fields list, field hover titles, the assign
+   * panel, the field toolbar, the mobile friendly view's fallback labels),
+   * an entry here wins. Without one, the PDF's own display name (AcroForm
+   * /TU) is shown, and only then the library's best-effort
+   * `humanizeFieldName` guess (e.g. "tenant_full_name" -> "Tenant Full
+   * Name"; Prepare mode shows the raw name). Display only: the field's name
+   * stays its ID everywhere else. Omitting this prop leaves every existing
+   * consumer unchanged.
    */
   fieldLabels?: Record<string, string>;
   /**
@@ -787,6 +804,23 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         requiredFields: [],
       })
     );
+
+    // Field display names (AcroForm /TU) by field NAME, read on every
+    // document load before pagesReady turns true, then copied onto each
+    // field record as `displayName`.
+    const fieldDisplayNamesRef = useRef<Record<string, string>>({});
+
+    // The name a PERSON sees for a field (resolveFieldLabel: host
+    // `fieldLabels` > the PDF's display name > `fallback`). Display only:
+    // the field's `name` stays its ID for assignments, values and saving.
+    const labelForField = (
+      name: string,
+      displayName?: string,
+      fallback?: (name: string) => string
+    ): string => resolveFieldLabel(name, { fieldLabels, displayName, fallback });
+    // Build mode has always shown the raw field name when nothing better
+    // exists; it keeps that fallback.
+    const rawName = (name: string) => name;
 
     // Single construction point for "which field names are signature
     // fields" outside build mode: the union of the host-declared
@@ -1137,9 +1171,13 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           setPdfDoc(doc);
 
           // Try to extract editor metadata from the PDF.
+          fieldDisplayNamesRef.current = {};
           try {
             const pdfBytes = await doc.getData();
             extractedMetadata.current = await extractEditorMetadata(pdfBytes);
+            // Never throws: a document it can't read has no display names.
+            fieldDisplayNamesRef.current =
+              await extractFieldDisplayNames(pdfBytes);
           } catch (error) {
             console.warn("Failed to extract editor metadata from PDF:", error);
           }
@@ -1205,12 +1243,21 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                             // while page proxy pageNumber index start from 1
                             rawField.page === proxy.pageNumber - 1
                         )
-                        // Normalize pdf.js's "radiobutton" → "radio".
-                        .map((rawField) =>
-                          rawField.type === "radiobutton"
-                            ? { ...rawField, type: "radio" as const }
-                            : rawField
-                        )
+                        // Normalize pdf.js's "radiobutton" → "radio", and
+                        // attach the field's display name (/TU), if any.
+                        .map((rawField) => {
+                          const displayName =
+                            fieldDisplayNamesRef.current[rawField.name];
+                          return rawField.type === "radiobutton" || displayName
+                            ? {
+                                ...rawField,
+                                ...(rawField.type === "radiobutton"
+                                  ? { type: "radio" as const }
+                                  : {}),
+                                ...(displayName ? { displayName } : {}),
+                              }
+                            : rawField;
+                        })
                     )
                   : [];
                 rawPages.push({ proxy, fields });
@@ -1311,6 +1358,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [fieldAssignmentsKey, participantsKey, pagesReady]);
 
+    // null: the active participant may fill this field (or gating doesn't
+    // apply). Otherwise the field is gated, and the string is the text that
+    // explains it: "Assigned to {name}" for another signer's field, or ""
+    // for a field assigned to no one (gated, but shown with no text).
     const getGatedLabel = (field: PDFFormRawField): string | null => {
       if (mode !== "edit" || !activeParticipantId) return null;
       // The HOST'S assignments win over the PDF's embedded metadata:
@@ -1343,24 +1394,22 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         : !hasAssignmentMapping; // unmapped: "not yours" once ANY mapping exists, unrestricted only when none does
       if (isAssigned) return null;
 
-      // Readonly-but-visible: tell the viewer WHY, rather than
-      // leaving a disabled field with no explanation. Resolved
-      // from the same full `participants` roster
-      // assignableParticipants/allParticipants derive from, so
-      // it names the assignee even if that party has since been
-      // excluded from the assignable list. A field with NO
-      // assignee entry at all gets its own distinct label --
-      // "assigned to someone else" and "assigned to no one in
-      // particular" are different anomalies, and conflating them
-      // as one generic message would hide which one this is.
-      const firstAssigneeId = assignedIds?.[0];
+      // A field assigned to no one is still locked, but carries no
+      // explanation: there is no one to name, and a generic "not
+      // assigned" note only added noise to every unmapped field.
+      if (!assignedIds) return "";
+
+      // Another signer's field: readonly-but-visible, so tell the viewer
+      // WHOSE it is rather than leaving a disabled field unexplained.
+      // Resolved from the same full `participants` roster
+      // assignableParticipants/allParticipants derive from, so it names
+      // the assignee even if that party has since been excluded from the
+      // assignable list.
+      const firstAssigneeId = assignedIds[0];
       const assigneeLabel = firstAssigneeId
         ? labelById.get(normalizeParticipantId(firstAssigneeId))
         : undefined;
-      const gatedLabel = assignedIds
-        ? `Assigned to ${assigneeLabel || "another signer"}`
-        : "Not assigned to a signer";
-      return gatedLabel;
+      return `Assigned to ${assigneeLabel || "another signer"}`;
     };
 
     // renderPages is memoised on [pages] (see its deps note), so it reads the
@@ -1389,16 +1438,42 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         const gating = gatingRef.current;
         const applies = gating.mode === "edit" && !!gating.activeParticipantId;
         const gatedLabel = applies ? gating.getGatedLabel(field) : null;
-        if (gatedLabel) {
+
+        // Put back a title/aria-label this loop overwrote: the overlay's
+        // own JSX `title` (the field's display label) or no attribute at
+        // all. The originals are stashed below when the label is written.
+        const restoreLabels = () => {
+          (
+            [
+              ["title", "pdfeTitle"],
+              ["aria-label", "pdfeAriaLabel"],
+            ] as const
+          ).forEach(([attr, key]) => {
+            if (!(key in el.dataset)) return;
+            const original = el.dataset[key];
+            delete el.dataset[key];
+            if (original) el.setAttribute(attr, original);
+            else el.removeAttribute(attr);
+          });
+        };
+
+        if (gatedLabel !== null) {
           // Marks what this loop changed, so it can undo exactly that.
           el.dataset.pdfeGated = "";
+          restoreLabels();
           if (gating.unassignedVisibility === "hidden") {
             el.style.display = "none";
           } else {
             el.style.display = "";
             el.setAttribute("disabled", "true");
-            el.setAttribute("title", gatedLabel);
-            el.setAttribute("aria-label", gatedLabel);
+            // Another signer's field says whose it is; a field assigned
+            // to no one is locked with no added text.
+            if (gatedLabel) {
+              el.dataset.pdfeTitle = el.getAttribute("title") ?? "";
+              el.dataset.pdfeAriaLabel = el.getAttribute("aria-label") ?? "";
+              el.setAttribute("title", gatedLabel);
+              el.setAttribute("aria-label", gatedLabel);
+            }
           }
         } else {
           // Only undo an element this loop gated: leave anything it never
@@ -1409,19 +1484,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
           // View mode overlays are disabled by their own JSX
           // (`disabled={mode === "view"}`); keep that.
           if (gating.mode !== "view") el.removeAttribute("disabled");
-          // Only clear a title/aria-label THIS gating loop added --
-          // never strips a combobox's own JSX-managed
-          // `title={field.name}`.
-          const isGatedLabel = (value: string | null) =>
-            !!value &&
-            (value.startsWith("Assigned to ") ||
-              value === "Not assigned to a signer");
-          if (isGatedLabel(el.getAttribute("title"))) {
-            el.removeAttribute("title");
-          }
-          if (isGatedLabel(el.getAttribute("aria-label"))) {
-            el.removeAttribute("aria-label");
-          }
+          restoreLabels();
         }
       },
       []
@@ -1675,7 +1738,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       pages.forEach((page) => {
         page.fields?.forEach((field) => {
           const label = getGatedLabel(field);
-          if (label) labels.set(field.id, label);
+          // "" (gated, no text) is kept: the field is still locked.
+          if (label !== null) labels.set(field.id, label);
         });
       });
       return labels;
@@ -1826,7 +1890,8 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
               page.fields,
               page.proxy.view,
               signatureNames,
-              extras
+              extras,
+              fieldLabels
             );
             sourcePages.push(await extractPage(page.proxy, index, widgets));
             if (!isCurrent()) return;
@@ -2546,13 +2611,17 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             origin: "existing",
             type: mappedType,
             name: field.name,
+            ...(field.displayName ? { displayName: field.displayName } : {}),
             x,
             y: yTopLeft,
             width,
             height,
             page: page.proxy.pageNumber - 1,
             properties: {
-              placeholder: field.type === "text" ? field.name : undefined,
+              placeholder:
+                field.type === "text"
+                  ? field.displayName || field.name
+                  : undefined,
               required: isRequired,
               defaultValue:
                 typeof field.value === "string"
@@ -2966,12 +3035,21 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       (fieldId: string) => {
         const field = buildModeFields.find((f) => f.id === fieldId);
         if (field) {
+          const name = generateDuplicateFieldName(field.name, buildModeFields);
           const newField: BuildModeField = {
             ...field,
             id: generateFieldId(),
             x: field.x + 20,
             y: field.y + 20,
-            name: generateDuplicateFieldName(field.name, buildModeFields),
+            name,
+            // The copy's display name gets the same suffix as its name
+            // (" copy", " copy 2", ...), so the two stay told apart.
+            ...(field.displayName
+              ? {
+                  displayName:
+                    field.displayName + name.slice(field.name.length),
+                }
+              : {}),
           };
           setBuildModeFields((prev) => [...prev, newField]);
           setSelectedField(newField.id);
@@ -2999,6 +3077,9 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
             id: generateFieldId(),
             page: pageIndex,
             name: `${field.name} (page ${pageIndex + 1})`,
+            ...(field.displayName
+              ? { displayName: `${field.displayName} (page ${pageIndex + 1})` }
+              : {}),
           });
         }
         if (newFields.length === 0) return;
@@ -3377,6 +3458,14 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                   });
                   break;
                 }
+              }
+              // The rebuilt field keeps its display name (/TU): flatten()
+              // dropped the original field along with its dictionary.
+              if (buildField.displayName) {
+                writeFieldDisplayName(
+                  form.getField(buildField.name),
+                  buildField.displayName
+                );
               }
             } catch (error) {
               console.warn(`Failed to add field ${buildField.name}:`, error);
@@ -4045,7 +4134,11 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         ? {
             fieldId: selectedFieldData.id,
             fieldLabel:
-              selectedFieldData.name || fieldTypeLabels[selectedFieldData.type],
+              labelForField(
+                selectedFieldData.name,
+                selectedFieldData.displayName,
+                rawName
+              ) || fieldTypeLabels[selectedFieldData.type],
             assignedIds: selectedFieldData.properties.assignees ?? [],
             onToggle: (participantId, checked) => {
               const current = selectedFieldData.properties.assignees || [];
@@ -4196,11 +4289,14 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         field.value || field.defaultValue
       );
       const kind = widgetKind(field, effectiveSignatureFieldNames);
-      const gatedLabel = gatedLabelById.get(field.id) ?? null;
+      // "" = gated with no explanation (a field assigned to no one).
+      const gatedText = gatedLabelById.get(field.id);
+      const gated = gatedText !== undefined;
       const isSignature = kind === "signature";
       return {
         id: field.id,
         name: field.name,
+        label: labelForField(field.name, field.displayName),
         kind,
         value,
         checked:
@@ -4254,9 +4350,10 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
         complete: isSignature
           ? !!value && value.startsWith("data:image")
           : isFieldValueComplete(value),
-        readOnly: mode === "view" || !!gatedLabel,
-        gatedLabel,
-        hidden: !!gatedLabel && unassignedVisibility === "hidden",
+        readOnly: mode === "view" || gated,
+        gated,
+        gatedLabel: gatedText || null,
+        hidden: gated && unassignedVisibility === "hidden",
       };
     };
 
@@ -4539,6 +4636,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
       onFinish: requestFinish,
       renderedFieldNames: getRenderedFieldNames(),
       fieldLabels,
+      fieldDisplayNames: fieldDisplayNamesRef.current,
     });
 
     const layout: EditorLayoutKind = isMobile
@@ -4922,11 +5020,14 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                             // shared model (spec §9.1); the mobile friendly
                             // view renders from the same one.
                             const control = getFieldControlModel(field);
+                            // Hover text: the field's display label, never
+                            // its raw ID (`name`/`data-field-name` keep that).
+                            const fieldTitle = control.label;
                             if (field.type === "combobox")
                               return (
                                 <select
                                   name={field.name}
-                                  title={field.name}
+                                  title={fieldTitle}
                                   key={field.id}
                                   data-field-id={field.id}
                                   data-complete={control.complete}
@@ -4983,6 +5084,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                   // so carry it as a data attribute.
                                   data-field-name={field.name}
                                   className={styles.signatureFieldButton}
+                                  title={fieldTitle}
                                   style={style}
                                   disabled={mode === "view"}
                                   onClick={() => {
@@ -5014,6 +5116,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                 <input
                                   type="checkbox"
                                   name={field.name}
+                                  title={fieldTitle}
                                   key={field.id}
                                   data-field-id={field.id}
                                   data-complete={control.complete}
@@ -5035,6 +5138,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                                 <input
                                   type="radio"
                                   name={field.name}
+                                  title={fieldTitle}
                                   key={field.id}
                                   data-field-id={field.id}
                                   data-complete={control.complete}
@@ -5059,6 +5163,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                               return (
                                 <textarea
                                   name={field.name}
+                                  title={fieldTitle}
                                   key={field.id}
                                   data-field-id={field.id}
                                   data-complete={control.complete}
@@ -5080,6 +5185,7 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                               <input
                                 type="text"
                                 name={field.name}
+                                title={fieldTitle}
                                 key={field.id}
                                 data-field-id={field.id}
                                 data-complete={control.complete}
@@ -5108,6 +5214,11 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                               <BuildModeFieldRenderer
                                 key={field.id}
                                 field={field}
+                                label={labelForField(
+                                  field.name,
+                                  field.displayName,
+                                  rawName
+                                )}
                                 scale={zoomLevels[zoomLevel]}
                                 isSelected={selectedField === field.id}
                                 isMultiSelected={
@@ -5212,7 +5323,11 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
                 context={
                   selectedFieldData
                     ? {
-                        fieldName: selectedFieldData.name,
+                        fieldName: labelForField(
+                          selectedFieldData.name,
+                          selectedFieldData.displayName,
+                          rawName
+                        ),
                         fieldType: selectedFieldData.type,
                       }
                     : undefined
@@ -5365,7 +5480,11 @@ export const PDFEditor = forwardRef<PDFEditorRef, PDFEditorProps>(
               fieldActions={
                 mode === "build" && selectedFieldData
                   ? {
-                      fieldName: selectedFieldData.name,
+                      fieldName: labelForField(
+                          selectedFieldData.name,
+                          selectedFieldData.displayName,
+                          rawName
+                        ),
                       fieldType: selectedFieldData.type,
                       isRequired: !!selectedFieldData.properties.required,
                       onToggleRequired: () =>

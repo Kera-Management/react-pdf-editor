@@ -503,7 +503,9 @@ describe("B6: visible 'Assigned to' chip on gated fields", () => {
     );
     await waitFor(() => expect(chip(container)).toBeNull());
     expect(input).not.toBeDisabled();
-    expect(input).not.toHaveAttribute("title");
+    // The gating label is gone; the field's own label title is back.
+    expect(input).toHaveAttribute("title", "Tenant Name");
+    expect(input).not.toHaveAttribute("aria-label");
   });
 
   it("undoes the gating when it stops applying (participant cleared, or View mode)", async () => {
@@ -529,7 +531,7 @@ describe("B6: visible 'Assigned to' chip on gated fields", () => {
     // The host clears the active participant: nothing is gated any more.
     rerender(<PDFEditor {...props} mode="edit" />);
     await waitFor(() => expect(input).not.toBeDisabled());
-    expect(input).not.toHaveAttribute("title");
+    expect(input).toHaveAttribute("title", "Tenant Name");
     expect(input).not.toHaveAttribute("aria-label", "Assigned to Jane Smith");
 
     // Gate again, then leave for View: View keeps its own read-only state.
@@ -538,7 +540,10 @@ describe("B6: visible 'Assigned to' chip on gated fields", () => {
     // `mode` seeds internal state; switching happens in the header menu.
     fireEvent.click(screen.getByRole("button", { name: /fill & sign/i }));
     fireEvent.click(await screen.findByRole("menuitemradio", { name: /view/i }));
-    await waitFor(() => expect(input).not.toHaveAttribute("title"));
+    await waitFor(() =>
+      expect(input).toHaveAttribute("title", "Tenant Name")
+    );
+    expect(input).not.toHaveAttribute("aria-label");
     expect(input).toBeDisabled();
   });
 
@@ -556,7 +561,7 @@ describe("B6: visible 'Assigned to' chip on gated fields", () => {
     );
   });
 
-  it("says 'Not assigned to a signer' for an unmapped field", async () => {
+  it("locks an unmapped field with no chip and no gating text", async () => {
     const { container } = renderWithChakra(
       <PDFEditor
         src="fake://doc.pdf"
@@ -565,9 +570,15 @@ describe("B6: visible 'Assigned to' chip on gated fields", () => {
         fieldAssignments={{ other_field: ["p1"] }}
       />
     );
-    await waitFor(() =>
-      expect(chip(container)).toHaveTextContent("Not assigned to a signer")
-    );
+    await waitForCanvas(container);
+    const input = container.querySelector(
+      'input[data-field-id="field_1"]'
+    ) as HTMLInputElement;
+    await waitFor(() => expect(input).toBeDisabled());
+    expect(chip(container)).toBeNull();
+    expect(input).toHaveAttribute("title", "Tenant Name");
+    expect(input).not.toHaveAttribute("aria-label");
+    expect(container.textContent).not.toMatch(/not assigned/i);
   });
 
   it("shows no chip for the signer's own field, or when gated fields are hidden", async () => {

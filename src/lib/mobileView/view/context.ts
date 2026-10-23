@@ -45,6 +45,8 @@ const controlKey = (control: FieldControlModel | null): string =>
         control.required,
         control.complete,
         control.readOnly,
+        control.label,
+        control.gated,
         control.gatedLabel ?? "",
         control.hidden,
       ].join("\u0000")

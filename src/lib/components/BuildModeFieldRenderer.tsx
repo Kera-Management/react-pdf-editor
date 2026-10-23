@@ -13,6 +13,12 @@ interface FieldParticipant {
 
 interface BuildModeFieldRendererProps {
   field: BuildModeField;
+  /**
+   * The name shown to people for this field (host `fieldLabels`, else the
+   * PDF's display name, else the raw name). Defaults to `field.name`.
+   * Display only: `field.name` stays the field's ID.
+   */
+  label?: string;
   scale: number;
   /**
    * The PRIMARY selected field: shows resize handles (single selection
@@ -69,6 +75,7 @@ type ResizeHandle = "topLeft" | "topRight" | "bottomLeft" | "bottomRight";
 
 export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
   field,
+  label: labelProp,
   scale,
   isSelected,
   isMultiSelected = false,
@@ -81,6 +88,7 @@ export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
   participants,
   allParticipants,
 }) => {
+  const label = labelProp || field.name;
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const longPressTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -472,7 +480,7 @@ export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
           <div className={styles.fieldPreview}>
             <input
               type="text"
-              value={field.properties.placeholder || field.name}
+              value={field.properties.placeholder || label}
               style={baseInputStyle}
               readOnly
             />
@@ -482,7 +490,7 @@ export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
         return (
           <div className={styles.fieldPreview}>
             <textarea
-              value={field.properties.placeholder || field.name}
+              value={field.properties.placeholder || label}
               style={{ ...baseInputStyle, resize: "none" }}
               readOnly
             />
@@ -507,7 +515,7 @@ export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
           <div className={styles.fieldPreview} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px" }}>
             <input type="radio" readOnly />
             <span className={styles.radioLabel} style={{ fontSize: scaledFontSize }}>
-              {field.name}
+              {label}
             </span>
           </div>
         );
@@ -525,7 +533,7 @@ export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
           <div className={styles.fieldPreview}>
             <input
               type="text"
-              value={field.name}
+              value={label}
               style={baseInputStyle}
               readOnly
             />
@@ -602,7 +610,7 @@ export const BuildModeFieldRenderer: React.FC<BuildModeFieldRendererProps> = ({
       onFocus={() => onSelect(field.id)}
       tabIndex={0}
       role="button"
-      aria-label={`${field.type} field: ${field.name}${
+      aria-label={`${field.type} field: ${label}${
         field.properties.required ? ", required" : ""
       }${isInvalid ? ", no options" : ""}`}
       aria-selected={showSelection}

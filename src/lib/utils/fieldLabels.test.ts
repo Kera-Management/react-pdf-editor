@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { humanizeFieldName } from "./fieldLabels";
+import { humanizeFieldName, resolveFieldLabel } from "./fieldLabels";
 
 describe("humanizeFieldName", () => {
   it("humanizes snake_case", () => {
@@ -40,5 +40,44 @@ describe("humanizeFieldName", () => {
     expect(humanizeFieldName("form1[0].subform[0].tenant_full_name[0]")).toBe(
       "Tenant Full Name"
     );
+  });
+});
+
+describe("resolveFieldLabel", () => {
+  it("prefers the host's fieldLabels entry over everything", () => {
+    expect(
+      resolveFieldLabel("landlord_name", {
+        fieldLabels: { landlord_name: "Your landlord" },
+        displayName: "Landlord's legal name",
+      })
+    ).toBe("Your landlord");
+  });
+
+  it("uses the PDF's display name (/TU) when the host has no entry", () => {
+    expect(
+      resolveFieldLabel("landlord_name", {
+        fieldLabels: { other: "Other" },
+        displayName: "Landlord's legal name",
+      })
+    ).toBe("Landlord's legal name");
+  });
+
+  it("falls back to humanizeFieldName, or the site's own fallback", () => {
+    expect(resolveFieldLabel("landlord_name")).toBe("Landlord Name");
+    expect(
+      resolveFieldLabel("landlord_name", { fallback: (name) => name })
+    ).toBe("landlord_name");
+  });
+
+  it("skips blank overrides and display names", () => {
+    expect(
+      resolveFieldLabel("landlord_name", {
+        fieldLabels: { landlord_name: "  " },
+        displayName: " ",
+      })
+    ).toBe("Landlord Name");
+    expect(
+      resolveFieldLabel("landlord_name", { displayName: "  Trimmed  " })
+    ).toBe("Trimmed");
   });
 });

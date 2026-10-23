@@ -7,6 +7,7 @@ import { MobileFriendlyView } from "../MobileFriendlyView";
 import type { MobileBlock, MobileDocument, MobileFieldKind } from "../types";
 import type { FieldControlModel } from "./fieldControlModel";
 import { Runs } from "./Runs";
+import { humanizeFieldName } from "../../utils/fieldLabels";
 import { makeSampleDocument, run } from "./__fixtures__/sampleDocument";
 
 interface FakeField {
@@ -15,6 +16,10 @@ interface FakeField {
   exportValue?: string;
   required?: boolean;
   gatedLabel?: string;
+  /** Gated with no text (assigned to no one). */
+  gated?: boolean;
+  /** Resolved display label; defaults to the humanized name. */
+  label?: string;
   hidden?: boolean;
   options?: { exportValue: string; displayValue: string }[];
 }
@@ -84,6 +89,7 @@ function Harness({
     return {
       id,
       name: field.name,
+      label: field.label ?? humanizeFieldName(field.name),
       kind: field.kind,
       value,
       checked:
@@ -102,7 +108,8 @@ function Harness({
       exportValue: field.exportValue,
       required: !!field.required,
       complete: !!value && value !== "Off",
-      readOnly: mode === "view" || !!field.gatedLabel,
+      readOnly: mode === "view" || !!field.gatedLabel || !!field.gated,
+      gated: !!field.gatedLabel || !!field.gated,
       gatedLabel: field.gatedLabel ?? null,
       hidden: !!field.hidden,
     };
@@ -302,6 +309,49 @@ describe("MobileFriendlyView fields", () => {
 });
 
 describe("MobileFriendlyView gating and view mode", () => {
+  it("locks a field assigned to no one without any explanatory text", () => {
+    const { container } = renderWithChakra(
+      <Harness fieldOverrides={{ f_phone: { gated: true } }} />
+    );
+    expect(control(container, "f_phone")?.tagName).not.toBe("INPUT");
+    expect(screen.getByText("Not filled yet")).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/assigned/i);
+  });
+
+  it("names unlabelled choices by the field's display label, never its ID", () => {
+    const doc = makeSampleDocument();
+    doc.blocks = doc.blocks.map((block) => {
+      if (block.type === "choice" && block.fieldId === "f_park") {
+        return { ...block, label: [] };
+      }
+      if (block.type === "radioGroup") {
+        return {
+          ...block,
+          label: null,
+          options: block.options.map((o) => ({ ...o, label: [] })),
+        };
+      }
+      return block;
+    });
+    renderWithChakra(
+      <Harness
+        document={doc}
+        fieldOverrides={{
+          f_park: { label: "Parking spot included" },
+          f_heat_l: { label: "Who pays for heat" },
+          f_heat_t: { label: "Who pays for heat" },
+        }}
+      />
+    );
+    expect(
+      screen.getByRole("checkbox", { name: "Parking spot included" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("radio", { name: "Who pays for heat: Landlord" })
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /parking$/i })).toBeNull();
+  });
+
   it("shows another signer's field read-only with its assignee", () => {
     const { container } = renderWithChakra(
       <Harness

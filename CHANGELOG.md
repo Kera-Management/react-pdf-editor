@@ -1,5 +1,41 @@
 # Changelog
 
+## 4.3.0
+
+### Added
+
+- **Field display names (AcroForm `/TU`).** A PDF field can carry a short
+  human label in its standard alternate name, `/TU` (e.g. "Landlord's
+  legal name"), while its ID (`/T`, the full name) never changes. The
+  editor reads `/TU` for every field when a document loads and shows it,
+  never the raw ID, wherever a field is named to a person: the Progress
+  panel's remaining fields, the hover title of every Fill & Sign/View
+  overlay (text, multiline, select, checkbox, radio, signature), the
+  Prepare assign banner ('Who fills "..."?') and its switches, the field
+  toolbar and mobile field action bar, the Prepare field previews and
+  their accessible names, and the mobile friendly view's fallback labels
+  (a field the page has no text for, a choice with no label, a radio
+  group's legend). One rule everywhere: a host `fieldLabels` entry, then
+  `/TU`, then the previous fallback (`humanizeFieldName`, or the raw name
+  in Prepare). The ID still drives assignments, values, saving and the
+  `name` / `data-field-name` attributes. PDFs without `/TU` look as
+  before, except that Fill & Sign overlays now always carry a hover title
+  (the humanized name).
+- `/TU` survives saving. Fill & Sign saves edit the loaded form in place,
+  so every field keeps its `/TU`; a Prepare save rebuilds each field and
+  writes its display name back. A duplicated field's display name gets the
+  same suffix as its name (" copy", " (page 3)").
+- `BuildModeField.displayName?`; `ProgressPanel`: `fieldDisplayNames?`
+  prop; `fieldLabels` now applies beyond the Progress panel.
+
+### Changed
+
+- **No "Not assigned to a signer" text.** A field assigned to no one (once
+  any assignment exists) is still locked in Fill & Sign, read-only or
+  hidden per `unassignedVisibility`, but gets no title, aria-label, chip or
+  mobile note. Another signer's field still says "Assigned to {name}".
+  When gating lifts, the overlay's own hover title comes back.
+
 ## 4.2.0
 
 ### Fixed
