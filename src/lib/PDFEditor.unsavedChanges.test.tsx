@@ -502,6 +502,11 @@ describe("PDFEditor Prepare -> View unsaved-fields guard", () => {
     const addText = await waitFor(() =>
       getByRole("button", { name: /add text field/i })
     );
+    // The palette mounts before the PDF's existing fields finish loading.
+    // Count after that load so its field isn't mistaken for the one we add.
+    await waitFor(() =>
+      expect(idsOf(container, "data-build-field-id")).toContain("existing_field_1")
+    );
     const before = idsOf(container, "data-build-field-id").length;
     fireEvent.click(addText);
     // The new field is on the page in Prepare.
