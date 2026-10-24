@@ -143,7 +143,8 @@ const RadioGroup: React.FC<{ block: RadioGroupBlock }> = ({ block }) => {
     ? block.label.kind === "source"
       ? runsToText(block.label.runs)
       : block.label.text.text
-    : humanizeFieldName(block.groupName);
+    : // The group's display label (host label, else /TU, else humanized).
+      (controls.find(Boolean)?.label ?? humanizeFieldName(block.groupName));
   return (
     <chakra.fieldset border="0" m="0" p="0" minW={0}>
       {block.label && (

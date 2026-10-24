@@ -15,7 +15,6 @@ import {
 } from "@chakra-ui/react";
 import { PencilSimpleIcon, SignatureIcon } from "@phosphor-icons/react";
 import type { TextRun } from "../types";
-import { humanizeFieldName } from "../../utils/fieldLabels";
 import { useFieldControl, useMobileViewContext } from "./context";
 import {
   inputModeFor,
@@ -24,6 +23,7 @@ import {
   type FieldControlModel,
 } from "./fieldControlModel";
 import { Runs } from "./Runs";
+import { STAMPED_SIGNATURE_VALUE } from "../../utils/signatureValue";
 
 /** Spec S7: at least 16px (no iOS focus zoom) and 44px tall. */
 const CONTROL_FONT_SIZE = "16px";
@@ -70,7 +70,10 @@ const ReadOnlyValue: React.FC<{
 }> = ({ control, labelText, emptyText, note }) => {
   let display: React.ReactNode = control.value;
   if (control.kind === "signature") {
-    display = isSignedValue(control.value) ? (
+    display =
+      control.value === STAMPED_SIGNATURE_VALUE ? (
+        "Signed"
+      ) : isSignedValue(control.value) ? (
       <SignatureSwatch
         src={control.value}
         alt={labelText ? `Signature: ${labelText}` : "Signature"}
@@ -161,6 +164,16 @@ const EditableControl: React.FC<ControlProps> = ({
     "aria-required": isRequiredHere(control) || undefined,
   };
   const onFocus = () => onFieldFocus(control.id);
+
+  if (control.kind === "signature" && control.value === STAMPED_SIGNATURE_VALUE) {
+    // Signed by an earlier save: the signature is part of the page now and
+    // can't be replaced (a second stamp would land on top of it).
+    return (
+      <Text {...dataAttributes(control)} {...a11y} aria-labelledby={undefined}>
+        Signed
+      </Text>
+    );
+  }
 
   if (control.kind === "signature") {
     const signed = isSignedValue(control.value);
@@ -361,7 +374,7 @@ export const FieldControl: React.FC<FieldControlProps> = ({
   }
 
   let body: React.ReactNode;
-  if (control.gatedLabel) {
+  if (control.gated) {
     body = (
       <ReadOnlyValue
         control={control}
@@ -372,7 +385,12 @@ export const FieldControl: React.FC<FieldControlProps> = ({
     );
   } else if (mode === "view" || control.readOnly) {
     body = (
-      <ReadOnlyValue control={control} labelText={labelText} emptyText="Blank" />
+      <ReadOnlyValue
+        control={control}
+        labelText={labelText}
+        emptyText="Blank"
+        note={control.note}
+      />
     );
   } else {
     body = (
@@ -439,10 +457,31 @@ export const ChoiceRow: React.FC<ChoiceRowProps> = ({
   const name =
     labelText ||
     fallbackName ||
-    humanizeFieldName(control.name) ||
+    control.label ||
     "Field";
+  // A choice group's name and help, once, above its first member. Its
+  // required mark lives here too: the members are not required one by one.
+  const group = control.choiceGroup?.first ? control.choiceGroup : undefined;
   return (
     <Stack gap="1" data-mf-field-slot={fieldId}>
+      {group && (
+        <Stack gap="0.5" data-mf-choice-group={group.id}>
+          <Text
+            fontSize="14px"
+            lineHeight="20px"
+            fontWeight="medium"
+            color="fg.muted"
+          >
+            {group.label}
+            {group.required && !control.gated && <RequiredMark />}
+          </Text>
+          {group.help && (
+            <Text fontSize="14px" lineHeight="20px" color="fg.muted">
+              {group.help}
+            </Text>
+          )}
+        </Stack>
+      )}
       <Flex
         as="label"
         align="center"
@@ -477,9 +516,9 @@ export const ChoiceRow: React.FC<ChoiceRowProps> = ({
         </Box>
       </Flex>
       {hint && hint.length > 0 && <Box ps="8">{hintNode}</Box>}
-      {control.gatedLabel && (
+      {(control.gatedLabel || control.note) && (
         <Text fontSize="14px" lineHeight="20px" color="fg.muted" ps="8">
-          {control.gatedLabel}
+          {control.gatedLabel || control.note}
         </Text>
       )}
     </Stack>

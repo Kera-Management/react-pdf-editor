@@ -32,6 +32,14 @@ const MODE_SUMMARIES: Record<PDFEditorMode, ReactNode> = {
       <strong>{modeLabels.view}</strong> is read-only.
     </>
   ),
+  // Never offered alongside the others (the tour's mode list leaves it
+  // out); here so every mode has a line.
+  defaults: (
+    <>
+      <strong>{modeLabels.defaults}</strong> keeps values for future
+      documents.
+    </>
+  ),
 };
 
 const COUNT_WORDS = ["", "One", "Two", "Three"];

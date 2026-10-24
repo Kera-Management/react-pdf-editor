@@ -18,8 +18,14 @@ import {
 } from "@phosphor-icons/react";
 import { PanelHeader } from "./PanelHeader";
 import { UserAvatar } from "./UserAvatar";
-import { humanizeFieldName } from "../../utils/fieldLabels";
+import { resolveFieldLabel } from "../../utils/fieldLabels";
 import { assigneesIncludeParticipant } from "../../utils/participantMatching";
+import {
+  choiceGroupForField,
+  choiceGroupLabel,
+  isFieldOrChoiceGroupComplete,
+  type PDFEditorChoiceGroup,
+} from "../../utils/choiceGroups";
 
 export interface ProgressPanelProps {
   /** Active participant ID */
@@ -34,8 +40,19 @@ export interface ProgressPanelProps {
   totalFields: number;
   /** Number of completed fields */
   completedFields: number;
+  /**
+   * The active participant's REQUIRED work, as field names (PDFEditor
+   * passes `getRequiredAssignedFieldNames`: the set `totalFields` /
+   * `completedFields` count; a choice group is one entry). When given,
+   * "Remaining" lists only these, so it always agrees with the count and
+   * the finished state, and the participant's other assigned fields that
+   * are still empty are listed under "Optional" instead. Omitted: every
+   * assigned field is listed under "Remaining" (the behavior before this
+   * prop existed).
+   */
+  requiredFieldNames?: string[];
   /** Current mode */
-  mode: "build" | "edit" | "view";
+  mode: "build" | "edit" | "view" | "defaults";
   /** Callback when a field is focused */
   onFieldFocus?: (fieldName: string) => void;
   /**
@@ -69,6 +86,20 @@ export interface ProgressPanelProps {
    * those instead of a best-effort guess.
    */
   fieldLabels?: Record<string, string>;
+  /**
+   * The PDF's own display names (AcroForm /TU), keyed by field NAME. Shown
+   * when `fieldLabels` has no entry, before falling back to
+   * `humanizeFieldName(name)`. PDFEditor fills this from the document.
+   */
+  fieldDisplayNames?: Record<string, string>;
+  /**
+   * Choice groups (checkbox fields answering one question, e.g. yes/no).
+   * A group is listed ONCE, under its `label` (else its members' names
+   * joined with " / "), with its `help` below, and is remaining until
+   * exactly one member is checked. Clicking it goes to the member it is
+   * listed under. PDFEditor fills this from the document's metadata.
+   */
+  choiceGroups?: PDFEditorChoiceGroup[];
 }
 
 export const ProgressPanel: React.FC<ProgressPanelProps> = ({
@@ -78,11 +109,14 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
   formFields,
   totalFields,
   completedFields,
+  requiredFieldNames,
   mode,
   onFieldFocus,
   onFinish,
   renderedFieldNames,
   fieldLabels,
+  fieldDisplayNames,
+  choiceGroups,
 }) => {
   // Which remaining field guided navigation ("Start"/"Next") last sent the
   // signer to. Tracked by name, not list position -- the remaining list
@@ -157,12 +191,42 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
   // Get remaining (incomplete) fields, in document order (the order
   // fieldAssignments/formFields were built in) -- this is also the order
   // Start/Next walk through.
-  const remainingFields = React.useMemo(() => {
-    return renderableAssignedFields.filter((name) => {
-      const value = formFields[name];
-      return !value || value.trim() === "" || value === "Off";
+  // A choice group is one entry, under the first of its members in this
+  // order.
+  // Split into required ("Remaining", what the count measures) and the
+  // rest ("Optional") when the host says which are required.
+  const { remainingFields, optionalFields } = React.useMemo(() => {
+    const listedGroups = new Set<string>();
+    const incomplete = renderableAssignedFields.filter((name) => {
+      const group = choiceGroupForField(choiceGroups, name);
+      if (group) {
+        if (listedGroups.has(group.id)) return false;
+        listedGroups.add(group.id);
+      }
+      return !isFieldOrChoiceGroupComplete(name, formFields, choiceGroups);
     });
-  }, [renderableAssignedFields, formFields]);
+    if (!requiredFieldNames) {
+      return { remainingFields: incomplete, optionalFields: [] as string[] };
+    }
+    const required = new Set(requiredFieldNames);
+    // A choice group is required as a whole, whichever member names it.
+    const isRequired = (name: string) => {
+      const group = choiceGroupForField(choiceGroups, name);
+      return group
+        ? group.fields.some((member) => required.has(member))
+        : required.has(name);
+    };
+    return {
+      remainingFields: incomplete.filter(isRequired),
+      optionalFields: incomplete.filter((name) => !isRequired(name)),
+    };
+  }, [renderableAssignedFields, formFields, choiceGroups, requiredFieldNames]);
+
+  const labelFor = (fieldName: string) =>
+    resolveFieldLabel(fieldName, {
+      fieldLabels,
+      displayName: fieldDisplayNames?.[fieldName],
+    });
 
   // Check if all fields are complete
   const isComplete = completedFields === totalFields && totalFields > 0;
@@ -209,6 +273,54 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
           )
         : undefined;
     goToField(nextAfterCompleted ?? remainingFields[0]);
+  };
+
+  const renderFieldItem = (fieldName: string) => {
+    const isActive = fieldName === activeFieldName;
+    const group = choiceGroupForField(choiceGroups, fieldName);
+    const button = (
+      <Button
+        key={fieldName}
+        type="button"
+        size="sm"
+        variant={isActive ? "subtle" : "ghost"}
+        colorPalette="gray"
+        justifyContent="flex-start"
+        w="full"
+        fontWeight="normal"
+        aria-current={isActive ? "step" : undefined}
+        onClick={() => goToField(fieldName)}
+      >
+        <Icon
+          boxSize="4"
+          color={isActive ? "fg" : "fg.subtle"}
+          flexShrink={0}
+        >
+          <CircleIcon weight={isActive ? "fill" : "regular"} />
+        </Icon>
+        <Text as="span" truncate>
+          {group
+            ? choiceGroupLabel(group, labelFor)
+            : labelFor(fieldName)}
+        </Text>
+      </Button>
+    );
+    if (!group?.help) return button;
+    return (
+      <Stack key={fieldName} gap={0}>
+        {button}
+        <Text
+          fontSize="xs"
+          color="fg.muted"
+          ps={8}
+          pe={2}
+          pb={1}
+          data-choice-group-help={group.id}
+        >
+          {group.help}
+        </Text>
+      </Stack>
+    );
   };
 
   if (mode !== "edit") return null;
@@ -281,34 +393,7 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
         <Stack gap={2}>
           <PanelHeader title="Remaining" count={remainingFields.length} />
           <Stack gap={0.5}>
-            {remainingFields.map((fieldName) => {
-              const isActive = fieldName === activeFieldName;
-              return (
-                <Button
-                  key={fieldName}
-                  type="button"
-                  size="sm"
-                  variant={isActive ? "subtle" : "ghost"}
-                  colorPalette="gray"
-                  justifyContent="flex-start"
-                  w="full"
-                  fontWeight="normal"
-                  aria-current={isActive ? "step" : undefined}
-                  onClick={() => goToField(fieldName)}
-                >
-                  <Icon
-                    boxSize="4"
-                    color={isActive ? "fg" : "fg.subtle"}
-                    flexShrink={0}
-                  >
-                    <CircleIcon weight={isActive ? "fill" : "regular"} />
-                  </Icon>
-                  <Text as="span" truncate>
-                    {fieldLabels?.[fieldName] ?? humanizeFieldName(fieldName)}
-                  </Text>
-                </Button>
-              );
-            })}
+            {remainingFields.map(renderFieldItem)}
           </Stack>
         </Stack>
       )}
@@ -341,7 +426,11 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
           <Icon boxSize="8" color="fg.muted">
             <CheckCircleIcon />
           </Icon>
-          <Text fontWeight="medium">You've completed all your fields.</Text>
+          <Text fontWeight="medium">
+            {optionalFields.length > 0
+              ? "You've completed all your required fields."
+              : "You've completed all your fields."}
+          </Text>
           <Text color="fg.muted">Review your entries before submitting.</Text>
           {onFinish && (
             <Box w="full" pt={2}>
@@ -353,6 +442,17 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
               </Button>
             </Box>
           )}
+        </Stack>
+      )}
+
+      {/* The participant's own fields nothing requires (e.g. a date beside
+          a signature): listed after the finished state, apart from
+          "Remaining" (what the count and Finish wait for), so they never
+          read as missing. */}
+      {optionalFields.length > 0 && (
+        <Stack gap={2}>
+          <PanelHeader title="Optional" count={optionalFields.length} />
+          <Stack gap={0.5}>{optionalFields.map(renderFieldItem)}</Stack>
         </Stack>
       )}
     </Stack>

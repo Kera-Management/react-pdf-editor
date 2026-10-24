@@ -248,7 +248,10 @@ export const PartiesPanel: React.FC<PartiesPanelProps> = ({
     const checked = assignMode.assignedIds.includes(partyId);
     return {
       assignChecked: checked,
-      onAssignToggle: () => assignMode.onToggle(partyId, !checked),
+      assignDisabled: !!assignMode.lockedReason,
+      onAssignToggle: () => {
+        if (!assignMode.lockedReason) assignMode.onToggle(partyId, !checked);
+      },
       assignAriaLabel: `Assign ${labelFor(partyId)} to ${assignMode.fieldLabel}`,
     };
   };
@@ -260,7 +263,10 @@ export const PartiesPanel: React.FC<PartiesPanelProps> = ({
     }
     return {
       assignChecked: true,
-      onAssignToggle: () => assignMode.onToggle(partyId, false),
+      assignDisabled: !!assignMode.lockedReason,
+      onAssignToggle: () => {
+        if (!assignMode.lockedReason) assignMode.onToggle(partyId, false);
+      },
       assignAriaLabel: `Assign ${labelFor(partyId)} to ${assignMode.fieldLabel}`,
     };
   };
@@ -358,7 +364,8 @@ export const PartiesPanel: React.FC<PartiesPanelProps> = ({
           <Alert.Content>
             <Alert.Title>Who fills "{visibleAssign.fieldLabel}"?</Alert.Title>
             <Alert.Description>
-              Turn on each person who should complete this field.
+              {visibleAssign.lockedReason ??
+                "Turn on each person who should complete this field."}
             </Alert.Description>
           </Alert.Content>
           <CloseButton

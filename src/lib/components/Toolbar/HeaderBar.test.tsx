@@ -615,3 +615,30 @@ describe("HeaderBar: Show tour (guided tour spec §3.3)", () => {
     }
   );
 });
+
+describe("HeaderBar: defaults on its own", () => {
+  it.each(["desktop", "mobile"] as const)(
+    "shows a Defaults label instead of the mode menu (%s)",
+    (layout) => {
+      renderHeader({ layout, mode: "defaults", allowedModes: ["defaults"] });
+      expect(screen.getByText("Defaults")).toHaveAttribute(
+        "data-pdfe-mode-label",
+        "defaults"
+      );
+      expect(screen.queryByRole("button", { name: /Defaults/ })).toBeNull();
+    }
+  );
+
+  it("shows no label when there is a menu or another single mode", () => {
+    const { unmount } = renderHeader({
+      layout: "desktop",
+      mode: "defaults",
+      allowedModes: ["defaults", "edit"],
+    });
+    expect(document.querySelector("[data-pdfe-mode-label]")).toBeNull();
+    expect(screen.getByRole("button", { name: /Defaults/ })).toBeInTheDocument();
+    unmount();
+    renderHeader({ layout: "desktop", mode: "edit", allowedModes: ["edit"] });
+    expect(document.querySelector("[data-pdfe-mode-label]")).toBeNull();
+  });
+});

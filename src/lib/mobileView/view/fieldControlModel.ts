@@ -10,8 +10,11 @@ import type { MobileFieldKind, SourceOption } from "../types";
 export interface FieldControlModel {
   /** The editor's field id (the `fieldValues` key). */
   id: string;
-  /** AcroForm field name. Radio options share it. */
+  /** AcroForm field name (the field's ID). Radio options share it. */
   name: string;
+  /** The name shown to people: host `fieldLabels`, else the PDF's display
+   * name (/TU), else the humanized `name`. Display only. */
+  label: string;
   kind: MobileFieldKind;
   /** Current value: typed text, the checkbox/radio export value or "Off",
    * the selected option's export value, or a signature data URL. */
@@ -34,18 +37,38 @@ export interface FieldControlModel {
   /** Checkbox/radio "on" value: names an option that has no label text. */
   exportValue?: string;
   /** Required by the template. Gated fields (another signer's) are not
-   * required of the active participant: views check `gatedLabel` too. */
+   * required of the active participant: views check `gated` too. */
   required: boolean;
   /** Same rule as progress: non-empty and not the "Off" sentinel; a
    * signature is complete once it holds an image. */
   complete: boolean;
-  /** View mode or gated (another signer's field). */
+  /** View mode, defaults mode's locked fields, or gated. */
   readOnly: boolean;
-  /** "Assigned to {name}" when the active participant may not fill it. */
+  /** Defaults mode: the host's note on a locked field (`fieldNotes`),
+   * shown as helper text. Null or absent otherwise. */
+  note?: string | null;
+  /** The active participant may not fill it: another signer's field, or
+   * (once any assignment exists) a field assigned to no one. */
+  gated: boolean;
+  /** "Assigned to {name}" for another signer's field; null otherwise
+   * (including a gated field assigned to no one, which shows no text). */
   gatedLabel: string | null;
   /** Gated with `unassignedVisibility="hidden"`: render no control at all
    * (the surrounding document text still shows). */
   hidden: boolean;
+  /**
+   * Set when the field is a member of a choice group (one question answered
+   * by several checkboxes, e.g. yes/no). `label` is the group's name for a
+   * person, `required` whether one answer is required, and `first` marks the
+   * member the group's label and help are shown with (once per group).
+   */
+  choiceGroup?: {
+    id: string;
+    label: string;
+    help?: string;
+    required: boolean;
+    first: boolean;
+  };
 }
 
 /** Looks a field up by id. Null for an id the editor doesn't know. */
@@ -55,9 +78,11 @@ export type GetFieldControl = (fieldId: string) => FieldControlModel | null;
  * whatever the template says: progress and the guided bar leave it out,
  * and so does the original layout. */
 export const isRequiredHere = (control: FieldControlModel | null): boolean =>
-  !!control && control.required && !control.gatedLabel;
+  !!control && control.required && !control.gated;
 
-/** A signature value is a PNG data URL once adopted. */
+/** A signature value is a PNG data URL once adopted (the image a swatch
+ * can show). A signature stamped by an earlier save is signed too, but has
+ * no image here: see STAMPED_SIGNATURE_VALUE. */
 export const isSignedValue = (value: string): boolean =>
   !!value && value.startsWith("data:image");
 

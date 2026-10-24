@@ -484,3 +484,91 @@ describe("ProgressPanel Chakra redesign (spec §3.4, copy #10-13)", () => {
     expect(container).toBeEmptyDOMElement();
   });
 });
+
+describe("ProgressPanel requiredFieldNames (Remaining vs Optional)", () => {
+  const section = (title: string) =>
+    screen.queryByRole("heading", { name: title })?.parentElement?.parentElement
+      ?.parentElement ?? null;
+  const items = (title: string) =>
+    Array.from(section(title)?.querySelectorAll("button") ?? []).map(
+      (b) => b.textContent
+    );
+
+  it("lists only the required fields as Remaining and the rest as Optional", () => {
+    const onFieldFocus = vi.fn();
+    render(
+      <ProgressPanel
+        {...baseProps}
+        formFields={{}}
+        totalFields={1}
+        completedFields={0}
+        requiredFieldNames={["signature_field"]}
+        onFieldFocus={onFieldFocus}
+      />
+    );
+    expect(items("Remaining")).toEqual(["Signature Field"]);
+    expect(items("Optional")).toEqual(["Tenant Full Name", "Move In Date"]);
+    // Start walks the required work.
+    fireEvent.click(screen.getByRole("button", { name: /start/i }));
+    expect(onFieldFocus).toHaveBeenCalledWith("signature_field");
+  });
+
+  it("never says complete while listing Remaining work", () => {
+    render(
+      <ProgressPanel
+        {...baseProps}
+        formFields={{ signature_field: "data:image/png;base64,x" }}
+        totalFields={1}
+        completedFields={1}
+        requiredFieldNames={["signature_field"]}
+        onFinish={vi.fn()}
+      />
+    );
+    expect(section("Remaining")).toBeNull();
+    expect(
+      screen.getByText("You've completed all your required fields.")
+    ).toBeInTheDocument();
+    expect(items("Optional")).toEqual(["Tenant Full Name", "Move In Date"]);
+  });
+
+  it("counts a choice group as required whichever member names it", () => {
+    render(
+      <ProgressPanel
+        {...baseProps}
+        fieldAssignments={{
+          email_yes: ["signer-1"],
+          email_no: ["signer-1"],
+          move_in_date: ["signer-1"],
+        }}
+        formFields={{ email_yes: "Off", email_no: "Off" }}
+        totalFields={1}
+        completedFields={0}
+        // getRequiredAssignedFieldNames may name the group by any member.
+        requiredFieldNames={["email_no"]}
+        choiceGroups={[
+          {
+            id: "notices_by_email",
+            fields: ["email_yes", "email_no"],
+            required: true,
+            label: "Notices by email",
+          },
+        ]}
+      />
+    );
+    expect(items("Remaining")).toEqual(["Notices by email"]);
+    expect(items("Optional")).toEqual(["Move In Date"]);
+  });
+
+  it("without requiredFieldNames, every assigned field stays Remaining", () => {
+    render(
+      <ProgressPanel
+        {...baseProps}
+        formFields={{}}
+        totalFields={3}
+        completedFields={0}
+      />
+    );
+    expect(items("Remaining")).toHaveLength(3);
+    expect(section("Optional")).toBeNull();
+  });
+});

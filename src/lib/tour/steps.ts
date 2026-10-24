@@ -12,6 +12,7 @@ export const TOUR_FOR_MODE: Record<PDFEditorMode, EditorTourId | null> = {
   build: "pdf_prepare",
   edit: "pdf_sign",
   view: null,
+  defaults: null,
 };
 
 /** The `tours` prop key that says a tour is still unseen. */

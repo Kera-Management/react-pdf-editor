@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, PDFHexString, PDFName } from "pdf-lib";
 import { renderWithChakra } from "./testUtils";
 import type { PDFEditorProps } from "./PDFEditor";
 import PDFEditor from "./PDFEditor";
@@ -244,6 +244,48 @@ async function mountReflow(props: Partial<PDFEditorProps> = {}) {
 const toggle = () => screen.getByRole("radiogroup", { name: "Document view" });
 const segment = (name: "Mobile friendly" | "Original") =>
   within(toggle()).getByRole("radio", { name });
+
+describe("field display names (/TU) in the mobile friendly view", () => {
+  it("labels widgets by fieldLabels, then /TU, then pdf.js's annotation tooltip", async () => {
+    const doc = await PDFDocument.load(sourceBytes);
+    const form = doc.getForm();
+    form
+      .getField("tenant_name")
+      .acroField.dict.set(PDFName.of("TU"), PDFHexString.fromText("Tenant's legal name"));
+    form
+      .getField("heat")
+      .acroField.dict.set(PDFName.of("TU"), PDFHexString.fromText("Who pays for heat"));
+    form
+      .getField("parking")
+      .acroField.dict.set(PDFName.of("TU"), PDFHexString.fromText("Parking (from /TU)"));
+    const bytes = await doc.save();
+    (fakeDocRef.current as { getData: () => Promise<Uint8Array> }).getData = vi.fn(
+      async () => bytes
+    );
+
+    const { container } = await mountReflow({
+      fieldLabels: { parking: "Parking spot", phone: "Best phone number" },
+    });
+    const widgets = extractPageMock.mock.calls[0][2] as { id: string; name: string; tooltip?: string }[];
+    const tooltip = (id: string) => widgets.find((w) => w.id === id)?.tooltip;
+    // /TU, read by the editor, on every widget of the field.
+    expect(tooltip("f_name")).toBe("Tenant's legal name");
+    expect(tooltip("f_name2")).toBe("Tenant's legal name");
+    expect(tooltip("f_heat_l")).toBe("Who pays for heat");
+    // The host's label beats both /TU and pdf.js's annotation tooltip.
+    expect(tooltip("f_park")).toBe("Parking spot");
+    expect(tooltip("f_phone")).toBe("Best phone number");
+    // No label of any kind: no tooltip (the converter humanizes the ID).
+    expect(tooltip("f_prov")).toBeUndefined();
+    // The ID itself is untouched.
+    expect(widgets.find((w) => w.id === "f_name")?.name).toBe("tenant_name");
+    // The original overlay carries the same label as its hover title.
+    expect(originalControl(container, "f_name")?.getAttribute("title")).toBe(
+      "Tenant's legal name"
+    );
+    expect(originalControl(container, "f_name")?.getAttribute("name")).toBe("tenant_name");
+  });
+});
 
 describe("opt-in, layouts and modes (S4, S5)", () => {
   it("adds nothing and converts nothing without the prop", async () => {
@@ -1016,5 +1058,36 @@ describe("guided sign tour on a phone (guided tour spec §3.2)", () => {
     expect(
       screen.getByRole("region", { name: "Review the original document" })
     ).toBeInTheDocument();
+  });
+});
+
+describe("defaults mode", () => {
+  it("fills only defaultable fields, with no guided bar or progress, and reports values", async () => {
+    const user = userEvent.setup();
+    const onDefaultsSave = vi.fn();
+    const onSave = vi.fn();
+    const { container } = await mountReflow({
+      mode: "defaults",
+      allowedModes: ["defaults"],
+      defaultableFields: ["phone", "parking"],
+      onDefaultsSave,
+      onSave,
+    });
+    // Defaultable: editable. Everything else (a required name, the
+    // signature): read-only, with no guided signing and no progress.
+    expect(reflowControl(container, "f_phone")?.tagName).toBe("INPUT");
+    expect(reflowControl(container, "f_name")?.tagName).not.toBe("INPUT");
+    expect(reflowControl(container, "f_sig")?.tagName).not.toBe("BUTTON");
+    expect(screen.queryByRole("region", { name: "Guided signing" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /progress/i })).toBeNull();
+
+    await user.type(reflowControl(container, "f_phone")!, " 4165550100 ");
+    await user.click(reflowControl(container, "f_park")!);
+    // No review step: Save defaults reports straight away.
+    await user.click(screen.getByRole("button", { name: /^Save defaults/ }));
+    await waitFor(() =>
+      expect(onDefaultsSave).toHaveBeenCalledWith({ phone: "4165550100", parking: true })
+    );
+    expect(onSave).not.toHaveBeenCalled();
   });
 });

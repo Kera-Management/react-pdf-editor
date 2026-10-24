@@ -32,6 +32,14 @@ export interface UseFieldValuesResult {
    * AcroForm as defaults would forge content this signer never wrote.
    */
   isSeededValue: (fieldId: string, currentValue: string) => boolean;
+  /**
+   * Overwrite the values of the ids in `entries`, live edits included
+   * (host-driven: a locked field following the host's value, or a host
+   * reset). With `asSeed` the new values count as untouched seeds (see
+   * isSeededValue); without it they count as session values. Ids not in
+   * `entries` are untouched.
+   */
+  assign: (entries: FieldValueMap, asSeed: boolean) => void;
   /** Clear all values, e.g. when a new document loads. */
   reset: () => void;
 }
@@ -94,6 +102,19 @@ export function useFieldValues(): UseFieldValuesResult {
     });
   }, []);
 
+  const assign = useCallback((entries: FieldValueMap, asSeed: boolean) => {
+    for (const [id, value] of Object.entries(entries)) {
+      if (asSeed) seededRef.current[id] = value;
+      else delete seededRef.current[id];
+    }
+    setValues((prev) => {
+      const changed = Object.entries(entries).some(
+        ([id, value]) => prev[id] !== value
+      );
+      return changed ? { ...prev, ...entries } : prev;
+    });
+  }, []);
+
   const reset = useCallback(() => {
     seededRef.current = {};
     setValues({});
@@ -113,6 +134,7 @@ export function useFieldValues(): UseFieldValuesResult {
     setValueForIds,
     seed,
     isSeededValue,
+    assign,
     reset,
   };
 }

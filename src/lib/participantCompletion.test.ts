@@ -532,3 +532,241 @@ describe("getRequiredAssignedFieldNames: unmapped fields under a non-empty mappi
     });
   });
 });
+
+// A drawn signature is stamped into the page as an image and its AcroForm
+// text value stays empty by design, so `signedFields` is the only record a
+// saved document carries that the field is signed. Without it, every
+// signed signature read as unsigned on reopen and in host checks
+// (Ontario Standard Lease: "Add lease" kept saying Signature 1 was missing).
+describe("signedFields (signatures stamped into the document)", () => {
+  const META = {
+    fieldAssignments: { sig: ["manager"], date: ["manager"] },
+    requiredFields: ["sig", "date"],
+    signatureFields: ["sig"],
+  };
+  const BY_MANAGER = { field: "sig", participantId: "manager", at: "2027-06-01T12:00:00.000Z" };
+
+  it("is written only when non-empty, one record per field, and only for signature fields", () => {
+    const { createEditorMetadata } = participantCompletion;
+    expect(createEditorMetadata(META)).not.toHaveProperty("signedFields");
+    expect(
+      createEditorMetadata({
+        ...META,
+        signedFields: [
+          { field: "sig", participantId: "someone" },
+          BY_MANAGER,
+          { field: "date", participantId: "manager" },
+          { field: "gone", participantId: "manager" },
+        ],
+      }).signedFields
+    ).toEqual([BY_MANAGER]);
+  });
+
+  it("round-trips through serialize/parse and drops non-signature names on parse", () => {
+    const { createEditorMetadata, serializeEditorMetadata, parseEditorMetadataValue } =
+      participantCompletion;
+    const title = serializeEditorMetadata(
+      createEditorMetadata({ ...META, signedFields: [BY_MANAGER] })
+    );
+    expect(parseEditorMetadataValue(title).signedFields).toEqual([BY_MANAGER]);
+    const forged = `REACT_PDF_EDITOR_METADATA:${JSON.stringify({
+      ...META,
+      version: 3,
+      signedFields: [{ field: "date", participantId: "manager" }, { field: "sig" }, 7],
+    })}`;
+    expect(parseEditorMetadataValue(forged)).not.toHaveProperty("signedFields");
+  });
+
+  it("reads a legacy bare name as signed by the field's only assignee, and drops it otherwise", () => {
+    const { parseEditorMetadataValue } = participantCompletion;
+    const legacy = (fieldAssignments: Record<string, string[]>) =>
+      parseEditorMetadataValue(
+        `REACT_PDF_EDITOR_METADATA:${JSON.stringify({
+          ...META,
+          version: 3,
+          fieldAssignments,
+          signedFields: ["sig"],
+        })}`
+      ).signedFields;
+    expect(legacy({ sig: ["manager"] })).toEqual([{ field: "sig", participantId: "manager" }]);
+    expect(legacy({ sig: ["manager", "tenant"] })).toBeUndefined();
+    expect(legacy({})).toBeUndefined();
+  });
+
+  it("withSignedFieldsInTitle adds records, replaces a field's earlier one, keeps every other key", () => {
+    const { withSignedFieldsInTitle } = participantCompletion;
+    const title = `REACT_PDF_EDITOR_METADATA:${JSON.stringify({
+      version: 3,
+      ...META,
+      fieldAssignments: { ...META.fieldAssignments, other_sig: ["tenant"] },
+      signatureFields: ["sig", "other_sig"],
+      futureKey: { kept: true },
+      // A legacy bare name: credited to other_sig's only assignee.
+      signedFields: ["other_sig", { field: "sig", participantId: "old-signer" }],
+    })}`;
+    const next = withSignedFieldsInTitle(title, [
+      { field: "sig", participantId: "manager" },
+      { field: "date", participantId: "manager" },
+    ])!;
+    const parsed = JSON.parse(next.slice("REACT_PDF_EDITOR_METADATA:".length));
+    expect(parsed.futureKey).toEqual({ kept: true });
+    expect(parsed.signedFields).toEqual([
+      { field: "other_sig", participantId: "tenant" },
+      { field: "sig", participantId: "manager" },
+    ]);
+    expect(parsed.requiredFields).toEqual(META.requiredFields);
+  });
+
+  it("withSignedFieldsInTitle leaves a non-editor Title alone", () => {
+    const { withSignedFieldsInTitle } = participantCompletion;
+    const rec = [{ field: "sig", participantId: "manager" }];
+    expect(withSignedFieldsInTitle("Form N11", rec)).toBeNull();
+    expect(withSignedFieldsInTitle(undefined, rec)).toBeNull();
+    expect(withSignedFieldsInTitle("REACT_PDF_EDITOR_METADATA:{bad", rec)).toBeNull();
+  });
+
+  it("counts a stamp as complete for its signer only, while they are still assigned", () => {
+    const { calculateParticipantCompletion, createEditorMetadata } = participantCompletion;
+    const run = (
+      fieldAssignments: Record<string, string[]>,
+      participantId: string | undefined,
+      signedFields: Array<{ field: string; participantId: string } | string> = [BY_MANAGER]
+    ) =>
+      calculateParticipantCompletion({
+        // Assignments as a host may pass them, after the stamp was written.
+        metadata: {
+          ...createEditorMetadata({ ...META, signedFields }),
+          fieldAssignments,
+        },
+        formFields: { sig: "", date: "2027/06/01" },
+        participantId,
+      });
+
+    const unsigned = calculateParticipantCompletion({
+      metadata: createEditorMetadata(META),
+      formFields: { sig: "", date: "2027/06/01" },
+      participantId: "manager",
+    });
+    expect(unsigned.remainingRequiredFields).toEqual(["sig"]);
+
+    // A signed, A still assigned: complete for A (ids match loosely).
+    expect(run(META.fieldAssignments, "manager").isComplete).toBe(true);
+    expect(run(META.fieldAssignments, " MANAGER ").isComplete).toBe(true);
+    // ...and for the document as a whole.
+    expect(run(META.fieldAssignments, undefined).remainingRequiredFields).toEqual([]);
+
+    // Reassigned to B: B's signature is outstanding; A's stamp is not theirs.
+    const reassigned = { sig: ["tenant"], date: ["manager"] };
+    expect(run(reassigned, "tenant").remainingRequiredFields).toEqual(["sig"]);
+    expect(run(reassigned, "tenant").isComplete).toBe(false);
+    // A no longer owns it: the whole document is not signed there either.
+    expect(run(reassigned, undefined).remainingRequiredFields).toEqual(["sig"]);
+
+    // Shared with B: still A's signature, never B's.
+    const shared = { sig: ["manager", "tenant"], date: ["manager"] };
+    expect(run(shared, "manager").isComplete).toBe(true);
+    expect(run(shared, "tenant").remainingRequiredFields).toEqual(["sig"]);
+  });
+
+  it("never trusts the editor's internal stamped marker in formFields on its own", () => {
+    const { calculateParticipantCompletion, createEditorMetadata } = participantCompletion;
+    const completion = calculateParticipantCompletion({
+      metadata: createEditorMetadata(META),
+      formFields: { sig: "__react_pdf_editor_signature_stamped__", date: "2027/06/01" },
+      participantId: "manager",
+    });
+    expect(completion.remainingRequiredFields).toEqual(["sig"]);
+  });
+
+  it("a legacy bare name in hand-built metadata is credited to the current only assignee", () => {
+    const { calculateParticipantCompletion } = participantCompletion;
+    const run = (fieldAssignments: Record<string, string[]>, participantId: string) =>
+      calculateParticipantCompletion({
+        metadata: { version: 3, ...META, fieldAssignments, signedFields: ["sig"] as never },
+        formFields: { sig: "", date: "x" },
+        participantId,
+      }).remainingRequiredFields;
+    expect(run({ sig: ["manager"], date: ["manager"] }, "manager")).toEqual([]);
+    expect(run({ sig: ["manager", "tenant"], date: ["manager"] }, "manager")).toEqual(["sig"]);
+  });
+
+  it("getParticipantCompletion reads signedFields, and its signer, from the saved PDF", async () => {
+    const { createEditorMetadata, serializeEditorMetadata, getParticipantCompletion } =
+      participantCompletion;
+    const build = async (
+      signedFields?: Array<{ field: string; participantId: string } | string>,
+      fieldAssignments: Record<string, string[]> = META.fieldAssignments
+    ) => {
+      const doc = await PDFDocument.create();
+      const page = doc.addPage([600, 800]);
+      const form = doc.getForm();
+      form.createTextField("sig").addToPage(page, { x: 40, y: 100, width: 200, height: 30 });
+      const date = form.createTextField("date");
+      date.addToPage(page, { x: 300, y: 100, width: 100, height: 30 });
+      date.setText("2027/06/01");
+      doc.setTitle(
+        serializeEditorMetadata(
+          createEditorMetadata({ ...META, fieldAssignments, signedFields })
+        )
+      );
+      return doc.save();
+    };
+    const before = await getParticipantCompletion(clonePdfBytes(await build()), "manager");
+    expect(before.remainingRequiredFields).toEqual(["sig"]);
+    const after = await getParticipantCompletion(
+      clonePdfBytes(await build([BY_MANAGER])),
+      "manager"
+    );
+    expect(after.isComplete).toBe(true);
+
+    // Saved with the field reassigned to the tenant: the manager's stamp
+    // doesn't sign it for them.
+    const reassigned = await build([BY_MANAGER], { sig: ["tenant"], date: ["manager"] });
+    const tenant = await getParticipantCompletion(clonePdfBytes(reassigned), "tenant");
+    expect(tenant.remainingRequiredFields).toEqual(["sig"]);
+    expect(tenant.isComplete).toBe(false);
+
+    // Legacy bare names: one assignee -> theirs; two -> nobody's.
+    const legacyOne = await build(["sig"]);
+    expect((await getParticipantCompletion(clonePdfBytes(legacyOne), "manager")).isComplete).toBe(
+      true
+    );
+    const legacyTwo = await build(["sig"], { sig: ["manager", "tenant"], date: ["manager"] });
+    expect(
+      (await getParticipantCompletion(clonePdfBytes(legacyTwo), "manager")).remainingRequiredFields
+    ).toEqual(["sig"]);
+  });
+});
+
+describe("serializeEditorMetadata: unknown top-level keys", () => {
+  const PREFIX = "REACT_PDF_EDITOR_METADATA:";
+  const metadata = () =>
+    participantCompletion.createEditorMetadata({
+      fieldAssignments: { a: ["p1"] },
+      requiredFields: ["a"],
+    });
+  const serialize = (...args: Parameters<typeof participantCompletion.serializeEditorMetadata>) =>
+    participantCompletion.serializeEditorMetadata(...args);
+
+  it("carries a previous Title's unknown keys verbatim, never its stale known keys", () => {
+    const previous = `${PREFIX}${JSON.stringify({
+      version: 3,
+      fieldAssignments: { old: ["p9"] },
+      requiredFields: ["old"],
+      signatureFields: [],
+      choiceGroups: [{ id: "g", fields: ["x", "y"] }],
+      keraSignatures: "manual",
+      hostCustom: { a: 1 },
+    })}`;
+    const parsed = JSON.parse(serialize(metadata(), previous).slice(PREFIX.length));
+    expect(parsed).toEqual({ ...metadata(), keraSignatures: "manual", hostCustom: { a: 1 } });
+    expect(parsed.choiceGroups).toBeUndefined();
+  });
+
+  it("writes exactly as before without a previous Title, or one that isn't editor metadata", () => {
+    const plain = `${PREFIX}${JSON.stringify(metadata())}`;
+    expect(serialize(metadata())).toBe(plain);
+    expect(serialize(metadata(), "Residential Tenancy Agreement")).toBe(plain);
+    expect(serialize(metadata(), `${PREFIX}{not json`)).toBe(plain);
+  });
+});

@@ -18,6 +18,7 @@ import {
 } from "@chakra-ui/react";
 import {
   ArrowCounterClockwiseIcon,
+  BookmarkSimpleIcon,
   CaretDownIcon,
   CheckIcon,
   DotsThreeVerticalIcon,
@@ -163,15 +164,17 @@ const modeDescriptions: Record<PDFEditorMode, string> = {
   build: "Place fields and choose who signs",
   edit: "Fill in and sign your fields",
   view: "Read-only",
+  defaults: "Fill in values to reuse on future documents",
 };
 
 const modeIcons: Record<PDFEditorMode, React.ReactElement> = {
   build: <NotePencilIcon />,
   edit: <SignatureIcon />,
   view: <EyeIcon />,
+  defaults: <BookmarkSimpleIcon />,
 };
 
-const allModes: PDFEditorMode[] = ["build", "edit", "view"];
+const allModes: PDFEditorMode[] = ["build", "edit", "view", "defaults"];
 
 interface OverflowItem {
   value: string;
@@ -440,6 +443,20 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
 
   const availableModes = allModes.filter((m) => allowedModes.includes(m));
   const showModeSelector = availableModes.length > 1;
+  // Defaults mode on its own (the host's "your defaults" editor): no menu
+  // to switch from, but say which mode this is where the menu would be,
+  // so the form doesn't read as a document being filled in.
+  const modeLabel =
+    availableModes.length === 1 && availableModes[0] === "defaults" ? (
+      <Text
+        fontWeight="medium"
+        color="fg.muted"
+        flexShrink={0}
+        data-pdfe-mode-label="defaults"
+      >
+        {modeLabels.defaults}
+      </Text>
+    ) : null;
 
   // A8: desktop/tablet sidebar toggle. Controlled via leftSidebarOpen when
   // the host passes it; otherwise tracked locally from the layout default.
@@ -641,6 +658,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
               forceOpen={modeMenuOpen}
             />
           )}
+          {modeLabel}
         </HStack>
         <HStack gap={2} minW={0} justify="flex-end">
           {declineButton}
@@ -695,6 +713,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             forceOpen={modeMenuOpen}
           />
         )}
+        {modeLabel}
         {title && (
           <Text fontWeight="medium" truncate minW={0}>
             {title}

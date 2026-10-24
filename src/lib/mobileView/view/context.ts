@@ -45,8 +45,12 @@ const controlKey = (control: FieldControlModel | null): string =>
         control.required,
         control.complete,
         control.readOnly,
+        control.label,
+        control.gated,
         control.gatedLabel ?? "",
+        control.note ?? "",
         control.hidden,
+        control.choiceGroup ? JSON.stringify(control.choiceGroup) : "",
       ].join("\u0000")
     : "";
 

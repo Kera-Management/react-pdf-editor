@@ -86,6 +86,15 @@ export type PartiesPanelAssignMode = {
   /** Called when a row's checkbox changes. */
   onToggle: (participantId: string, checked: boolean) => void;
   /**
+   * When set, the field's assignment can't be changed: every switch is
+   * disabled and this text replaces the banner's instruction. Used for a
+   * signature field already signed in the document ("Signed by Avery
+   * Admin. A signed field can't be reassigned."): its signature is drawn
+   * into the page, so giving the field to someone else would leave them a
+   * box that already carries another person's signature.
+   */
+  lockedReason?: string;
+  /**
    * Participants assignable to this field -- typically the roster minus
    * anyone currently excluded. Drives which rows in the signer/undecided/
    * viewer sections show as freshly-checkable.

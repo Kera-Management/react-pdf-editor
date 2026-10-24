@@ -6,4 +6,5 @@ export const modeLabels: Record<PDFEditorMode, string> = {
   build: "Prepare",
   edit: "Fill & Sign",
   view: "View",
+  defaults: "Defaults",
 };

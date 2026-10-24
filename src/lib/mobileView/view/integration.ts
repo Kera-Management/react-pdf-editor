@@ -18,6 +18,8 @@ export interface RawFieldLike {
   charLimit?: number;
   comb?: boolean;
   items?: { exportValue: string; displayValue: string }[];
+  /** The field's display name (AcroForm /TU), read by the editor. */
+  displayName?: string;
 }
 
 /** pdf.js annotation extras `getFieldObjects` doesn't carry, by id. */
@@ -50,19 +52,27 @@ export const widgetKind = (
  * `SourceWidget[]` for one page, from the same `page.fields` the original
  * overlays render (spec §9.2). `view` is the page's pdf.js view box
  * ([x0, y0, x1, y1]); rects flip to top-left space against it.
+ *
+ * A widget's `tooltip` (its synthetic label when the page has no text for
+ * it) follows the editor's one label rule: the host's `fieldLabels` entry,
+ * else the field's display name, else pdf.js's per-widget /TU.
  */
 export const buildSourceWidgets = (
   fields: RawFieldLike[] | undefined,
   view: number[],
   signatureNames: Set<string>,
-  extras: Map<string, WidgetExtras> = new Map()
+  extras: Map<string, WidgetExtras> = new Map(),
+  fieldLabels?: Record<string, string>
 ): SourceWidget[] => {
   // `?? []`: a test double (or a broken page) may have no view box.
   const [x0 = 0, , , y1 = 0] = view ?? [];
   return (fields ?? []).map((field) => {
     const [llx, lly, urx, ury] = field.rect;
     const kind = widgetKind(field, signatureNames);
-    const tooltip = extras.get(field.id)?.tooltip?.trim();
+    const tooltip =
+      fieldLabels?.[field.name]?.trim() ||
+      field.displayName?.trim() ||
+      extras.get(field.id)?.tooltip?.trim();
     const widget: SourceWidget = {
       id: field.id,
       name: field.name,

@@ -77,8 +77,8 @@ The `theme` prop is **deprecated** and ignored since 4.0.0. It is kept only so e
 | ---------------------- | ------------------------------------------------------------------------------------------------------- | ----- |
 | `src`                  | `string \| URL \| TypedArray \| ArrayBuffer \| DocumentInitParameters`, required                        | URL, bytes, or a PDF.js parameter object. |
 | `workerSrc`            | `string`                                                                                                | PDF.js worker URL. Defaults to the unpkg CDN build. |
-| `mode`                 | `"view" \| "edit" \| "build"`                                                                           | Default `"edit"`. |
-| `allowedModes`         | `("view" \| "edit" \| "build")[]`                                                                       | Modes offered in the header's mode menu. **Defaults to `[mode]`**, so the menu only appears when you pass two or more. (2.x defaulted to all modes; changed in 3.0.0.) |
+| `mode`                 | `"view" \| "edit" \| "build" \| "defaults"`                                                            | Default `"edit"`. `"defaults"` is a standalone mode: see [Defaults mode](#defaults-mode). |
+| `allowedModes`         | `("view" \| "edit" \| "build" \| "defaults")[]`                                                        | Modes offered in the header's mode menu. **Defaults to `[mode]`**, so the menu only appears when you pass two or more. (2.x defaulted to all modes; changed in 3.0.0.) |
 | `onSave`               | `(pdfBytes, formFields) => void \| Promise<void>`                                                       | Fill & Sign save. A returned promise keeps the "Saving" state until it settles. Without it, Save downloads the PDF. |
 | `onBuildSave`          | `(pdfBytes, buildSchema, fieldAssignments) => void \| Promise<void>`                                    | Prepare save. |
 | `onClose`              | `() => void`                                                                                            | Shows the Close button. Goes through the unsaved-changes guard. |
@@ -90,11 +90,17 @@ The `theme` prop is **deprecated** and ignored since 4.0.0. It is kept only so e
 | `sidebarPanel`         | `{ title; content; modes? }`                                                                            | Host-owned panel shown in the side panel (desktop), side drawer (tablet) or a bottom drawer (mobile). |
 | `onDownload`, `isDownloading` | `() => void`, `boolean`                                                                          | Shows a Download button (in "More actions" on tablet and mobile). |
 | `onDecline`, `declineLabel` | `() => void \| Promise<void>`, `string`                                                            | Fill & Sign only. Shows "I can't sign this" with a confirm dialog. |
-| `saveLabel`            | `string`                                                                                                | Save button label. Default "Save". |
+| `saveLabel`            | `string`                                                                                                | Save button label. Default "Save" ("Save defaults" in defaults mode). |
 | `savedSignature`, `onSignatureAdopted` | `string`, `(dataUrl) => void`                                                           | Offer and capture a reusable signature (PNG data URL). The library never persists it. |
-| `initialFieldValues`   | `Record<string, string>`                                                                                | Values seeded once per document load, keyed by field name. |
+| `initialFieldValues`   | `Record<string, string \| boolean>`                                                                     | Values seeded once per document load, keyed by field name. A boolean ticks (true) or clears (false) a checkbox and is ignored for other fields. In defaults mode, locked fields follow it live: see [Defaults mode](#defaults-mode). |
+| `resetFieldValues`     | `{ fields: string[]; nonce: number }`                                                                   | When `nonce` changes, the listed fields (by name) go back to their `initialFieldValues` value, or empty, and stop counting as unsaved changes. See [Defaults mode](#defaults-mode). |
+| `defaultableFields`    | `string[]`                                                                                              | Defaults mode only: field names the person may fill. See [Defaults mode](#defaults-mode). |
+| `fieldNotes`           | `Record<string, string>`                                                                                | Defaults mode only: a note per field name, shown on that field while it is locked. See [Defaults mode](#defaults-mode). |
+| `exclusiveFieldGroups` | `string[][]`                                                                                            | Sets of checkbox field names of which at most one may be ticked, in every mode. See [Required choice groups](#required-choice-groups). |
+| `onDefaultsSave`       | `(values: PDFEditorDefaultsValues) => void \| Promise<void>`                                            | Defaults mode's "Save defaults". No PDF is produced. |
+| `rememberableFields`, `onRememberFieldValue` | `string[]`, `(fieldName, value: string \| boolean) => void \| Promise<void>`                     | Offer "Use on future documents" for these fields in Prepare and Fill & Sign. See [Use on future documents](#use-on-future-documents). |
 | `signatureFieldNames`  | `string[]`                                                                                              | Extra field names to treat as signature fields. |
-| `fieldLabels`          | `Record<string, string>`                                                                                | Friendly names for the progress list. |
+| `fieldLabels`          | `Record<string, string>`                                                                                | Friendly names, keyed by field name, wherever a field is named to a person. Wins over the PDF's own display name (AcroForm `/TU`), which wins over a humanized field name. |
 | `mobileFriendlyView`   | `boolean`                                                                                               | Default `false`. Offers a reflowed, readable "Mobile friendly" view below 1024px in Fill & Sign and View. See [Mobile friendly view](#mobile-friendly-view). |
 | `tours`                | `{ prepare?: boolean; sign?: boolean }`                                                                 | Guided tours this person hasn't seen yet. Omit it for no tours. See [Guided tours](#guided-tours). |
 | `onTourEnd`            | `(tourId, reason, meta) => void`                                                                        | Called once each time a tour ends. See [Guided tours](#guided-tours). |
@@ -141,6 +147,91 @@ Short first-run tours that explain the editor before a user runs into it. The li
 - **Inside a host dialog.** The tour isn't portaled: it renders inside the editor on a fixed full-viewport layer, so it stays clickable inside a host's modal Chakra Dialog, and a click on its dimmed background ends the tour without closing the dialog. Esc while a tour shows ends only the tour; the host dialog never sees it.
 - **The unsaved-fields guard stays.** Completing or skipping the Prepare tour never affects the "Save your fields first?" dialog: any switch out of Prepare with unsaved fields still opens it, including picking a mode from the menu the tour opened.
 
+## Required choice groups
+
+Some forms ask one question with several separate checkbox fields, such as a yes/no pair ("Notices by email · yes" / "· no"). A choice group ties them together. The host declares groups in the editor's PDF Title metadata (`REACT_PDF_EDITOR_METADATA:` JSON, still version 3), next to `fieldAssignments`, `requiredFields` and `signatureFields`:
+
+```ts
+choiceGroups?: Array<{
+  id: string;        // unique within the document
+  fields: string[];  // member field NAMES, at least two
+  required: boolean; // one answer is required
+  label?: string;    // e.g. "Notices by email"
+  help?: string;     // shown with the group
+}>;
+```
+
+```ts
+import { createEditorMetadata, serializeEditorMetadata } from "@kera-management/react-pdf-editor";
+
+pdfDoc.setTitle(
+  serializeEditorMetadata(
+    createEditorMetadata({
+      fieldAssignments: { email_yes: ["tenant1"], email_no: ["tenant1"] },
+      requiredFields: [],
+      choiceGroups: [
+        { id: "notices_by_email", fields: ["email_yes", "email_no"], required: true, label: "Notices by email" },
+      ],
+    })
+  )
+);
+```
+
+- **Fill & Sign and the mobile friendly view.** Checking one member unchecks the others. Nothing is pre-selected by the editor.
+- **One required item.** A required group is complete when exactly one member is checked: none, or more than one, is incomplete. It counts once in progress ("N of M"), blocks Save and Finish like a required field, and is one stop for guided navigation. Members are never required on their own, even if `requiredFields` lists them (a group with a listed member counts as required).
+- **Display.** The Progress panel lists the group once, under `label` (else the members' display names joined with " / "), with `help` below it. Each member's hover title carries the help text, and the mobile friendly view shows the label, required mark and help above the first member.
+- **Assignment.** A group is a participant's work when its members are assigned to them. Only that signer can answer it.
+- **Saving.** Fill & Sign saves keep the title as is. A Prepare save writes the groups back, dropping a deleted member (and a group left with fewer than two). There is no Prepare UI for creating groups. A member's Required toggle in Prepare is its group's.
+- **Host groups.** The `exclusiveFieldGroups` prop adds exclusive sets without touching the PDF: ticking one member unticks the others, in every mode (Fill & Sign, defaults, the mobile friendly view). They are merged with the document's groups (a field can be in both; ticking it unticks the members of each), but carry no label, help or required rule and are never written to the PDF. A member the person can't fill (another signer's, or locked in defaults mode) is never changed.
+- **Absent means unchanged.** A PDF without `choiceGroups` behaves and saves exactly as before, and no `choiceGroups` key is written. Older readers ignore the key.
+
+Pure helpers, for hosts and servers that need the same rule:
+
+| Export | Does |
+| ------ | ---- |
+| `choiceGroupsFromMetadata(metadataOrTitle)` | The validated groups from parsed metadata or the raw PDF title string. `[]` if none. |
+| `isChoiceGroupComplete(values, group)` | `true` when exactly one member is checked (`values` keyed by field name; `""` / `"Off"` is unchecked). |
+| `isFieldOrChoiceGroupComplete(name, values, groups)` | Completion of one entry of a required-names list: a member answers with its group. |
+| `normalizeChoiceGroups`, `pruneChoiceGroups`, `choiceGroupForField`, `choiceGroupLabel`, `isChoiceValueChecked` | Validation, keeping groups in step with existing fields, lookup and naming. |
+
+`calculateParticipantCompletion` and `getParticipantCompletion` apply groups too: a group is one entry of `remainingRequiredFields` (under its first member's name), and `remainingChoiceGroups` lists the unanswered group ids (only for documents that have groups).
+
+## Defaults mode
+
+Defaults mode lets a person fill in the values a host keeps for later documents, on the document itself, without signing or producing a PDF. It is a standalone mode: pass it as the only allowed mode.
+
+```tsx
+<PDFEditor
+  src={blankFormBytes}
+  mode="defaults"
+  allowedModes={["defaults"]}
+  defaultableFields={["parking_spaces", "utilities_heat", "additional_terms"]}
+  fieldNotes={{ tenant_name: "Filled in on each document" }}
+  exclusiveFieldGroups={[["utilities_heat_landlord", "utilities_heat_tenant"]]}
+  initialFieldValues={{ utilities_heat: true }}
+  onDefaultsSave={async (values) => saveMyDefaults(values)}
+/>
+```
+
+- **Which fields.** Only fields named in `defaultableFields` can be filled. Every other field renders locked with its value showing and is never reported; locked text boxes are disabled (dimmed, no focus, skipped by Tab) like locked checkboxes, so only the fillable fields look fillable. Signature fields are always read-only here and show no Sign prompt.
+- **Changing the lists.** `defaultableFields` and `fieldNotes` are read on every render: change either prop and the form updates in place, with no remount. Values typed into fields that stay fillable are kept, a field that becomes locked keeps showing its value (it is no longer reported), and a field that unlocks can be filled straight away.
+- **Notes on locked fields.** `fieldNotes` maps a field name to a short note saying why it can't be filled here. A locked field with a note gets it in its hover title (after the field's label) and, while the pointer is on the field, as a small muted label laid over the field's own box (it may run past a narrow box; near the page's right edge it grows leftwards). The label is hover-only on purpose: a long form has dozens of locked fields, and a permanent label on each would bury the form's own text and truncate on narrow boxes. In the mobile friendly view the note is helper text under the field. Notes on fillable fields, and outside defaults mode, are ignored.
+- **Header.** With `allowedModes={["defaults"]}` there is no mode menu; a small muted "Defaults" label sits where it would be.
+- **Starting values.** Fillable fields start from `initialFieldValues`, or the PDF's own value where it has none, once per document load; later changes to the prop don't touch them.
+- **Locked fields follow `initialFieldValues`.** When the prop is passed, every locked field (not a signature) always shows its current `initialFieldValues` value, or empty (unticked) when the prop has no entry for it, even over a value in the PDF. This holds on every change of the prop or of `defaultableFields`: a field the person typed into and the host then locks shows the host's value, and its edit no longer counts as unsaved. Without the prop, locked fields show the PDF's values.
+- **Resetting fields.** `resetFieldValues={{ fields, nonce }}` puts the listed fields, fillable or locked, back to their `initialFieldValues` value, or empty, each time `nonce` changes (the nonce on first mount is the starting point, not a reset). Their edits stop counting as unsaved; the session stays unsaved only if something else changed. It works in every mode. Typical use: after the host saves a change that cleared some values on its side, refetch, pass the new `initialFieldValues`, and bump the nonce for those fields.
+- **Save defaults.** The header's primary button (label "Save defaults", or `saveLabel`) calls `onDefaultsSave(values)`. `values` (type `PDFEditorDefaultsValues = Record<string, string | boolean | null>`) has an entry for every defaultable field the document has: text, dropdown and radio fields give a trimmed string, or `null` when blank (cleared); checkboxes give `true` or `false`. Names the document doesn't have are left out. A returned promise keeps the "Saving" state until it settles; a rejection leaves the session unsaved. `ref.save()` and the unsaved-changes guard's "Save and close" do the same.
+- **No signing UI.** No Progress panel, no required cues or Save gate, no guided signing, no parties or assignment, no tour. Display names (`/TU`) label fields as in other modes, and the mobile friendly view works (Save reports straight away, with no review step).
+
+## Use on future documents
+
+With `rememberableFields` and `onRememberFieldValue`, a listed field that has a value (non-blank text, a chosen option, a ticked checkbox) offers "Use on future documents":
+
+- **Prepare:** in the selected field's toolbar, and in the field action bar on phones. The value is the field's current value in the document.
+- **Fill & Sign:** in a small toolbar beside the field while it has focus (in the original layout and in the mobile friendly view). Pressing it keeps focus in the field.
+
+Clicking it calls `onRememberFieldValue(fieldName, value)` with the field's name and its trimmed text, or `true` for a ticked checkbox. Once the callback settles, "Saved for future documents" shows in place of the field name for a moment; a rejection shows nothing (the host reports its own failure). The action is never offered for signature fields, another signer's field, a blank field, in View or defaults mode, or without both props. The editor stores nothing.
+
 ## Ref
 
 ```tsx
@@ -171,6 +262,12 @@ const ref = useRef<PDFEditorRef>(null);
   }}
 />
 ```
+
+A Prepare save rewrites the editor metadata in the PDF Title (`fieldAssignments`, `requiredFields`, `signatureFields`, `choiceGroups`, `signedFields`) and keeps any other top-level key a host put there verbatim; Fill & Sign saves leave them alone too.
+
+A signature adopted in Fill & Sign is stamped into the page content when the document is saved, and the save records it in the metadata's `signedFields` as `{ field, participantId, at }`. The `participantId` is whoever was the `activeParticipantId` at the time. A stamped field counts as signed only for that participant, and only while they are still assigned to it: if a host later gives the field to someone else, it shows "Sign" for the new assignee and is incomplete for them until they sign. In Prepare, the assignment of a field that has a standing stamp is locked ("Signed by {name}. A signed field can't be reassigned."), because the ink can't be lifted off the page.
+
+Assigning a signature field to someone in Prepare marks it required (it is saved in the metadata's `requiredFields`); unassigning leaves Required as it was, and the Required toggle still works either way.
 
 ### Sign as one participant
 

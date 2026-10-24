@@ -105,6 +105,7 @@ function Harness({
     return {
       id,
       name: widget.name,
+      label: widget.name,
       kind: widget.kind,
       value,
       checked: !!value && value !== "Off",
@@ -117,6 +118,7 @@ function Harness({
       required: false,
       complete: !!value && value !== "Off",
       readOnly: gatedHidden,
+      gated: gatedHidden,
       gatedLabel: gatedHidden ? "Assigned to Lee Landlord" : null,
       hidden: gatedHidden,
     };

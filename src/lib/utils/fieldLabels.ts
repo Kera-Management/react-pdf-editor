@@ -43,3 +43,29 @@ export const humanizeFieldName = (name: string): string => {
     )
     .join(" ");
 };
+
+/**
+ * The ONE rule for the name a person sees for a field: the host's
+ * `fieldLabels` entry, else the PDF's display name (/TU), else `fallback`
+ * (by default `humanizeFieldName`; a site may keep its own, e.g. build mode
+ * shows the raw name). Keyed by field NAME. Display only: never use the
+ * result for assignments, values, saving or data attributes.
+ */
+export const resolveFieldLabel = (
+  name: string,
+  {
+    fieldLabels,
+    displayName,
+    fallback = humanizeFieldName,
+  }: {
+    fieldLabels?: Record<string, string>;
+    displayName?: string;
+    fallback?: (name: string) => string;
+  } = {}
+): string => {
+  const override = fieldLabels?.[name]?.trim();
+  if (override) return override;
+  const fromPdf = displayName?.trim();
+  if (fromPdf) return fromPdf;
+  return fallback(name);
+};

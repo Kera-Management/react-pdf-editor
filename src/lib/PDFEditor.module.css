@@ -252,6 +252,42 @@
   text-overflow: ellipsis;
 }
 
+/* Defaults mode: the host's note on a locked field (`fieldNotes`). The
+   overlay's next sibling, laid over the field's own box like the gated
+   chip, and shown only while the pointer is on the field: a lease-sized
+   form has dozens of locked fields, and a permanent label on each would
+   bury the form's own text and truncate on narrow boxes. The full note is
+   also the field's title. */
+.fieldNote {
+  position: absolute;
+  display: none;
+  align-items: center;
+  max-width: min(360px, 100%);
+  padding: 0 2px;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.pdfInput:hover + .fieldNote,
+.pdfSelect:hover + .fieldNote,
+.signatureFieldButton:hover + .fieldNote {
+  display: flex;
+}
+
+.fieldNoteText {
+  max-width: 100%;
+  padding: 0 6px;
+  border-radius: 9999px;
+  background: var(--pdfe-gated-chip-bg);
+  color: var(--pdfe-gated-chip-fg);
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ==========================================================================
    Signature Field (click-to-sign, edit/view mode)
    ========================================================================== */
@@ -269,6 +305,14 @@
   transition:
     border-color 100ms,
     background 100ms;
+}
+
+/* Signed by an earlier save: the stamp is page content under the button,
+   so the button stays clear and takes no clicks. */
+.signatureFieldButton[data-stamped="true"] {
+  background: transparent;
+  border-color: transparent;
+  cursor: default;
 }
 
 .signatureFieldButton:hover:not(:disabled) {

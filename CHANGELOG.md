@@ -1,5 +1,202 @@
 # Changelog
 
+## 4.3.0
+
+### Added
+
+- **`resetFieldValues?: { fields: string[]; nonce: number }`**: each time
+  `nonce` changes (not on first mount), the listed fields, fillable or
+  locked, in any mode, go back to their `initialFieldValues` value or to
+  empty (unticked), and no longer count as unsaved changes. The session
+  stays unsaved if anything else changed.
+- Defaults mode: when `initialFieldValues` is passed, locked fields follow
+  it live. A locked field (not a signature) always shows its current
+  value there, or empty when it has no entry, even over the PDF's value,
+  including a field that was typed into and then locked; its edit stops
+  counting as unsaved. Fillable fields still seed once per load.
+- Prepare: assigning a signature field to a participant makes it required
+  (saved in `requiredFields`). Unassigning leaves Required as it was.
+- `useFieldValues` gains `assign(entries, asSeed)`.
+- **Defaults mode** (`mode="defaults"`, passed as the only allowed mode).
+  The person fills only the fields the host lists in `defaultableFields`;
+  every other field renders locked with its value (a locked text box is
+  disabled, dimmed and out of the tab order like a locked checkbox, so it
+  never looks fillable), and signature fields are always read-only with
+  no Sign prompt. The primary
+  button, "Save defaults" (or `saveLabel`), calls
+  `onDefaultsSave(values)` instead of producing a PDF: `values` has every
+  defaultable field the document has, text, dropdown and radio as a
+  trimmed string or `null` when blank, checkboxes as `true` / `false`.
+  Awaited like `onSave`. No Progress panel, required cues or Save gate,
+  guided signing, parties or assignment UI, or tour. Display names (`/TU`)
+  and the mobile friendly view work as elsewhere. New type
+  `PDFEditorDefaultsValues`; `"defaults"` joins `PDFEditorMode` (and the
+  `ProgressPanel` `mode` prop type, which renders nothing for it).
+- Defaults mode: `defaultableFields` and the new `fieldNotes?:
+  Record<string, string>` follow the props live (no remount): typed
+  values in fields that stay fillable are kept, and a field that becomes
+  locked keeps showing its value. A locked field with a note gets it in
+  its hover title and, while the pointer is on it, as a small muted label
+  over the field's own box (helper text in the mobile friendly view).
+  `FieldControlModel` gains `note?`.
+- With `allowedModes={["defaults"]}` the header shows a small "Defaults"
+  label where the mode menu would be.
+- **`exclusiveFieldGroups?: string[][]`**: ticking one checkbox in a set
+  unticks the others, in every mode, merged with the document's own choice
+  groups. Members another signer owns or that are locked are left alone
+  (now true of choice groups too).
+- **"Use on future documents"** (`rememberableFields`,
+  `onRememberFieldValue(fieldName, value)`). In Prepare, the selected
+  field's toolbar (and the phone field action bar) offers it for a listed
+  field that has a value; in Fill & Sign, a small toolbar beside the
+  focused field does. The callback gets the trimmed text, or `true` for a
+  ticked checkbox; "Saved for future documents" shows briefly once it
+  settles. Never for signature fields, another signer's field, blank
+  fields, View or defaults mode. `ContextToolbar` gains `onRemember?` /
+  `rememberDisabled?`; `FieldActionBar` gains `onRemember?`,
+  `rememberDisabled?`, `rememberFeedback?`.
+- `initialFieldValues` accepts booleans for checkboxes
+  (`Record<string, string | boolean>`): true ticks the box, false clears
+  it; a boolean for any other field is ignored. Strings work as before.
+
+- **Field display names (AcroForm `/TU`).** A PDF field can carry a short
+  human label in its standard alternate name, `/TU` (e.g. "Landlord's
+  legal name"), while its ID (`/T`, the full name) never changes. The
+  editor reads `/TU` for every field when a document loads and shows it,
+  never the raw ID, wherever a field is named to a person: the Progress
+  panel's remaining fields, the hover title of every Fill & Sign/View
+  overlay (text, multiline, select, checkbox, radio, signature), the
+  Prepare assign banner ('Who fills "..."?') and its switches, the field
+  toolbar and mobile field action bar, the Prepare field previews and
+  their accessible names, and the mobile friendly view's fallback labels
+  (a field the page has no text for, a choice with no label, a radio
+  group's legend). One rule everywhere: a host `fieldLabels` entry, then
+  `/TU`, then the previous fallback (`humanizeFieldName`, or the raw name
+  in Prepare). The ID still drives assignments, values, saving and the
+  `name` / `data-field-name` attributes. PDFs without `/TU` look as
+  before, except that Fill & Sign overlays now always carry a hover title
+  (the humanized name).
+- `/TU` survives saving. Fill & Sign saves edit the loaded form in place,
+  so every field keeps its `/TU`; a Prepare save rebuilds each field and
+  writes its display name back. A duplicated field's display name gets the
+  same suffix as its name (" copy", " (page 3)").
+- `BuildModeField.displayName?`; `ProgressPanel`: `fieldDisplayNames?`
+  prop; `fieldLabels` now applies beyond the Progress panel.
+
+- **Required choice groups** for questions asked as several checkbox
+  fields (e.g. Ontario 2229E Section 3, "Notices by email · yes" / "·
+  no"). Optional `choiceGroups: { id, fields, required, label?, help? }[]`
+  in the editor's title metadata (still v3; absent = unchanged behaviour,
+  and no key is written). In Fill & Sign and the mobile friendly view the
+  members are mutually exclusive; a required group is ONE required item,
+  complete when exactly one member is checked, that blocks Save/Finish and
+  guided navigation like any required field. Members are never required on
+  their own. The Progress panel lists the group once by `label` (fallback:
+  the members' display names joined with " / ") with its `help`; member
+  hover titles carry the help, and the mobile friendly view shows label,
+  required mark and help above the first member. Assignment gating applies.
+  Fill & Sign saves keep the metadata; Prepare saves write it back, drop a
+  deleted member and a group left with fewer than two members.
+- Pure helpers: `choiceGroupsFromMetadata`, `isChoiceGroupComplete`,
+  `isFieldOrChoiceGroupComplete`, `normalizeChoiceGroups`,
+  `pruneChoiceGroups`, `choiceGroupForField`, `choiceGroupLabel`,
+  `isChoiceValueChecked`; type `PDFEditorChoiceGroup`.
+  `PDFEditorMetadata.choiceGroups?`, `createEditorMetadata({ choiceGroups })`,
+  `ParticipantCompletion.remainingChoiceGroups?` (only for documents with
+  groups) and the `ProgressPanel` `choiceGroups?` prop.
+  `calculateParticipantCompletion` /
+  `getRequiredAssignedFieldNames` count a group once, under its first
+  member's name.
+
+### Changed
+
+- **No "Not assigned to a signer" text.** A field assigned to no one (once
+  any assignment exists) is still locked in Fill & Sign, read-only or
+  hidden per `unassignedVisibility`, but gets no title, aria-label, chip or
+  mobile note. Another signer's field still says "Assigned to {name}".
+  When gating lifts, the overlay's own hover title comes back.
+
+### Fixed
+
+- A Prepare save no longer drops top-level editor metadata keys it doesn't
+  know (a host's or server's own stamp, e.g. `"keraSignatures": "manual"`):
+  they are kept verbatim next to the rewritten known keys.
+  `serializeEditorMetadata(metadata, previousTitle?)` takes the previous
+  Title to do the same. Fill & Sign saves already kept them.
+- **The Progress panel's Remaining list matches its count.** The count and
+  Finish have always measured the signer's REQUIRED fields, but Remaining
+  listed every assigned field still empty, so a signer with an optional
+  field of their own (a lease's date beside the signature) read "0 of 1"
+  over two Remaining items, and after signing read "You've completed all
+  your fields" with that field still listed above it. Remaining now lists
+  the required work only (what Start/Next walk); the signer's other empty
+  fields are listed under "Optional" after the finished state, which then
+  says "You've completed all your required fields." New `ProgressPanel`
+  prop `requiredFieldNames?` (PDFEditor passes
+  `getRequiredAssignedFieldNames`); without it the panel lists as before.
+- **No required ring on another signer's field.** The dashed required ring
+  marked every empty required field, including ones gated to someone else
+  (a tenant's signature, and with choice groups the tenant's yes/no boxes,
+  for the manager signing first). It now marks only fields the active
+  signer can fill, and it is also applied after switching from Prepare to
+  Fill & Sign, where it used to be missing until the next zoom.
+- **A signed signature stays signed after saving.** A drawn or adopted
+  signature is stamped onto the page as an image, and the signature
+  field's own AcroForm value stays empty (by design, since 2.9.0). Nothing
+  in the saved PDF said the field was signed, so reopening the saved bytes
+  (which a host does after every save) showed "Sign" again and the Progress
+  panel counted it as remaining, and `getParticipantCompletion` on the
+  saved file reported it as a missing required field. This affected every
+  signature field, whether a Prepare save created it or a server wrote it.
+  Saves now record each stamped field in the title metadata's new optional
+  `signedFields` (v3; written only when non-empty, limited to
+  `signatureFields`). Fill & Sign saves add to it and keep every other
+  metadata key as it was; a document without editor metadata keeps its
+  Title. Prepare saves carry it through renames. `calculateParticipantCompletion`
+  and `getParticipantCompletion` count a stamped field as complete. On
+  reopening, a stamped field shows as signed, with the stamp visible
+  through it, and can't be signed again (a second stamp would land on the
+  first). Hosts still receive `""` for it in `onSave` formFields and
+  `ref.formFields`. A document signed before this version has no record
+  and still asks again. `PDFEditorMetadata.signedFields?`,
+  `createEditorMetadata({ signedFields })`, `withSignedFieldsInTitle`.
+- **A stamped signature belongs to the signer who stamped it.** Each
+  `signedFields` entry is now a record, `{ field, participantId, at? }`
+  (`PDFEditorSignedField`): the active participant at the save that
+  stamped it (`""` with no `activeParticipantId`) and when. A record
+  counts as complete only for that participant, and only while they are
+  still assigned to the field. Before this, the record was the field name
+  alone, so a field signed by A and then reassigned to B (a host passing
+  different `fieldAssignments`) read as already signed for B: B's
+  completion said done and B could not sign it.
+  - Completion (`calculateParticipantCompletion`,
+    `getParticipantCompletion`): a stamp is complete for its signer while
+    assigned; with no participant, while its signer is still assigned. The
+    editor's internal stamped marker in `formFields` never counts by
+    itself.
+  - Fill & Sign, desktop and the mobile friendly view: a field the signer
+    at the keyboard is assigned to shows as signed (and is locked) only
+    when their own stamp stands. A field reassigned to them shows "Sign"
+    and they can sign it; their stamp then replaces the earlier record.
+    The Progress panel, guided Next, the Save gate and the field controls
+    all follow from the same rule. Another signer's stamped field still
+    shows as signed for everyone else.
+  - Prepare: a stamped signature is drawn into the page content (pdf-lib
+    `drawImage`), not an annotation, so it can't be removed. The
+    assignment of a field with a standing stamp is locked: the
+    Recipients panel says "Signed by {name}. A signed field can't be
+    reassigned." and its switches are disabled, and assignee changes to
+    that field are ignored whatever path makes them. A Prepare save
+    carries each record, with its signer, to the field's new name; a
+    duplicate of a signed field gets neither the record nor the lock.
+  - Legacy entries (bare names, written by 4.3.0 pre-releases) are read as
+    signed by the field's assignee in the document's own metadata when it
+    has exactly one, and dropped otherwise (the field asks again).
+  - New exports: `PDFEditorSignedField`, `normalizeSignedFields`,
+    `isSignatureRecordedFor`, `standingSignatureRecord`.
+    `withSignedFieldsInTitle(title, records)` takes records.
+    `PartiesPanelAssignMode` gains `lockedReason?`.
+
 ## 4.2.0
 
 ### Fixed

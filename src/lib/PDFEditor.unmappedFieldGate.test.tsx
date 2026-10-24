@@ -182,7 +182,9 @@ describe("PDFEditor: unmapped-field gate matrix", () => {
       return el;
     });
     expect(input.disabled).toBe(false);
-    expect(input.getAttribute("title")).toBeNull();
+    // Hover text is the field's label, never a gating explanation.
+    expect(input.getAttribute("title")).toBe("Mapped To Me");
+    expect(input.getAttribute("aria-label")).toBeNull();
   });
 
   it("(b) a field mapped to someone else is locked with an assignee label", async () => {
@@ -209,7 +211,7 @@ describe("PDFEditor: unmapped-field gate matrix", () => {
     });
   });
 
-  it("(c) an unmapped field is locked as 'Not assigned to a signer' once a non-empty mapping exists", async () => {
+  it("(c) an unmapped field is locked, with no explanatory text, once a non-empty mapping exists", async () => {
     const { container } = renderWithChakra(
       <PDFEditor
         src="fake://document.pdf"
@@ -228,8 +230,11 @@ describe("PDFEditor: unmapped-field gate matrix", () => {
     });
     await waitFor(() => {
       expect(input.disabled).toBe(true);
-      expect(input.getAttribute("title")).toBe("Not assigned to a signer");
     });
+    // No gating text: the title stays the field's own label.
+    expect(input.getAttribute("title")).toBe("Unmapped Field");
+    expect(input.getAttribute("aria-label")).toBeNull();
+    expect(container.textContent).not.toMatch(/not assigned/i);
   });
 
   it("(d) with a wholly empty mapping, an unmapped field stays editable (plain fill & sign unaffected)", async () => {
@@ -247,7 +252,7 @@ describe("PDFEditor: unmapped-field gate matrix", () => {
       return el;
     });
     expect(input.disabled).toBe(false);
-    expect(input.getAttribute("title")).toBeNull();
+    expect(input.getAttribute("title")).toBe("Unmapped Field");
   });
 
   it("(e) unmappedVisibility='hidden' hides rather than disables the unmapped field", async () => {
@@ -294,8 +299,9 @@ describe("PDFEditor: unmapped-field gate matrix", () => {
     });
     await waitFor(() => {
       expect(unmapped.disabled).toBe(true);
-      expect(unmapped.getAttribute("title")).toBe("Not assigned to a signer");
     });
+    expect(unmapped.getAttribute("title")).toBe("Unmapped Field");
+    expect(unmapped.getAttribute("aria-label")).toBeNull();
 
     const mine = container.querySelector<HTMLInputElement>(
       'input[data-field-id="field_mapped_me"]'
